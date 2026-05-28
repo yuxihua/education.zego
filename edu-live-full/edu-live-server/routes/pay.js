@@ -12,8 +12,6 @@ const { asyncHandler } = require('../middleware/error');
 const { auth } = require('../middleware/auth');
 const { payLimiter } = require('../middleware/ratelimit');
 const {
-  wxpay,
-  alipaySdk,
   createWxOrder,
   createAlipayOrder,
   createAlipayWapOrder,

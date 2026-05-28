@@ -7,14 +7,34 @@ const AlipaySdk = require('alipay-sdk').default;
 const crypto = require('crypto');
 
 // ========== 微信支付 ==========
-const wxpay = new Wechatpay({
-  appid: process.env.WX_APPID || '',
-  mchid: process.env.WX_MCHID || '',
-  privateKey: process.env.WX_PRIVATE_KEY?.replace(/\\n/g, '\n') || '',
-  serialNo: process.env.WX_SERIAL_NO || '',
-  apiV3Key: process.env.WX_APIV3_KEY || '',
-  certs: {}
-});
+let wxpay;
+
+function getWxpay() {
+  if (wxpay) {
+    return wxpay;
+  }
+
+  const appid = process.env.WX_APPID || '';
+  const mchid = process.env.WX_MCHID || '';
+  const privateKey = process.env.WX_PRIVATE_KEY?.replace(/\\n/g, '\n') || '';
+  const serialNo = process.env.WX_SERIAL_NO || '';
+  const apiV3Key = process.env.WX_APIV3_KEY || '';
+
+  if (!appid || !mchid || !privateKey || !serialNo || !apiV3Key) {
+    throw new Error('微信支付配置不完整');
+  }
+
+  wxpay = new Wechatpay({
+    appid,
+    mchid,
+    privateKey,
+    serialNo,
+    apiV3Key,
+    certs: {}
+  });
+
+  return wxpay;
+}
 
 /**
  * 创建微信支付订单（JSAPI）
@@ -28,6 +48,7 @@ const wxpay = new Wechatpay({
  */
 async function createWxOrder(params) {
   const { description, outTradeNo, amount, openid, notifyUrl } = params;
+  const wxpay = getWxpay();
   
   const payParams = {
     description,
@@ -50,6 +71,7 @@ async function createWxOrder(params) {
  * @returns {object}
  */
 function decryptWxNotify(body) {
+  const wxpay = getWxpay();
   return wxpay.decrypt(body, {
     aesKey: process.env.WX_APIV3_KEY,
     ciphertext: body.resource?.ciphertext,
@@ -64,6 +86,7 @@ function decryptWxNotify(body) {
  * @returns {Promise<object>}
  */
 async function queryWxOrder(outTradeNo) {
+  const wxpay = getWxpay();
   return await wxpay.query({ out_trade_no: outTradeNo });
 }
 
@@ -74,6 +97,7 @@ async function queryWxOrder(outTradeNo) {
  */
 async function wxRefund(params) {
   const { outTradeNo, outRefundNo, amount, reason } = params;
+  const wxpay = getWxpay();
   
   return await wxpay.refund({
     out_trade_no: outTradeNo,
@@ -88,13 +112,31 @@ async function wxRefund(params) {
 }
 
 // ========== 支付宝 ==========
-const alipaySdk = new AlipaySdk({
-  appId: process.env.ALIPAY_APPID || '',
-  privateKey: process.env.ALIPAY_PRIVATE_KEY?.replace(/\\n/g, '\n') || '',
-  alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY?.replace(/\\n/g, '\n') || '',
-  gateway: 'https://openapi.alipay.com/gateway.do',
-  signType: 'RSA2'
-});
+let alipaySdk;
+
+function getAlipaySdk() {
+  if (alipaySdk) {
+    return alipaySdk;
+  }
+
+  const appId = process.env.ALIPAY_APPID || '';
+  const privateKey = process.env.ALIPAY_PRIVATE_KEY?.replace(/\\n/g, '\n') || '';
+  const alipayPublicKey = process.env.ALIPAY_PUBLIC_KEY?.replace(/\\n/g, '\n') || '';
+
+  if (!appId || !privateKey || !alipayPublicKey) {
+    throw new Error('支付宝配置不完整');
+  }
+
+  alipaySdk = new AlipaySdk({
+    appId,
+    privateKey,
+    alipayPublicKey,
+    gateway: 'https://openapi.alipay.com/gateway.do',
+    signType: 'RSA2'
+  });
+
+  return alipaySdk;
+}
 
 /**
  * 创建支付宝订单（电脑网站支付）
@@ -108,6 +150,7 @@ const alipaySdk = new AlipaySdk({
  */
 async function createAlipayOrder(params) {
   const { subject, outTradeNo, totalAmount, returnUrl, notifyUrl } = params;
+  const alipaySdk = getAlipaySdk();
   
   const result = await alipaySdk.exec('alipay.trade.page.pay', {
     notify_url: notifyUrl,
@@ -130,6 +173,7 @@ async function createAlipayOrder(params) {
  */
 async function createAlipayWapOrder(params) {
   const { subject, outTradeNo, totalAmount, returnUrl, notifyUrl } = params;
+  const alipaySdk = getAlipaySdk();
   
   const result = await alipaySdk.exec('alipay.trade.wap.pay', {
     notify_url: notifyUrl,
@@ -151,7 +195,7 @@ async function createAlipayWapOrder(params) {
  * @returns {boolean}
  */
 function verifyAlipayNotify(params) {
-  return alipaySdk.checkNotifySign(params);
+  return getAlipaySdk().checkNotifySign(params);
 }
 
 /**
@@ -160,7 +204,7 @@ function verifyAlipayNotify(params) {
  * @returns {Promise<object>}
  */
 async function queryAlipayOrder(outTradeNo) {
-  return await alipaySdk.exec('alipay.trade.query', {
+  return await getAlipaySdk().exec('alipay.trade.query', {
     bizContent: {
       out_trade_no: outTradeNo
     }
@@ -175,7 +219,7 @@ async function queryAlipayOrder(outTradeNo) {
 async function alipayRefund(params) {
   const { outTradeNo, refundAmount, outRequestNo, refundReason } = params;
   
-  return await alipaySdk.exec('alipay.trade.refund', {
+  return await getAlipaySdk().exec('alipay.trade.refund', {
     bizContent: {
       out_trade_no: outTradeNo,
       refund_amount: refundAmount,
@@ -198,14 +242,12 @@ function generateOrderNo(prefix = 'E') {
 
 module.exports = {
   // 微信支付
-  wxpay,
   createWxOrder,
   decryptWxNotify,
   queryWxOrder,
   wxRefund,
   
   // 支付宝
-  alipaySdk,
   createAlipayOrder,
   createAlipayWapOrder,
   verifyAlipayNotify,
