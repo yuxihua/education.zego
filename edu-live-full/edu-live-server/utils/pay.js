@@ -2,7 +2,7 @@
  * 支付工具封装
  * 支持：微信支付（JSAPI）、支付宝（网页/APP支付）
  */
-const { Wechatpay } = require('wechatpay-node-v3');
+const Wechatpay = require('wechatpay-node-v3');
 const AlipaySdk = require('alipay-sdk').default;
 const crypto = require('crypto');
 
