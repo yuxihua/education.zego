@@ -44,6 +44,7 @@ const Question = sequelize.define('Question', {
   categoryName: {
     type: DataTypes.STRING(100),
     allowNull: true,
+    field: 'category_name',
     comment: '分类名称'
   }
 }, {
@@ -51,8 +52,8 @@ const Question = sequelize.define('Question', {
   timestamps: true,
   indexes: [
     { fields: ['type'] },
-    { fields: ['categoryName'] },
-    { fields: ['createdAt'] }
+    { fields: ['category_name'] },
+    { fields: ['created_at'] }
   ]
 });
 
