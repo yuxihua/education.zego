@@ -26,6 +26,7 @@ router.use('/pay', require('./pay'));
 router.use('/zego', require('./zego'));
 router.use('/live', require('./live'));
 router.use('/question', require('./question'));
+router.use('/student', require('./student'));
 router.use('/course', require('./course'));
 router.use('/homework', require('./homework'));
 router.use('/upload', require('./upload'));
