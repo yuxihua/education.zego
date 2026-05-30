@@ -73,6 +73,7 @@
             action="/api/upload/image"
             :headers="{ Authorization: 'Bearer ' + userStore.token }"
             :on-success="handleUploadSuccess"
+            :on-error="handleUploadError"
             :show-file-list="false"
           >
             <el-image v-if="form.cover" :src="form.cover" style="width: 200px; height: 120px" fit="cover" />
@@ -198,7 +199,16 @@ const handleDelete = async (row) => {
 }
 
 const handleUploadSuccess = (res) => {
-  form.cover = res.url
+  const url = res?.data?.url || res?.url
+  if (!url) {
+    ElMessage.error('上传返回异常，未获取到图片地址')
+    return
+  }
+  form.cover = url
+}
+
+const handleUploadError = () => {
+  ElMessage.error('封面上传失败，请重试')
 }
 
 const handleManagePPT = (row) => {
