@@ -4,7 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
-const { LiveRoom, Course, PPTFile } = require('../models');
+const { LiveRoom, Course, PPTFile, User } = require('../models');
 const { success, fail, page } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
@@ -80,7 +80,7 @@ router.get('/room/:id', asyncHandler(async (req, res) => {
  * 创建直播间
  */
 router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
-  const { courseId, title, password, settings } = req.body;
+  const { courseId, title, password, settings, teacherId } = req.body;
 
   // 检查课程是否存在
   const course = await Course.findByPk(courseId);
@@ -94,6 +94,18 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
     return fail(res, '该课程已有直播间', 409, 409);
   }
 
+  let anchorId = req.user.id;
+  let anchorName = req.user.nickname || req.user.username;
+
+  if (teacherId) {
+    const teacher = await User.findOne({ where: { id: teacherId, role: 'teacher', status: 1 } });
+    if (!teacher) {
+      return fail(res, '讲师不存在', 404, 404);
+    }
+    anchorId = teacher.id;
+    anchorName = teacher.nickname || teacher.username;
+  }
+
   // 生成 ZEGO 房间ID
   const zegoRoomId = `edu_${courseId}_${Date.now()}`;
 
@@ -101,8 +113,8 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
     courseId,
     zegoRoomId,
     title: title || course.title,
-    anchorId: req.user.id,
-    anchorName: req.user.nickname || req.user.username,
+    anchorId,
+    anchorName,
     password: password || null,
     settings: settings || {},
     status: 'waiting'

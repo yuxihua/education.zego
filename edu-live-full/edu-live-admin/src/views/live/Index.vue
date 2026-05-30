@@ -73,6 +73,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getLiveList, createLiveRoom, endLive } from '@/api/live'
+import { getCourseList, getTeacherList } from '@/api/course'
 
 const router = useRouter()
 const loading = ref(false)
@@ -90,6 +91,15 @@ const rules = {
 const courseList = ref([])
 const teacherList = ref([])
 
+const loadCourseList = async () => {
+  const res = await getCourseList({ page: 1, size: 1000 })
+  courseList.value = res.list || []
+}
+
+const loadTeacherList = async () => {
+  teacherList.value = await getTeacherList()
+}
+
 const loadData = async () => {
   loading.value = true
   const res = await getLiveList({ ...pagination })
@@ -101,6 +111,8 @@ const loadData = async () => {
 const handleCreate = () => {
   Object.assign(form, { title: '', courseId: null, teacherId: null, startTime: '' })
   dialogVisible.value = true
+  loadCourseList()
+  loadTeacherList()
 }
 
 const handleSubmit = async () => {
