@@ -13,13 +13,13 @@
           <el-statistic title="今日订单" :value="stats.todayCount" />
         </el-col>
         <el-col :span="6">
-          <el-statistic title="今日营收" :value="stats.todayAmount" prefix="\u00A5" />
+          <el-statistic title="今日营收" :value="stats.todayAmount" prefix="¥" />
         </el-col>
         <el-col :span="6">
           <el-statistic title="本月订单" :value="stats.monthCount" />
         </el-col>
         <el-col :span="6">
-          <el-statistic title="本月营收" :value="stats.monthAmount" prefix="\u00A5" />
+          <el-statistic title="本月营收" :value="stats.monthAmount" prefix="¥" />
         </el-col>
       </el-row>
 
@@ -58,7 +58,7 @@
         <el-table-column prop="studentName" label="学员" width="120" />
         <el-table-column prop="courseName" label="课程" min-width="200" />
         <el-table-column prop="amount" label="实付金额" width="120">
-          <template #default="{ row }"><strong style="color: #f56c6c">\u00A5{{ row.amount }}</strong></template>
+          <template #default="{ row }"><strong style="color: #f56c6c">¥{{ row.amount }}</strong></template>
         </el-table-column>
         <el-table-column prop="payType" label="支付方式" width="120">
           <template #default="{ row }">{{ { wxpay: '微信支付', alipay: '支付宝' }[row.payType] }}</template>

@@ -34,7 +34,7 @@
         <el-table-column prop="title" label="课程名称" min-width="200" />
         <el-table-column prop="teacherName" label="讲师" width="120" />
         <el-table-column prop="price" label="价格" width="100">
-          <template #default="{ row }">\u00A5{{ row.price }}</template>
+          <template #default="{ row }">¥{{ row.price }}</template>
         </el-table-column>
         <el-table-column prop="studentCount" label="学员数" width="100" />
         <el-table-column prop="status" label="状态" width="100">

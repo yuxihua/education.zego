@@ -41,7 +41,7 @@
             <el-table-column prop="orderNo" label="订单号" />
             <el-table-column prop="courseName" label="课程" />
             <el-table-column prop="amount" label="金额" width="100">
-              <template #default="{ row }">\u00A5{{ row.amount }}</template>
+              <template #default="{ row }">¥{{ row.amount }}</template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
@@ -66,7 +66,7 @@ const statsCards = ref([
   { title: '今日直播', value: 12, icon: 'VideoCamera', color: '#ff6b6b' },
   { title: '在班学员', value: 3456, icon: 'User', color: '#4ecdc4' },
   { title: '今日订单', value: 89, icon: 'ShoppingCart', color: '#45b7d1' },
-  { title: '本月营收', value: '\u00A5128,500', icon: 'Money', color: '#f9ca24' }
+  { title: '本月营收', value: '¥128,500', icon: 'Money', color: '#f9ca24' }
 ])
 
 const statusMap = { live: '直播中', upcoming: '即将开始', ended: '已结束' }
