@@ -7,7 +7,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
-const { generateToken, auth } = require('../middleware/auth');
+const { generateToken, auth, requireRole } = require('../middleware/auth');
 const { strictLimiter } = require('../middleware/ratelimit');
 const { User } = require('../models');
 const redis = require('../config/redis');
@@ -231,6 +231,81 @@ router.post('/refresh', auth, asyncHandler(async (req, res) => {
   });
 
   success(res, { token }, '刷新成功');
+}));
+
+/**
+ * @GET /api/auth/teachers
+ * 获取讲师列表
+ */
+router.get('/teachers', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
+  const where = { role: 'teacher', status: 1 };
+
+  if (req.user.role !== 'superadmin') {
+    where.institutionId = req.user.institutionId || req.user.id;
+  }
+
+  const list = await User.findAll({
+    where,
+    attributes: ['id', 'username', 'nickname', 'phone', 'institutionId'],
+    order: [['id', 'DESC']]
+  });
+
+  success(res, list.map((item) => ({
+    id: item.id,
+    username: item.username,
+    name: item.nickname || item.username,
+    nickname: item.nickname || item.username,
+    phone: item.phone,
+    institutionId: item.institutionId
+  })));
+}));
+
+/**
+ * @POST /api/auth/teacher
+ * 创建讲师账号
+ */
+router.post('/teacher', auth, requireRole(['superadmin', 'admin']), [
+  body('username').trim().isLength({ min: 4, max: 20 }).withMessage('用户名4-20位字符'),
+  body('password').trim().isLength({ min: 6 }).withMessage('密码至少6位'),
+  body('nickname').trim().notEmpty().withMessage('讲师姓名不能为空'),
+  body('phone').optional().isMobilePhone('zh-CN').withMessage('手机号格式错误')
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return fail(res, errors.array()[0].msg, 400);
+  }
+
+  const { username, password, nickname, phone, email, institutionId } = req.body;
+
+  const existUser = await User.findOne({ where: { username } });
+  if (existUser) {
+    return fail(res, '用户名已存在', 409, 409);
+  }
+
+  const teacherInstitutionId = req.user.role === 'superadmin'
+    ? (institutionId || 0)
+    : (req.user.institutionId || req.user.id);
+
+  const teacher = await User.create({
+    username,
+    password,
+    nickname,
+    phone,
+    email,
+    role: 'teacher',
+    institutionId: teacherInstitutionId,
+    institutionName: req.user.institutionName || null,
+    status: 1
+  });
+
+  success(res, {
+    id: teacher.id,
+    username: teacher.username,
+    name: teacher.nickname || teacher.username,
+    nickname: teacher.nickname || teacher.username,
+    phone: teacher.phone,
+    institutionId: teacher.institutionId
+  }, '讲师创建成功');
 }));
 
 module.exports = router;
