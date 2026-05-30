@@ -4,7 +4,8 @@
  */
 const express = require('express');
 const router = express.Router();
-const { Course, Order, LiveRoom } = require('../models');
+const { Course, Order, LiveRoom, User } = require('../models');
+const { Op } = require('sequelize');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
@@ -17,35 +18,43 @@ const { notifyLiveStart } = require('../utils/push');
 router.get('/list', asyncHandler(async (req, res) => {
   const { 
     page = 1, 
+    size,
     pageSize = 10, 
     category, 
-    status = 'published',
+    status,
     keyword,
     sortBy = 'createdAt',
     sortOrder = 'DESC'
   } = req.query;
 
-  const where = { status };
+  const where = {};
   
+  if (status) where.status = status;
   if (category) where.category = category;
   if (keyword) {
-    where.title = { [require('sequelize').Op.like]: `%${keyword}%` };
+    where.title = { [Op.like]: `%${keyword}%` };
   }
+
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(size || pageSize, 10) || 10;
 
   const { count, rows } = await Course.findAndCountAll({
     where,
     attributes: { exclude: ['detail'] },
     order: [[sortBy, sortOrder]],
-    offset: (page - 1) * pageSize,
-    limit: parseInt(pageSize)
+    offset: (pageNum - 1) * pageSizeNum,
+    limit: pageSizeNum
   });
 
   success(res, {
     list: rows,
+    total: count,
+    page: pageNum,
+    size: pageSizeNum,
     pagination: {
       total: count,
-      page: parseInt(page),
-      pageSize: parseInt(pageSize)
+      page: pageNum,
+      pageSize: pageSizeNum
     }
   });
 }));
@@ -84,7 +93,9 @@ router.post('/', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHan
     originalPrice,
     lessonCount,
     duration,
+    teacherId,
     teacherName,
+    description,
     detail,
     outline,
     startTime,
@@ -94,19 +105,31 @@ router.post('/', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHan
     enableReplay
   } = req.body;
 
+  let assignedTeacherId = req.user.id;
+  let assignedTeacherName = teacherName || req.user.nickname;
+
+  if (teacherId) {
+    const teacher = await User.findOne({ where: { id: teacherId, role: 'teacher', status: 1 } });
+    if (!teacher) {
+      return fail(res, '讲师不存在', 404, 404);
+    }
+    assignedTeacherId = teacher.id;
+    assignedTeacherName = teacher.nickname || teacher.username;
+  }
+
   const course = await Course.create({
     title,
-    subtitle,
+    subtitle: subtitle || description,
     cover,
     category,
     price: price || 0,
     originalPrice,
     lessonCount: lessonCount || 1,
     duration: duration || 60,
-    teacherId: req.user.id,
-    teacherName: teacherName || req.user.nickname,
+    teacherId: assignedTeacherId,
+    teacherName: assignedTeacherName,
     institutionId: req.user.institutionId || req.user.id,
-    detail,
+    detail: detail || description,
     outline,
     startTime,
     endTime,
@@ -141,6 +164,18 @@ router.put('/:id', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncH
   delete updateData.id;
   delete updateData.studentCount;
   delete updateData.createdAt;
+
+  if (updateData.description && !updateData.detail) {
+    updateData.detail = updateData.description;
+  }
+
+  if (updateData.teacherId) {
+    const teacher = await User.findOne({ where: { id: updateData.teacherId, role: 'teacher', status: 1 } });
+    if (!teacher) {
+      return fail(res, '讲师不存在', 404, 404);
+    }
+    updateData.teacherName = teacher.nickname || teacher.username;
+  }
 
   await course.update(updateData);
   success(res, course, '课程更新成功');
