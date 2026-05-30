@@ -100,11 +100,11 @@ const Order = sequelize.define('Order', {
   tableName: 'orders',
   timestamps: true,
   indexes: [
-    { fields: ['studentId'] },
-    { fields: ['courseId'] },
-    { fields: ['orderNo'] },
+    { fields: ['student_id'] },
+    { fields: ['course_id'] },
+    { fields: ['order_no'] },
     { fields: ['status'] },
-    { fields: ['createdAt'] }
+    { fields: ['created_at'] }
   ]
 });
 
