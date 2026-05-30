@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const OSS = require('ali-oss');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
@@ -19,7 +20,12 @@ const MAX_FILE_SIZE = parseInt(process.env.UPLOAD_MAX_SIZE) || 100 * 1024 * 1024
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(UPLOAD_DIR, req.params.type || 'images');
-    cb(null, uploadPath);
+    try {
+      fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      cb(err);
+    }
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
