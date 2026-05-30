@@ -61,15 +61,28 @@
     </el-dialog>
 
     <el-dialog v-model="recordDialogVisible" title="学习记录" width="800px">
+      <el-row :gutter="12" style="margin-bottom: 12px">
+        <el-col :span="6"><el-tag type="info">已购课程：{{ recordSummary.paidCourseCount }}</el-tag></el-col>
+        <el-col :span="6"><el-tag type="success">累计消费：¥{{ recordSummary.totalAmount }}</el-tag></el-col>
+        <el-col :span="6"><el-tag>已提交作业：{{ recordSummary.homeworkSubmitted }}</el-tag></el-col>
+        <el-col :span="6"><el-tag type="warning">已批改：{{ recordSummary.homeworkGraded }}</el-tag></el-col>
+      </el-row>
       <el-table :data="recordList" border>
         <el-table-column prop="orderNo" label="订单号" min-width="180" />
-        <el-table-column label="课程" min-width="200">
-          <template #default="{ row }">{{ row.course?.title || '-' }}</template>
+        <el-table-column prop="courseName" label="课程" min-width="180" />
+        <el-table-column label="金额" width="110">
+          <template #default="{ row }">¥{{ row.amount }}</template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="100" />
-        <el-table-column prop="payType" label="支付方式" width="110" />
-        <el-table-column prop="status" label="订单状态" width="100" />
-        <el-table-column prop="createdAt" label="下单时间" width="180" />
+        <el-table-column label="支付方式" width="110">
+          <template #default="{ row }">{{ payTypeMap[row.payType] || row.payType || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="订单状态" width="110">
+          <template #default="{ row }">{{ statusMap[row.status] || row.status || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="homeworkSubmitted" label="作业提交" width="100" />
+        <el-table-column prop="homeworkGraded" label="作业批改" width="100" />
+        <el-table-column prop="lastLearningTime" label="最近学习" width="170" />
+        <el-table-column prop="paidAt" label="支付时间" width="170" />
       </el-table>
       <el-empty v-if="!recordList.length" description="暂无学习记录" style="margin-top: 12px" />
     </el-dialog>
@@ -89,6 +102,27 @@ const detailDialogVisible = ref(false)
 const recordDialogVisible = ref(false)
 const detailData = ref({})
 const recordList = ref([])
+const recordSummary = reactive({
+  paidCourseCount: 0,
+  totalAmount: 0,
+  homeworkSubmitted: 0,
+  homeworkGraded: 0
+})
+
+const payTypeMap = {
+  wxpay: '微信支付',
+  alipay: '支付宝',
+  free: '免费'
+}
+
+const statusMap = {
+  pending: '待支付',
+  paid: '已支付',
+  refunding: '退款中',
+  refunded: '已退款',
+  cancelled: '已取消',
+  expired: '已过期'
+}
 
 const loadData = async () => {
   loading.value = true
@@ -109,7 +143,14 @@ const handleDetail = async (row) => {
 
 const handleRecord = async (row) => {
   try {
-    recordList.value = await getStudentLearningRecord(row.id)
+    const res = await getStudentLearningRecord(row.id)
+    recordList.value = res?.list || (Array.isArray(res) ? res : [])
+    Object.assign(recordSummary, {
+      paidCourseCount: Number(res?.summary?.paidCourseCount || recordList.value.length || 0),
+      totalAmount: Number(res?.summary?.totalAmount || 0),
+      homeworkSubmitted: Number(res?.summary?.homeworkSubmitted || 0),
+      homeworkGraded: Number(res?.summary?.homeworkGraded || 0)
+    })
     recordDialogVisible.value = true
   } catch (err) {
     ElMessage.error('加载学习记录失败')

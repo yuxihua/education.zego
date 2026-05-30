@@ -4,7 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
-const { Student, Order, Course } = require('../models');
+const { Student, Order, Course, Homework } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 
@@ -68,12 +68,95 @@ router.get('/learning-record', asyncHandler(async (req, res) => {
   }
 
   const orders = await Order.findAll({
-    where: { studentId: id },
+    where: {
+      studentId: id,
+      status: { [Op.in]: ['paid', 'refunding', 'refunded'] }
+    },
     include: [{ model: Course, as: 'course', attributes: ['id', 'title', 'cover'] }],
     order: [['createdAt', 'DESC']]
   });
 
-  success(res, orders);
+  const courseIds = orders.map((order) => order.courseId).filter(Boolean);
+  const homeworkRows = courseIds.length
+    ? await Homework.findAll({
+        where: {
+          studentId: id,
+          courseId: { [Op.in]: courseIds }
+        },
+        attributes: ['courseId', 'status', 'submitTime', 'gradeTime']
+      })
+    : [];
+
+  const homeworkByCourse = {};
+  let totalHomeworkSubmitted = 0;
+  let totalHomeworkGraded = 0;
+  let lastHomeworkTime = null;
+
+  homeworkRows.forEach((item) => {
+    const key = String(item.courseId);
+    if (!homeworkByCourse[key]) {
+      homeworkByCourse[key] = {
+        submittedCount: 0,
+        gradedCount: 0,
+        lastLearningTime: null
+      };
+    }
+
+    if (['submitted', 'graded', 'returned'].includes(item.status)) {
+      homeworkByCourse[key].submittedCount += 1;
+      totalHomeworkSubmitted += 1;
+    }
+
+    if (item.status === 'graded') {
+      homeworkByCourse[key].gradedCount += 1;
+      totalHomeworkGraded += 1;
+    }
+
+    const candidateTime = item.gradeTime || item.submitTime;
+    if (candidateTime) {
+      const current = homeworkByCourse[key].lastLearningTime;
+      if (!current || new Date(candidateTime) > new Date(current)) {
+        homeworkByCourse[key].lastLearningTime = candidateTime;
+      }
+      if (!lastHomeworkTime || new Date(candidateTime) > new Date(lastHomeworkTime)) {
+        lastHomeworkTime = candidateTime;
+      }
+    }
+  });
+
+  const list = orders.map((order) => {
+    const row = order.toJSON();
+    const stats = homeworkByCourse[String(order.courseId)] || {
+      submittedCount: 0,
+      gradedCount: 0,
+      lastLearningTime: null
+    };
+    return {
+      ...row,
+      courseName: row.course?.title || '-',
+      paidAt: row.payTime || row.createdAt,
+      homeworkSubmitted: stats.submittedCount,
+      homeworkGraded: stats.gradedCount,
+      lastLearningTime: stats.lastLearningTime || row.payTime || row.createdAt
+    };
+  });
+
+  const totalAmount = list.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const latestOrderTime = list.length ? list[0].payTime || list[0].createdAt : null;
+  const lastStudyTime = [latestOrderTime, lastHomeworkTime]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+
+  success(res, {
+    summary: {
+      paidCourseCount: list.length,
+      totalAmount,
+      homeworkSubmitted: totalHomeworkSubmitted,
+      homeworkGraded: totalHomeworkGraded,
+      lastStudyTime
+    },
+    list
+  });
 }));
 
 module.exports = router;
