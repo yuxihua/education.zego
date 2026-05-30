@@ -2,6 +2,8 @@
  * MySQL 数据库配置
  * 使用 Sequelize ORM
  */
+require('dotenv').config();
+
 const { Sequelize } = require('sequelize');
 
 const sequelize = new Sequelize(
