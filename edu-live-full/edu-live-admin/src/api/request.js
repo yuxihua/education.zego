@@ -19,7 +19,8 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   res => {
-    if (res.data.code !== 200) {
+    const successCodes = [0, 200]
+    if (!successCodes.includes(res.data.code)) {
       ElMessage.error(res.data.msg || '请求失败')
       if (res.data.code === 401) {
         const userStore = useUserStore()
