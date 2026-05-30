@@ -47,8 +47,24 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
+            <el-button
+              v-if="userStore.isInstitutionAdmin && row.status !== 'published'"
+              link
+              type="success"
+              @click="handlePublish(row)"
+            >
+              上架
+            </el-button>
+            <el-button
+              v-if="userStore.isInstitutionAdmin && row.status === 'published'"
+              link
+              type="warning"
+              @click="handleArchive(row)"
+            >
+              下架
+            </el-button>
             <el-button link type="primary" @click="handleManagePPT(row)">课件</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <el-button v-if="userStore.isInstitutionAdmin" link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -126,7 +142,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getCourseList, createCourse, updateCourse, deleteCourse, getTeacherList, createTeacher } from '@/api/course'
+import { getCourseList, createCourse, updateCourse, deleteCourse, publishCourse, archiveCourse, getTeacherList, createTeacher } from '@/api/course'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -195,6 +211,20 @@ const handleDelete = async (row) => {
   await ElMessageBox.confirm('确认删除该课程？', '提示', { type: 'warning' })
   await deleteCourse(row.id)
   ElMessage.success('删除成功')
+  loadData()
+}
+
+const handlePublish = async (row) => {
+  await ElMessageBox.confirm(`确认上架课程【${row.title}】？`, '提示', { type: 'warning' })
+  await publishCourse(row.id)
+  ElMessage.success('课程已上架')
+  loadData()
+}
+
+const handleArchive = async (row) => {
+  await ElMessageBox.confirm(`确认下架课程【${row.title}】？`, '提示', { type: 'warning' })
+  await archiveCourse(row.id)
+  ElMessage.success('课程已下架')
   loadData()
 }
 
