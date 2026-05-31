@@ -110,8 +110,23 @@
 
           <div v-if="scheduleViewMode === 'week'" class="week-board">
             <div class="week-board-header">
-              <span class="week-board-title">周课表</span>
-              <span class="week-board-range">{{ weekRangeText }}</span>
+              <div class="week-board-header-left">
+                <span class="week-board-title">周课表</span>
+                <span class="week-board-range">{{ weekRangeText }}</span>
+              </div>
+              <div class="week-board-header-right">
+                <el-select v-model="scheduleColorMode" size="small" style="width: 130px">
+                  <el-option label="无着色" value="none" />
+                  <el-option label="按讲师" value="teacher" />
+                  <el-option label="按教室" value="classroom" />
+                </el-select>
+              </div>
+            </div>
+            <div class="week-legend" v-if="weekLegendItems.length">
+              <div class="week-legend-item" v-for="item in weekLegendItems" :key="item.key">
+                <span class="week-legend-dot" :style="{ backgroundColor: item.theme.bg, borderColor: item.theme.border }"></span>
+                <span class="week-legend-text">{{ item.label }}</span>
+              </div>
             </div>
             <div class="week-grid">
               <div class="week-day" v-for="day in weekGridDays" :key="day.key">
@@ -119,11 +134,15 @@
                   <div class="week-day-name">{{ day.label }}</div>
                   <div class="week-day-date">{{ day.dateText }}</div>
                 </div>
-                <div class="week-day-body">
+                <div class="week-day-body" @dragover.prevent @drop="handleDayDrop(day)">
                   <div
                     class="week-slot"
                     v-for="item in day.items"
                     :key="item.id"
+                    draggable="true"
+                    :style="getSlotStyle(item)"
+                    @dragstart="handleSlotDragStart(item, day)"
+                    @dragend="handleSlotDragEnd"
                     @click="openScheduleDialog(item)"
                   >
                     <div class="week-slot-time">{{ slotTimeText(item) }}</div>
@@ -256,6 +275,7 @@ const classroomKeyword = ref('')
 const teacherKeyword = ref('')
 const scheduleSearch = reactive({ classroomId: null, teacherId: null, startDate: '', endDate: '' })
 const scheduleViewMode = ref('week')
+const scheduleColorMode = ref('teacher')
 
 const classroomDialogVisible = ref(false)
 const classroomForm = reactive({ id: null, name: '', location: '', capacity: 0, description: '', status: 1 })
@@ -267,6 +287,18 @@ const scheduleDialogVisible = ref(false)
 const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, courseName: '', startTime: '', endTime: '', remarks: '', status: 1 })
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
+const draggingSlot = ref(null)
+
+const SLOT_THEMES = [
+  { bg: '#ecf5ff', border: '#91caff', text: '#1d39c4' },
+  { bg: '#f6ffed', border: '#b7eb8f', text: '#237804' },
+  { bg: '#fff7e6', border: '#ffd591', text: '#ad6800' },
+  { bg: '#fff0f6', border: '#ffadd2', text: '#c41d7f' },
+  { bg: '#f9f0ff', border: '#d3adf7', text: '#531dab' },
+  { bg: '#e6fffb', border: '#87e8de', text: '#006d75' },
+  { bg: '#fff1f0', border: '#ffa39e', text: '#a8071a' },
+  { bg: '#fcffe6', border: '#d3f261', text: '#5b8c00' }
+]
 
 const weekRangeText = computed(() => {
   if (!scheduleSearch.startDate || !scheduleSearch.endDate) return '-'
@@ -312,6 +344,44 @@ const weekGridDays = computed(() => {
   return days
 })
 
+function buildThemeMap(keys) {
+  const map = {}
+  keys.forEach((key, idx) => {
+    map[key] = SLOT_THEMES[idx % SLOT_THEMES.length]
+  })
+  return map
+}
+
+const teacherThemeMap = computed(() => {
+  const keys = [...new Set((schedules.value || []).map((item) => `t_${item.teacherId || 0}`).filter((x) => x !== 't_0'))]
+  return buildThemeMap(keys)
+})
+
+const classroomThemeMap = computed(() => {
+  const keys = [...new Set((schedules.value || []).map((item) => `c_${item.classroomId || 0}`).filter((x) => x !== 'c_0'))]
+  return buildThemeMap(keys)
+})
+
+const weekLegendItems = computed(() => {
+  if (scheduleColorMode.value === 'none') return []
+  const map = scheduleColorMode.value === 'teacher' ? teacherThemeMap.value : classroomThemeMap.value
+  const items = []
+  const visited = new Set()
+  for (const item of schedules.value || []) {
+    const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
+    if (key.endsWith('_0') || visited.has(key) || !map[key]) continue
+    visited.add(key)
+    items.push({
+      key,
+      label: scheduleColorMode.value === 'teacher'
+        ? (item.teacher?.nickname || item.teacher?.username || '未知讲师')
+        : (item.classroom?.name || '未知教室'),
+      theme: map[key]
+    })
+  }
+  return items
+})
+
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
   return `${fmt(start)} ~ ${fmt(end)}`
@@ -322,6 +392,29 @@ const slotTimeText = (item) => {
   const e = String(item?.endTime || '').slice(11, 16)
   if (!s || !e) return '-'
   return `${s}-${e}`
+}
+
+const getSlotStyle = (item) => {
+  if (scheduleColorMode.value === 'none') return {}
+  const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
+  const map = scheduleColorMode.value === 'teacher' ? teacherThemeMap.value : classroomThemeMap.value
+  const theme = map[key]
+  if (!theme) return {}
+  return {
+    backgroundColor: theme.bg,
+    borderColor: theme.border,
+    color: theme.text
+  }
+}
+
+const toApiDateTime = (date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`
 }
 
 const toDateString = (date) => {
@@ -371,6 +464,72 @@ const moveWeek = async (step) => {
   scheduleSearch.startDate = toDateString(start)
   scheduleSearch.endDate = toDateString(end)
   await loadSchedules()
+}
+
+const handleSlotDragStart = (item, day) => {
+  draggingSlot.value = {
+    id: item.id,
+    dayKey: day.key,
+    startTime: item.startTime,
+    endTime: item.endTime
+  }
+}
+
+const handleSlotDragEnd = () => {
+  draggingSlot.value = null
+}
+
+const handleDayDrop = async (targetDay) => {
+  const drag = draggingSlot.value
+  if (!drag || !targetDay?.key) return
+  if (drag.dayKey === targetDay.key) {
+    draggingSlot.value = null
+    return
+  }
+
+  const srcDay = new Date(`${drag.dayKey}T00:00:00`)
+  const dstDay = new Date(`${targetDay.key}T00:00:00`)
+  if (Number.isNaN(srcDay.getTime()) || Number.isNaN(dstDay.getTime())) {
+    draggingSlot.value = null
+    return
+  }
+
+  const dayDiff = Math.round((dstDay.getTime() - srcDay.getTime()) / (24 * 3600 * 1000))
+  const start = new Date(String(drag.startTime).replace(' ', 'T'))
+  const end = new Date(String(drag.endTime).replace(' ', 'T'))
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    draggingSlot.value = null
+    return
+  }
+  start.setDate(start.getDate() + dayDiff)
+  end.setDate(end.getDate() + dayDiff)
+
+  const payload = {
+    startTime: toApiDateTime(start),
+    endTime: toApiDateTime(end)
+  }
+  if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+    payload.institutionId = currentInstitutionId.value
+  }
+
+  try {
+    await updateSchedule(drag.id, payload)
+    ElMessage.success('已调整到新日期')
+    await loadSchedules()
+  } catch (err) {
+    const conflict = err?.data
+    if (err?.code === 409 && conflict) {
+      ElMessageBox.alert(
+        `冲突排课：${conflict.courseName || '-'}\n教室：${conflict.classroomName || '-'}\n讲师：${conflict.teacherName || '-'}\n时间：${conflict.timeRangeText || '-'}`,
+        '拖拽改期失败',
+        { type: 'warning' }
+      )
+    } else {
+      ElMessage.error('拖拽改期失败')
+    }
+  } finally {
+    draggingSlot.value = null
+  }
 }
 
 const downloadBlob = (blob, filename) => {
@@ -617,6 +776,17 @@ onMounted(async () => {
   border-bottom: 1px solid #f0f2f5;
 }
 
+.week-board-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.week-board-header-right {
+  display: flex;
+  align-items: center;
+}
+
 .week-board-title {
   font-weight: 600;
 }
@@ -624,6 +794,35 @@ onMounted(async () => {
 .week-board-range {
   color: #909399;
   font-size: 12px;
+}
+
+.week-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.week-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  padding: 2px 8px;
+}
+
+.week-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #dcdfe6;
+}
+
+.week-legend-text {
+  font-size: 12px;
+  color: #606266;
 }
 
 .week-grid {
@@ -674,6 +873,10 @@ onMounted(async () => {
 
 .week-slot:hover {
   border-color: #79bbff;
+}
+
+.week-slot:active {
+  opacity: 0.8;
 }
 
 .week-slot-time {
