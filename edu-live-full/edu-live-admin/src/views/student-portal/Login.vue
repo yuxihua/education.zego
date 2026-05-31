@@ -29,7 +29,9 @@
           <el-button type="success" :loading="wxLogin.loading" @click="createWxQrLogin">
             {{ wxLogin.qrUrl ? '刷新二维码' : '微信扫码登录' }}
           </el-button>
-          <span v-if="wxLogin.state" class="hint">二维码有效期 5 分钟，扫码后会自动登录</span>
+          <span v-if="wxLogin.state" class="hint">
+            二维码剩余 {{ wxLogin.remainSeconds }} 秒，扫码后会自动登录
+          </span>
         </div>
       </div>
     </div>
@@ -53,16 +55,41 @@ const form = reactive({
 const wxLogin = reactive({
   loading: false,
   state: '',
-  qrUrl: ''
+  qrUrl: '',
+  expireIn: 300,
+  remainSeconds: 0
 })
 
 let wxPollTimer = null
+let wxCountdownTimer = null
 
 const stopWxPolling = () => {
   if (wxPollTimer) {
     clearInterval(wxPollTimer)
     wxPollTimer = null
   }
+}
+
+const stopWxCountdown = () => {
+  if (wxCountdownTimer) {
+    clearInterval(wxCountdownTimer)
+    wxCountdownTimer = null
+  }
+}
+
+const startWxCountdown = () => {
+  stopWxCountdown()
+  wxLogin.remainSeconds = wxLogin.expireIn
+  wxCountdownTimer = setInterval(() => {
+    if (wxLogin.remainSeconds > 0) {
+      wxLogin.remainSeconds -= 1
+      return
+    }
+
+    stopWxCountdown()
+    // 自动刷新二维码，避免用户手动重复点击。
+    createWxQrLogin(true)
+  }, 1000)
 }
 
 const startWxPolling = () => {
@@ -94,13 +121,19 @@ const startWxPolling = () => {
   }, 2000)
 }
 
-const createWxQrLogin = async () => {
+const createWxQrLogin = async (silent = false) => {
+  if (wxLogin.loading) return
   wxLogin.loading = true
   try {
     const res = await studentCreateWxQr()
     wxLogin.state = res.state
     wxLogin.qrUrl = res.qrUrl
+    wxLogin.expireIn = Number(res.expireIn || 300)
     startWxPolling()
+    startWxCountdown()
+    if (!silent) {
+      ElMessage.success('二维码已生成，请使用微信扫码')
+    }
   } finally {
     wxLogin.loading = false
   }
@@ -129,6 +162,7 @@ const goAdminLogin = () => {
 
 onBeforeUnmount(() => {
   stopWxPolling()
+  stopWxCountdown()
 })
 </script>
 
