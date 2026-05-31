@@ -46,6 +46,12 @@ const Question = sequelize.define('Question', {
     allowNull: true,
     field: 'category_name',
     comment: '分类名称'
+  },
+  institutionId: {
+    type: DataTypes.BIGINT.UNSIGNED,
+    defaultValue: 0,
+    field: 'institution_id',
+    comment: '所属机构ID'
   }
 }, {
   tableName: 'questions',
@@ -53,6 +59,7 @@ const Question = sequelize.define('Question', {
   indexes: [
     { fields: ['type'] },
     { fields: ['category_name'] },
+    { fields: ['institution_id'] },
     { fields: ['created_at'] }
   ]
 });
