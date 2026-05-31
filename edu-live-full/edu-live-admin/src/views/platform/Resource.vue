@@ -77,6 +77,10 @@
                   <el-radio-button label="week">周视图</el-radio-button>
                   <el-radio-button label="month">月视图</el-radio-button>
                 </el-radio-group>
+                <template v-if="scheduleViewMode === 'week'">
+                  <el-button size="small" @click="moveWeek(-1)">上一周</el-button>
+                  <el-button size="small" @click="moveWeek(1)">下一周</el-button>
+                </template>
                 <el-button size="small" @click="handleCopyPrevToCurrent">上周复制到本周</el-button>
                 <el-button size="small" @click="handleCopyCurrentToNext">本周复制到下周</el-button>
                 <el-button size="small" type="success" @click="handleExportSchedules">导出CSV</el-button>
@@ -103,6 +107,34 @@
               <el-button @click="applyScheduleViewRange">按{{ scheduleViewMode === 'week' ? '本周' : '本月' }}刷新</el-button>
             </el-form-item>
           </el-form>
+
+          <div v-if="scheduleViewMode === 'week'" class="week-board">
+            <div class="week-board-header">
+              <span class="week-board-title">周课表</span>
+              <span class="week-board-range">{{ weekRangeText }}</span>
+            </div>
+            <div class="week-grid">
+              <div class="week-day" v-for="day in weekGridDays" :key="day.key">
+                <div class="week-day-head">
+                  <div class="week-day-name">{{ day.label }}</div>
+                  <div class="week-day-date">{{ day.dateText }}</div>
+                </div>
+                <div class="week-day-body">
+                  <div
+                    class="week-slot"
+                    v-for="item in day.items"
+                    :key="item.id"
+                    @click="openScheduleDialog(item)"
+                  >
+                    <div class="week-slot-time">{{ slotTimeText(item) }}</div>
+                    <div class="week-slot-course">{{ item.courseName }}</div>
+                    <div class="week-slot-meta">{{ item.classroom?.name || '-' }} · {{ item.teacher?.nickname || item.teacher?.username || '-' }}</div>
+                  </div>
+                  <div class="week-slot-empty" v-if="!day.items.length">暂无排课</div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <el-table :data="schedules" size="small" v-loading="scheduleLoading" border>
             <el-table-column prop="courseName" label="课程" min-width="120" />
@@ -190,7 +222,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
@@ -236,9 +268,60 @@ const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, co
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 
+const weekRangeText = computed(() => {
+  if (!scheduleSearch.startDate || !scheduleSearch.endDate) return '-'
+  return `${String(scheduleSearch.startDate).slice(0, 10)} ~ ${String(scheduleSearch.endDate).slice(0, 10)}`
+})
+
+const weekGridDays = computed(() => {
+  if (scheduleViewMode.value !== 'week' || !scheduleSearch.startDate) return []
+  const start = new Date(scheduleSearch.startDate)
+  if (Number.isNaN(start.getTime())) return []
+
+  const names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+  const days = Array.from({ length: 7 }).map((_, idx) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + idx)
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    const key = `${y}-${m}-${d}`
+    return {
+      key,
+      label: names[idx],
+      dateText: `${m}-${d}`,
+      items: []
+    }
+  })
+
+  for (const item of schedules.value || []) {
+    const dt = new Date(item.startTime)
+    if (Number.isNaN(dt.getTime())) continue
+    const y = dt.getFullYear()
+    const m = String(dt.getMonth() + 1).padStart(2, '0')
+    const d = String(dt.getDate()).padStart(2, '0')
+    const key = `${y}-${m}-${d}`
+    const day = days.find((x) => x.key === key)
+    if (!day) continue
+    day.items.push(item)
+  }
+
+  days.forEach((day) => {
+    day.items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+  })
+  return days
+})
+
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
   return `${fmt(start)} ~ ${fmt(end)}`
+}
+
+const slotTimeText = (item) => {
+  const s = String(item?.startTime || '').slice(11, 16)
+  const e = String(item?.endTime || '').slice(11, 16)
+  if (!s || !e) return '-'
+  return `${s}-${e}`
 }
 
 const toDateString = (date) => {
@@ -270,6 +353,21 @@ const applyScheduleViewRange = async () => {
     end.setMonth(now.getMonth() + 1, 1)
   }
 
+  scheduleSearch.startDate = toDateString(start)
+  scheduleSearch.endDate = toDateString(end)
+  await loadSchedules()
+}
+
+const moveWeek = async (step) => {
+  if (scheduleViewMode.value !== 'week') return
+  const start = new Date(scheduleSearch.startDate)
+  const end = new Date(scheduleSearch.endDate)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    await applyScheduleViewRange()
+    return
+  }
+  start.setDate(start.getDate() + step * 7)
+  end.setDate(end.getDate() + step * 7)
   scheduleSearch.startDate = toDateString(start)
   scheduleSearch.endDate = toDateString(end)
   await loadSchedules()
@@ -502,5 +600,116 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.week-board {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.week-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.week-board-title {
+  font-weight: 600;
+}
+
+.week-board-range {
+  color: #909399;
+  font-size: 12px;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.week-day {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.week-day-head {
+  padding: 8px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.week-day-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.week-day-date {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.week-day-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.week-slot {
+  border: 1px solid #d9ecff;
+  background: #ecf5ff;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.week-slot:hover {
+  border-color: #79bbff;
+}
+
+.week-slot-time {
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 600;
+}
+
+.week-slot-course {
+  font-size: 13px;
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.week-slot-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.week-slot-empty {
+  color: #c0c4cc;
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+@media (max-width: 1400px) {
+  .week-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .week-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
