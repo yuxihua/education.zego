@@ -9,6 +9,18 @@ export const routes = [
     meta: { public: true }
   },
   {
+    path: '/student-login',
+    name: 'StudentLogin',
+    component: () => import('@/views/student-portal/Login.vue'),
+    meta: { public: true }
+  },
+  {
+    path: '/student-center',
+    name: 'StudentCenter',
+    component: () => import('@/views/student-portal/Center.vue'),
+    meta: { public: true, studentAuth: true }
+  },
+  {
     path: '/',
     component: () => import('@/layouts/AdminLayout.vue'),
     redirect: '/dashboard',
@@ -97,6 +109,13 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
+  const studentToken = localStorage.getItem('student_token')
+
+  if (to.meta.studentAuth && !studentToken) {
+    next('/student-login')
+    return
+  }
+
   if (!to.meta.public && !userStore.token) {
     next('/login')
   } else {
