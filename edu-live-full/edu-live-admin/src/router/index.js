@@ -21,6 +21,12 @@ export const routes = [
     meta: { public: true, studentAuth: true }
   },
   {
+    path: '/pay/result',
+    name: 'StudentPayResult',
+    component: () => import('@/views/student-portal/PayResult.vue'),
+    meta: { public: true }
+  },
+  {
     path: '/',
     component: () => import('@/layouts/AdminLayout.vue'),
     redirect: '/dashboard',
