@@ -8,7 +8,7 @@ const router = express.Router();
 const { auth, requireRole } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/error');
 const { success, fail } = require('../utils/response');
-const { User, Student, Order, Course, DistributionConfig } = require('../models');
+const { User, Student, Order, Course, DistributionConfig, DistributionSettlement } = require('../models');
 
 const ADMIN_ROLES = ['superadmin', 'admin'];
 const VIEW_ROLES = ['superadmin', 'admin', 'sales'];
@@ -24,6 +24,53 @@ function getMonthRange(month) {
   const start = new Date(y, m - 1, 1, 0, 0, 0);
   const end = new Date(y, m, 0, 23, 59, 59, 999);
   return { start, end };
+}
+
+function normalizeMonth(month) {
+  if (!month) return '';
+  const m = String(month).trim();
+  return /^\d{4}-\d{2}$/.test(m) ? m : '';
+}
+
+function buildSummary(rows) {
+  return {
+    totalOrders: rows.length,
+    totalAmount: Number(rows.reduce((s, i) => s + Number(i.amount || 0), 0).toFixed(2)),
+    totalCommission: Number(rows.reduce((s, i) => s + Number(i.commissionAmount || 0), 0).toFixed(2))
+  };
+}
+
+function applyLocalFilters(rows, { salesUserId, salesLevel, keyword }) {
+  const sid = salesUserId ? Number(salesUserId) : null;
+  const level = salesLevel ? Number(salesLevel) : null;
+  const kw = String(keyword || '').trim().toLowerCase();
+
+  return rows.filter((row) => {
+    if (sid && Number(row.salesUserId || 0) !== sid) return false;
+    if (level && Number(row.salesLevel || 0) !== level) return false;
+
+    if (!kw) return true;
+    const fields = [
+      row.orderNo,
+      row.courseName,
+      row.studentName,
+      row.salesUserName,
+      row.salesUserId,
+      row.salesLevel
+    ].map((v) => String(v || '').toLowerCase());
+    return fields.some((v) => v.includes(kw));
+  });
+}
+
+async function getLockedSettlement(institutionId, monthKey) {
+  if (!monthKey) return null;
+  return DistributionSettlement.findOne({
+    where: {
+      institutionId,
+      monthKey,
+      isLocked: true
+    }
+  });
 }
 
 async function getOrInitConfig(institutionId) {
@@ -67,13 +114,17 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
   }
 
   if (keyword) {
-    where[Op.or] = [
+    const orFilters = [
       { orderNo: { [Op.like]: `%${keyword}%` } },
       { '$student.nickname$': { [Op.like]: `%${keyword}%` } },
       { '$student.realName$': { [Op.like]: `%${keyword}%` } },
       { '$student.phone$': { [Op.like]: `%${keyword}%` } },
       { '$course.title$': { [Op.like]: `%${keyword}%` } }
     ];
+    if (/^\d+$/.test(String(keyword).trim())) {
+      orFilters.push({ '$student.id$': Number(keyword) });
+    }
+    where[Op.or] = orFilters;
   }
 
   const rows = await Order.findAll({
@@ -277,13 +328,24 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     3: { id: 'level-3', nodeType: 'level', salesLevel: 3, label: '三级分销', children: [], orderCount: 0, commissionAmount: 0 }
   };
 
-  const rows = await buildCommissionRows({
-    institutionId,
-    salesUserId: req.user.role === 'sales' ? req.user.id : null,
-    salesLevel: null,
-    month,
-    keyword: ''
-  });
+  const monthKey = normalizeMonth(month);
+  const lockedSettlement = await getLockedSettlement(institutionId, monthKey);
+  const rows = lockedSettlement
+    ? applyLocalFilters(
+      Array.isArray(lockedSettlement.snapshotData?.rows) ? lockedSettlement.snapshotData.rows : [],
+      {
+        salesUserId: req.user.role === 'sales' ? req.user.id : null,
+        salesLevel: null,
+        keyword: ''
+      }
+    )
+    : await buildCommissionRows({
+      institutionId,
+      salesUserId: req.user.role === 'sales' ? req.user.id : null,
+      salesLevel: null,
+      month,
+      keyword: ''
+    });
   const salesMetricsMap = {};
   rows.forEach((row) => {
     const sid = Number(row.salesUserId || 0);
@@ -440,6 +502,100 @@ router.post('/student/assign', auth, requireRole(ADMIN_ROLES), asyncHandler(asyn
   }, '学员分销关系设置成功');
 }));
 
+router.get('/settlement/status', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+  const monthKey = normalizeMonth(req.query.month);
+  if (!monthKey) {
+    return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
+  }
+
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.query.institutionId || 0)
+    : getInstitutionId(req);
+
+  const settlement = await DistributionSettlement.findOne({
+    where: { institutionId, monthKey }
+  });
+
+  success(res, {
+    month: monthKey,
+    locked: Boolean(settlement?.isLocked),
+    lockedAt: settlement?.lockAt || null,
+    lockByUserId: settlement?.lockByUserId || null,
+    summary: settlement?.summaryData || null
+  });
+}));
+
+router.post('/settlement/lock', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const monthKey = normalizeMonth(req.body.month);
+  if (!monthKey) {
+    return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
+  }
+
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.body.institutionId || 0)
+    : getInstitutionId(req);
+
+  const locked = await getLockedSettlement(institutionId, monthKey);
+  if (locked) {
+    return fail(res, '该月份已锁定，无需重复操作', 400, 400);
+  }
+
+  const rows = await buildCommissionRows({
+    institutionId,
+    salesUserId: null,
+    salesLevel: null,
+    month: monthKey,
+    keyword: ''
+  });
+  const summary = buildSummary(rows);
+
+  const existing = await DistributionSettlement.findOne({ where: { institutionId, monthKey } });
+  if (existing) {
+    await existing.update({
+      isLocked: true,
+      lockByUserId: req.user.id,
+      lockAt: new Date(),
+      snapshotData: { rows },
+      summaryData: summary
+    });
+  } else {
+    await DistributionSettlement.create({
+      institutionId,
+      monthKey,
+      isLocked: true,
+      lockByUserId: req.user.id,
+      lockAt: new Date(),
+      snapshotData: { rows },
+      summaryData: summary
+    });
+  }
+
+  success(res, {
+    month: monthKey,
+    locked: true,
+    summary
+  }, '月度分销结算已锁定');
+}));
+
+router.post('/settlement/unlock', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const monthKey = normalizeMonth(req.body.month);
+  if (!monthKey) {
+    return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
+  }
+
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.body.institutionId || 0)
+    : getInstitutionId(req);
+
+  const existing = await DistributionSettlement.findOne({ where: { institutionId, monthKey } });
+  if (!existing) {
+    return fail(res, '该月份暂无结算记录', 404, 404);
+  }
+
+  await existing.update({ isLocked: false });
+  success(res, { month: monthKey, locked: false }, '月度分销结算已解锁');
+}));
+
 router.get('/orders', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
   const { page = 1, size = 20, month, salesUserId, salesLevel, keyword } = req.query;
 
@@ -451,13 +607,28 @@ router.get('/orders', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, re
     ? req.user.id
     : (salesUserId ? Number(salesUserId) : null);
 
-  const rows = await buildCommissionRows({
-    institutionId,
-    salesUserId: finalSalesUserId,
-    salesLevel: salesLevel ? Number(salesLevel) : null,
-    month,
-    keyword
-  });
+  const monthKey = normalizeMonth(month);
+  const lockedSettlement = await getLockedSettlement(institutionId, monthKey);
+
+  let rows = [];
+  if (lockedSettlement) {
+    const snapshotRows = Array.isArray(lockedSettlement.snapshotData?.rows)
+      ? lockedSettlement.snapshotData.rows
+      : [];
+    rows = applyLocalFilters(snapshotRows, {
+      salesUserId: finalSalesUserId,
+      salesLevel: salesLevel ? Number(salesLevel) : null,
+      keyword
+    });
+  } else {
+    rows = await buildCommissionRows({
+      institutionId,
+      salesUserId: finalSalesUserId,
+      salesLevel: salesLevel ? Number(salesLevel) : null,
+      month,
+      keyword
+    });
+  }
 
   const pageNum = parseInt(page, 10) || 1;
   const pageSizeNum = parseInt(size, 10) || 20;
@@ -465,15 +636,16 @@ router.get('/orders', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, re
   const start = (pageNum - 1) * pageSizeNum;
   const list = rows.slice(start, start + pageSizeNum);
 
-  const summary = {
-    totalOrders: total,
-    totalAmount: Number(rows.reduce((s, i) => s + Number(i.amount || 0), 0).toFixed(2)),
-    totalCommission: Number(rows.reduce((s, i) => s + Number(i.commissionAmount || 0), 0).toFixed(2))
-  };
+  const summary = buildSummary(rows);
 
   success(res, {
     list,
     summary,
+    settlement: {
+      month: monthKey || null,
+      locked: Boolean(lockedSettlement),
+      lockedAt: lockedSettlement?.lockAt || null
+    },
     pagination: {
       total,
       page: pageNum,
@@ -493,13 +665,21 @@ router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (
     ? req.user.id
     : (salesUserId ? Number(salesUserId) : null);
 
-  const rows = await buildCommissionRows({
-    institutionId,
-    salesUserId: finalSalesUserId,
-    salesLevel: salesLevel ? Number(salesLevel) : null,
-    month,
-    keyword
-  });
+  const monthKey = normalizeMonth(month);
+  const lockedSettlement = await getLockedSettlement(institutionId, monthKey);
+
+  const rows = lockedSettlement
+    ? applyLocalFilters(
+      Array.isArray(lockedSettlement.snapshotData?.rows) ? lockedSettlement.snapshotData.rows : [],
+      { salesUserId: finalSalesUserId, salesLevel: salesLevel ? Number(salesLevel) : null, keyword }
+    )
+    : await buildCommissionRows({
+      institutionId,
+      salesUserId: finalSalesUserId,
+      salesLevel: salesLevel ? Number(salesLevel) : null,
+      month,
+      keyword
+    });
 
   const escapeCell = (value) => {
     const text = String(value ?? '');

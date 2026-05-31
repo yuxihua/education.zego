@@ -10,7 +10,7 @@
 
       <el-form :inline="true" :model="filters" class="search-form">
         <el-form-item label="月份">
-          <el-date-picker v-model="filters.month" type="month" value-format="YYYY-MM" placeholder="选择月份" clearable />
+          <el-date-picker v-model="filters.month" type="month" value-format="YYYY-MM" placeholder="选择月份" clearable @change="loadSettlementStatus" />
         </el-form-item>
         <el-form-item label="销售" v-if="!isSalesRole">
           <el-select v-model="filters.salesUserId" placeholder="全部销售" clearable filterable style="width: 200px">
@@ -30,9 +30,20 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
+          <el-button type="warning" v-if="!isSalesRole" @click="handleLockSettlement">锁定当月结算</el-button>
+          <el-button v-if="!isSalesRole" @click="handleUnlockSettlement">解锁当月结算</el-button>
           <el-button type="success" @click="exportOrders">导出订单提成</el-button>
         </el-form-item>
       </el-form>
+
+      <div class="settlement-status" v-if="filters.month">
+        <el-tag v-if="settlementStatus.isLocked" type="danger">
+          {{ filters.month }} 已锁定（{{ settlementStatus.lockAt || '时间未知' }}）
+        </el-tag>
+        <el-tag v-else type="info">
+          {{ filters.month }} 未锁定（实时计算）
+        </el-tag>
+      </div>
 
       <el-row :gutter="12" class="summary-row">
         <el-col :span="8"><el-tag type="info">订单数：{{ summary.totalOrders }}</el-tag></el-col>
@@ -191,10 +202,13 @@ import {
   createSalesUser,
   getDistributionConfig,
   getDistributionOrders,
+  getDistributionSettlementStatus,
   getDistributionTree,
   getSalesList,
+  lockDistributionSettlement,
   searchDistributionStudents,
-  saveDistributionConfig
+  saveDistributionConfig,
+  unlockDistributionSettlement
 } from '@/api/distribution'
 
 const userStore = useUserStore()
@@ -214,6 +228,7 @@ const treeProps = { children: 'children', label: 'label' }
 const studentOptions = ref([])
 const treeLinkedFilterText = ref('')
 const treeStats = reactive({ orderCount: 0, commissionAmount: 0 })
+const settlementStatus = reactive({ isLocked: false, lockAt: '' })
 
 const assignForm = reactive({ studentId: null, salesUserId: null, salesLevel: 1 })
 
@@ -238,6 +253,23 @@ const loadTree = async () => {
     orderCount: Number(res.stats?.orderCount || 0),
     commissionAmount: Number(res.stats?.commissionAmount || 0)
   })
+}
+
+const loadSettlementStatus = async () => {
+  if (!filters.month) {
+    settlementStatus.isLocked = false
+    settlementStatus.lockAt = ''
+    return
+  }
+
+  try {
+    const res = await getDistributionSettlementStatus({ month: filters.month })
+    settlementStatus.isLocked = Boolean(res.isLocked || res.locked)
+    settlementStatus.lockAt = res.lockAt || res.lockedAt || ''
+  } catch (err) {
+    settlementStatus.isLocked = false
+    settlementStatus.lockAt = ''
+  }
 }
 
 const searchStudents = async (keyword = '') => {
@@ -322,6 +354,7 @@ const handleSearch = () => {
   pagination.page = 1
   loadOrders()
   loadTree()
+  loadSettlementStatus()
 }
 
 const handleReset = () => {
@@ -332,6 +365,27 @@ const handleReset = () => {
   pagination.page = 1
   loadOrders()
   loadTree()
+  loadSettlementStatus()
+}
+
+const handleLockSettlement = async () => {
+  if (!filters.month) {
+    ElMessage.warning('请先选择结算月份')
+    return
+  }
+  await lockDistributionSettlement({ month: filters.month })
+  ElMessage.success('当月分销结算已锁定')
+  await Promise.all([loadSettlementStatus(), loadOrders(), loadTree()])
+}
+
+const handleUnlockSettlement = async () => {
+  if (!filters.month) {
+    ElMessage.warning('请先选择结算月份')
+    return
+  }
+  await unlockDistributionSettlement({ month: filters.month })
+  ElMessage.success('当月分销结算已解锁')
+  await Promise.all([loadSettlementStatus(), loadOrders(), loadTree()])
 }
 
 const saveConfig = async () => {
@@ -390,7 +444,7 @@ const exportOrders = () => {
 }
 
 const loadAll = async () => {
-  await Promise.all([loadSales(), loadConfig(), loadOrders(), loadTree()])
+  await Promise.all([loadSales(), loadConfig(), loadOrders(), loadTree(), loadSettlementStatus()])
 }
 
 onMounted(loadAll)
@@ -419,5 +473,9 @@ onMounted(loadAll)
 
 .tree-link-state {
   margin-bottom: 10px;
+}
+
+.settlement-status {
+  margin-bottom: 12px;
 }
 </style>

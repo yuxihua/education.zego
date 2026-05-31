@@ -14,6 +14,7 @@ const PPTFile = require('./PPTFile');
 const Homework = require('./Homework');
 const Question = require('./Question');
 const DistributionConfig = require('./DistributionConfig');
+const DistributionSettlement = require('./DistributionSettlement');
 
 // ========== 定义模型关联关系 ==========
 
@@ -79,5 +80,6 @@ module.exports = {
   PPTFile,
   Homework,
   Question,
-  DistributionConfig
+  DistributionConfig,
+  DistributionSettlement
 };

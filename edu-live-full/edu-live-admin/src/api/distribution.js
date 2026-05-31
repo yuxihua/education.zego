@@ -11,3 +11,6 @@ export const getDistributionTree = (params) => request.get('/distribution/tree',
 export const assignStudentSales = (data) => request.post('/distribution/student/assign', data)
 
 export const getDistributionOrders = (params) => request.get('/distribution/orders', { params })
+export const getDistributionSettlementStatus = (params) => request.get('/distribution/settlement/status', { params })
+export const lockDistributionSettlement = (data) => request.post('/distribution/settlement/lock', data)
+export const unlockDistributionSettlement = (data) => request.post('/distribution/settlement/unlock', data)
