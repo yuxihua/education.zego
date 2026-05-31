@@ -80,6 +80,7 @@
                 <template v-if="scheduleViewMode === 'week'">
                   <el-button size="small" @click="moveWeek(-1)">上一周</el-button>
                   <el-button size="small" @click="moveWeek(1)">下一周</el-button>
+                  <el-button size="small" :disabled="!lastScheduleMove" @click="undoLastMove">撤销上次拖拽</el-button>
                 </template>
                 <el-button size="small" @click="handleCopyPrevToCurrent">上周复制到本周</el-button>
                 <el-button size="small" @click="handleCopyCurrentToNext">本周复制到下周</el-button>
@@ -128,28 +129,32 @@
                 <span class="week-legend-text">{{ item.label }}</span>
               </div>
             </div>
+            <div class="week-drag-tips">拖拽课程到指定日期栏的“上午/下午/晚间”分区，可同时调整日期和时间段。</div>
             <div class="week-grid">
               <div class="week-day" v-for="day in weekGridDays" :key="day.key">
                 <div class="week-day-head">
                   <div class="week-day-name">{{ day.label }}</div>
                   <div class="week-day-date">{{ day.dateText }}</div>
                 </div>
-                <div class="week-day-body" @dragover.prevent @drop="handleDayDrop(day)">
-                  <div
-                    class="week-slot"
-                    v-for="item in day.items"
-                    :key="item.id"
-                    draggable="true"
-                    :style="getSlotStyle(item)"
-                    @dragstart="handleSlotDragStart(item, day)"
-                    @dragend="handleSlotDragEnd"
-                    @click="openScheduleDialog(item)"
-                  >
-                    <div class="week-slot-time">{{ slotTimeText(item) }}</div>
-                    <div class="week-slot-course">{{ item.courseName }}</div>
-                    <div class="week-slot-meta">{{ item.classroom?.name || '-' }} · {{ item.teacher?.nickname || item.teacher?.username || '-' }}</div>
+                <div class="week-day-body">
+                  <div class="week-lane" v-for="lane in timeLanes" :key="`${day.key}_${lane.key}`" @dragover.prevent @drop="handleLaneDrop(day, lane)">
+                    <div class="week-lane-title">{{ lane.label }}</div>
+                    <div
+                      class="week-slot"
+                      v-for="item in getLaneItems(day, lane)"
+                      :key="item.id"
+                      draggable="true"
+                      :style="getSlotStyle(item)"
+                      @dragstart="handleSlotDragStart(item, day)"
+                      @dragend="handleSlotDragEnd"
+                      @click="openScheduleDialog(item)"
+                    >
+                      <div class="week-slot-time">{{ slotTimeText(item) }}</div>
+                      <div class="week-slot-course">{{ item.courseName }}</div>
+                      <div class="week-slot-meta">{{ item.classroom?.name || '-' }} · {{ item.teacher?.nickname || item.teacher?.username || '-' }}</div>
+                    </div>
+                    <div class="week-slot-empty" v-if="!getLaneItems(day, lane).length">暂无排课</div>
                   </div>
-                  <div class="week-slot-empty" v-if="!day.items.length">暂无排课</div>
                 </div>
               </div>
             </div>
@@ -288,6 +293,7 @@ const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, co
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 const draggingSlot = ref(null)
+const lastScheduleMove = ref(null)
 
 const SLOT_THEMES = [
   { bg: '#ecf5ff', border: '#91caff', text: '#1d39c4' },
@@ -299,6 +305,14 @@ const SLOT_THEMES = [
   { bg: '#fff1f0', border: '#ffa39e', text: '#a8071a' },
   { bg: '#fcffe6', border: '#d3f261', text: '#5b8c00' }
 ]
+
+const TIME_LANES = [
+  { key: 'morning', label: '上午', startHour: 9, startMinute: 0, endHour: 12, endMinute: 0 },
+  { key: 'afternoon', label: '下午', startHour: 13, startMinute: 30, endHour: 17, endMinute: 30 },
+  { key: 'evening', label: '晚间', startHour: 19, startMinute: 0, endHour: 22, endMinute: 0 }
+]
+
+const timeLanes = computed(() => TIME_LANES)
 
 const weekRangeText = computed(() => {
   if (!scheduleSearch.startDate || !scheduleSearch.endDate) return '-'
@@ -394,6 +408,17 @@ const slotTimeText = (item) => {
   return `${s}-${e}`
 }
 
+const getLaneItems = (day, lane) => {
+  return (day?.items || []).filter((item) => {
+    const dt = new Date(item.startTime)
+    if (Number.isNaN(dt.getTime())) return false
+    const minute = dt.getHours() * 60 + dt.getMinutes()
+    const laneStart = lane.startHour * 60 + lane.startMinute
+    const laneEnd = lane.endHour * 60 + lane.endMinute
+    return minute >= laneStart && minute < laneEnd
+  })
+}
+
 const getSlotStyle = (item) => {
   if (scheduleColorMode.value === 'none') return {}
   const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
@@ -479,13 +504,9 @@ const handleSlotDragEnd = () => {
   draggingSlot.value = null
 }
 
-const handleDayDrop = async (targetDay) => {
+const handleLaneDrop = async (targetDay, targetLane) => {
   const drag = draggingSlot.value
-  if (!drag || !targetDay?.key) return
-  if (drag.dayKey === targetDay.key) {
-    draggingSlot.value = null
-    return
-  }
+  if (!drag || !targetDay?.key || !targetLane) return
 
   const srcDay = new Date(`${drag.dayKey}T00:00:00`)
   const dstDay = new Date(`${targetDay.key}T00:00:00`)
@@ -494,19 +515,26 @@ const handleDayDrop = async (targetDay) => {
     return
   }
 
-  const dayDiff = Math.round((dstDay.getTime() - srcDay.getTime()) / (24 * 3600 * 1000))
   const start = new Date(String(drag.startTime).replace(' ', 'T'))
   const end = new Date(String(drag.endTime).replace(' ', 'T'))
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     draggingSlot.value = null
     return
   }
-  start.setDate(start.getDate() + dayDiff)
-  end.setDate(end.getDate() + dayDiff)
+
+  const durationMs = end.getTime() - start.getTime()
+  const nextStart = new Date(dstDay)
+  nextStart.setHours(targetLane.startHour, targetLane.startMinute, 0, 0)
+  const nextEnd = new Date(nextStart.getTime() + durationMs)
+
+  if (nextStart.getTime() === start.getTime() && nextEnd.getTime() === end.getTime()) {
+    draggingSlot.value = null
+    return
+  }
 
   const payload = {
-    startTime: toApiDateTime(start),
-    endTime: toApiDateTime(end)
+    startTime: toApiDateTime(nextStart),
+    endTime: toApiDateTime(nextEnd)
   }
   if (userStore.isPlatformAdmin && currentInstitutionId.value) {
     payload.institutionId = currentInstitutionId.value
@@ -514,6 +542,13 @@ const handleDayDrop = async (targetDay) => {
 
   try {
     await updateSchedule(drag.id, payload)
+    lastScheduleMove.value = {
+      id: drag.id,
+      oldStartTime: drag.startTime,
+      oldEndTime: drag.endTime,
+      newStartTime: payload.startTime,
+      newEndTime: payload.endTime
+    }
     ElMessage.success('已调整到新日期')
     await loadSchedules()
   } catch (err) {
@@ -529,6 +564,26 @@ const handleDayDrop = async (targetDay) => {
     }
   } finally {
     draggingSlot.value = null
+  }
+}
+
+const undoLastMove = async () => {
+  const move = lastScheduleMove.value
+  if (!move) return
+  const payload = {
+    startTime: move.oldStartTime,
+    endTime: move.oldEndTime
+  }
+  if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+    payload.institutionId = currentInstitutionId.value
+  }
+  try {
+    await updateSchedule(move.id, payload)
+    ElMessage.success('已撤销上次拖拽')
+    lastScheduleMove.value = null
+    await loadSchedules()
+  } catch (err) {
+    ElMessage.error('撤销失败')
   }
 }
 
@@ -825,6 +880,13 @@ onMounted(async () => {
   color: #606266;
 }
 
+.week-drag-tips {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #909399;
+  border-bottom: 1px dashed #ebeef5;
+}
+
 .week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -861,6 +923,19 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.week-lane {
+  border: 1px dashed #e4e7ed;
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.week-lane-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+  margin-bottom: 6px;
 }
 
 .week-slot {
