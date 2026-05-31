@@ -14,3 +14,28 @@ export const getSchedules = (params) => request.get('/resource/schedules', { par
 export const createSchedule = (data) => request.post('/resource/schedules', data)
 export const updateSchedule = (id, data) => request.put(`/resource/schedules/${id}`, data)
 export const deleteSchedule = (id, params) => request.delete(`/resource/schedules/${id}`, { params })
+export const copyWeekSchedules = (data) => request.post('/resource/schedules/copy-week', data)
+
+export const exportSchedules = async (params = {}) => {
+	const search = new URLSearchParams()
+	Object.entries(params || {}).forEach(([key, value]) => {
+		if (value === null || value === undefined || value === '') return
+		search.set(key, String(value))
+	})
+
+	const token = localStorage.getItem('token') || ''
+	const res = await fetch(`/api/resource/schedules/export?${search.toString()}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	})
+	if (!res.ok) {
+		const text = await res.text()
+		throw new Error(text || '导出失败')
+	}
+
+	const disposition = res.headers.get('Content-Disposition') || ''
+	const match = disposition.match(/filename="?([^";]+)"?/i)
+	const filename = match?.[1] || `schedules_${Date.now()}.csv`
+	const blob = await res.blob()
+
+	return { blob, filename }
+}

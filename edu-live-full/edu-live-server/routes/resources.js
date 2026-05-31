@@ -18,6 +18,13 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function parseWeekStart(value) {
+  const date = parseDate(value);
+  if (!date) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function formatDateTime(dateValue) {
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return '-';
@@ -53,6 +60,13 @@ async function findConflictSchedule({ institutionId, classroomId, teacherId, sta
     ],
     order: [['startTime', 'ASC']]
   });
+}
+
+function escapeCsvCell(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).replace(/\r?\n/g, ' ');
+  if (/[,"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
 router.get('/classrooms', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
@@ -250,6 +264,137 @@ router.get('/schedules', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req
   });
 
   success(res, list);
+}));
+
+router.get('/schedules/export', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const { classroomId, teacherId, startDate, endDate } = req.query;
+  const where = { institutionId };
+  if (classroomId) where.classroomId = Number(classroomId);
+  if (teacherId) where.teacherId = Number(teacherId);
+  if (startDate && endDate) {
+    where.startTime = { [Op.lt]: new Date(endDate) };
+    where.endTime = { [Op.gt]: new Date(startDate) };
+  }
+
+  const list = await TeachingSchedule.findAll({
+    where,
+    include: [
+      { model: Classroom, as: 'classroom', attributes: ['name', 'location'] },
+      { model: User, as: 'teacher', attributes: ['nickname', 'username', 'phone'] }
+    ],
+    order: [['startTime', 'ASC'], ['id', 'ASC']]
+  });
+
+  const header = ['ID', '课程名称', '开始时间', '结束时间', '教室', '教室位置', '讲师', '讲师账号', '讲师手机号', '状态', '备注'];
+  const rows = list.map((item) => [
+    item.id,
+    item.courseName,
+    formatDateTime(item.startTime),
+    formatDateTime(item.endTime),
+    item.classroom?.name || '-',
+    item.classroom?.location || '-',
+    item.teacher?.nickname || item.teacher?.username || '-',
+    item.teacher?.username || '-',
+    item.teacher?.phone || '-',
+    Number(item.status) === 1 ? '启用' : '取消',
+    item.remarks || ''
+  ]);
+
+  const csv = [header, ...rows].map((line) => line.map(escapeCsvCell).join(',')).join('\n');
+  const filename = `schedules_${Date.now()}.csv`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(`\uFEFF${csv}`);
+}));
+
+router.post('/schedules/copy-week', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const sourceWeekStart = parseWeekStart(req.body.sourceWeekStart);
+  const targetWeekStart = parseWeekStart(req.body.targetWeekStart);
+  const overwrite = Boolean(req.body.overwrite);
+
+  if (!sourceWeekStart || !targetWeekStart) {
+    return fail(res, 'sourceWeekStart 和 targetWeekStart 必填，格式为日期时间', 400, 400);
+  }
+
+  const sourceWeekEnd = new Date(sourceWeekStart);
+  sourceWeekEnd.setDate(sourceWeekEnd.getDate() + 7);
+
+  const targetWeekEnd = new Date(targetWeekStart);
+  targetWeekEnd.setDate(targetWeekEnd.getDate() + 7);
+
+  const dayOffset = Math.round((targetWeekStart.getTime() - sourceWeekStart.getTime()) / (24 * 3600 * 1000));
+
+  const sourceSchedules = await TeachingSchedule.findAll({
+    where: {
+      institutionId,
+      status: 1,
+      startTime: { [Op.gte]: sourceWeekStart, [Op.lt]: sourceWeekEnd }
+    },
+    order: [['startTime', 'ASC'], ['id', 'ASC']]
+  });
+
+  if (!sourceSchedules.length) {
+    return success(res, { copiedCount: 0, skippedCount: 0, skipped: [] }, '源周没有可复制排课');
+  }
+
+  if (overwrite) {
+    await TeachingSchedule.destroy({
+      where: {
+        institutionId,
+        startTime: { [Op.gte]: targetWeekStart, [Op.lt]: targetWeekEnd }
+      }
+    });
+  }
+
+  let copiedCount = 0;
+  const skipped = [];
+  for (const source of sourceSchedules) {
+    const targetStart = new Date(source.startTime);
+    targetStart.setDate(targetStart.getDate() + dayOffset);
+    const targetEnd = new Date(source.endTime);
+    targetEnd.setDate(targetEnd.getDate() + dayOffset);
+
+    const conflict = await findConflictSchedule({
+      institutionId,
+      classroomId: source.classroomId,
+      teacherId: source.teacherId,
+      startTime: targetStart,
+      endTime: targetEnd
+    });
+
+    if (conflict) {
+      skipped.push({
+        sourceScheduleId: source.id,
+        courseName: source.courseName,
+        targetTimeRange: `${formatDateTime(targetStart)} ~ ${formatDateTime(targetEnd)}`,
+        reason: '教室或讲师时间冲突',
+        conflictScheduleId: conflict.id,
+        conflictCourseName: conflict.courseName,
+        conflictTimeRange: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
+      });
+      continue;
+    }
+
+    await TeachingSchedule.create({
+      institutionId,
+      classroomId: source.classroomId,
+      teacherId: source.teacherId,
+      courseName: source.courseName,
+      startTime: targetStart,
+      endTime: targetEnd,
+      remarks: source.remarks || '',
+      status: source.status
+    });
+    copiedCount += 1;
+  }
+
+  success(res, {
+    copiedCount,
+    skippedCount: skipped.length,
+    skipped
+  }, `复制完成：成功${copiedCount}条，跳过${skipped.length}条`);
 }));
 
 router.post('/schedules', auth, requireRole(ADMIN_ROLES), [

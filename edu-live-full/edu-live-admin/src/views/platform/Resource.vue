@@ -77,6 +77,9 @@
                   <el-radio-button label="week">周视图</el-radio-button>
                   <el-radio-button label="month">月视图</el-radio-button>
                 </el-radio-group>
+                <el-button size="small" @click="handleCopyPrevToCurrent">上周复制到本周</el-button>
+                <el-button size="small" @click="handleCopyCurrentToNext">本周复制到下周</el-button>
+                <el-button size="small" type="success" @click="handleExportSchedules">导出CSV</el-button>
                 <el-button type="primary" size="small" @click="openScheduleDialog()">新增</el-button>
               </div>
             </div>
@@ -167,6 +170,22 @@
         <el-button type="primary" @click="saveSchedule">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="copyResultVisible" title="复制结果" width="760px">
+      <el-alert
+        :title="`成功 ${copyResult.copiedCount || 0} 条，跳过 ${copyResult.skippedCount || 0} 条`"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
+      <el-table :data="copyResult.skipped || []" size="small" border>
+        <el-table-column prop="courseName" label="课程" min-width="120" />
+        <el-table-column prop="targetTimeRange" label="目标时间" min-width="180" />
+        <el-table-column prop="reason" label="原因" min-width="120" />
+        <el-table-column prop="conflictCourseName" label="冲突课程" min-width="120" />
+        <el-table-column prop="conflictTimeRange" label="冲突时间" min-width="180" />
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -177,11 +196,13 @@ import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
 import {
   createClassroom,
+  copyWeekSchedules,
   createSchedule,
   createTeacher,
   deleteClassroom,
   deleteSchedule,
   deleteTeacher,
+  exportSchedules,
   getClassrooms,
   getSchedules,
   getTeachers,
@@ -212,6 +233,8 @@ const teacherForm = reactive({ id: null, username: '', password: '', nickname: '
 
 const scheduleDialogVisible = ref(false)
 const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, courseName: '', startTime: '', endTime: '', remarks: '', status: 1 })
+const copyResultVisible = ref(false)
+const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
@@ -223,6 +246,14 @@ const toDateString = (date) => {
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d} 00:00:00`
+}
+
+const startOfWeek = (date) => {
+  const d = new Date(date)
+  const day = d.getDay() || 7
+  d.setDate(d.getDate() - (day - 1))
+  d.setHours(0, 0, 0, 0)
+  return d
 }
 
 const applyScheduleViewRange = async () => {
@@ -242,6 +273,17 @@ const applyScheduleViewRange = async () => {
   scheduleSearch.startDate = toDateString(start)
   scheduleSearch.endDate = toDateString(end)
   await loadSchedules()
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 const buildCommonParams = () => {
@@ -387,6 +429,47 @@ const saveSchedule = async () => {
   ElMessage.success('排课已保存')
   scheduleDialogVisible.value = false
   await loadSchedules()
+}
+
+const copyWeekWithOffset = async (offsetDays) => {
+  const base = startOfWeek(new Date())
+  const source = new Date(base)
+  source.setDate(source.getDate() + (offsetDays < 0 ? -7 : 0))
+  const target = new Date(source)
+  target.setDate(target.getDate() + 7)
+
+  const payload = {
+    sourceWeekStart: toDateString(offsetDays < 0 ? source : base),
+    targetWeekStart: toDateString(offsetDays < 0 ? base : target)
+  }
+  if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+    payload.institutionId = currentInstitutionId.value
+  }
+
+  const res = await copyWeekSchedules(payload)
+  copyResult.copiedCount = Number(res.copiedCount || 0)
+  copyResult.skippedCount = Number(res.skippedCount || 0)
+  copyResult.skipped = Array.isArray(res.skipped) ? res.skipped : []
+  copyResultVisible.value = true
+  ElMessage.success(`复制完成：成功${copyResult.copiedCount}条，跳过${copyResult.skippedCount}条`)
+  await loadSchedules()
+}
+
+const handleCopyPrevToCurrent = async () => {
+  await ElMessageBox.confirm('确认复制上周排课到本周吗？如有冲突会自动跳过。', '提示', { type: 'warning' })
+  await copyWeekWithOffset(-7)
+}
+
+const handleCopyCurrentToNext = async () => {
+  await ElMessageBox.confirm('确认复制本周排课到下周吗？如有冲突会自动跳过。', '提示', { type: 'warning' })
+  await copyWeekWithOffset(7)
+}
+
+const handleExportSchedules = async () => {
+  const params = { ...buildCommonParams(), ...scheduleSearch }
+  const { blob, filename } = await exportSchedules(params)
+  downloadBlob(blob, filename)
+  ElMessage.success('导出成功')
 }
 
 const handleDeleteSchedule = async (row) => {
