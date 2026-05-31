@@ -130,6 +130,11 @@
               </div>
             </div>
             <div class="week-drag-tips">拖拽课程到指定日期栏的“上午/下午/晚间”分区，可同时调整日期和时间段。</div>
+            <div class="quick-undo-bar" v-if="quickUndoVisible">
+              <span class="quick-undo-text">已完成拖拽改期，可在 {{ quickUndoSeconds }}s 内快速撤销。</span>
+              <el-button link type="warning" @click="undoLastMove">立即撤销</el-button>
+              <el-button link @click="dismissQuickUndo">关闭</el-button>
+            </div>
             <div class="week-grid">
               <div class="week-day" v-for="day in weekGridDays" :key="day.key">
                 <div class="week-day-head">
@@ -138,7 +143,13 @@
                 </div>
                 <div class="week-day-body">
                   <div
-                    :class="['week-lane', { 'is-drop-target': dragHoverLaneKey === getLaneKey(day, lane) }]"
+                    :class="[
+                      'week-lane',
+                      {
+                        'is-drop-target': dragHoverLaneKey === getLaneKey(day, lane),
+                        'is-conflict-target': laneConflictMap[getLaneKey(day, lane)]
+                      }
+                    ]"
                     v-for="lane in timeLanes"
                     :key="`${day.key}_${lane.key}`"
                     @dragenter.prevent="handleLaneDragEnter(day, lane)"
@@ -254,7 +265,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
@@ -303,7 +314,12 @@ const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 const draggingSlot = ref(null)
 const dragHoverLaneKey = ref('')
+const laneConflictMap = reactive({})
+const lanePrecheckTimer = ref(null)
+const quickUndoSeconds = ref(0)
+const quickUndoTimer = ref(null)
 const lastScheduleMove = ref(null)
+const quickUndoVisible = computed(() => !!lastScheduleMove.value && quickUndoSeconds.value > 0)
 
 const SLOT_THEMES = [
   { bg: '#ecf5ff', border: '#91caff', text: '#1d39c4' },
@@ -431,6 +447,101 @@ const getLaneItems = (day, lane) => {
 
 const getLaneKey = (day, lane) => `${day?.key || ''}_${lane?.key || ''}`
 
+const clearLaneConflictMap = () => {
+  Object.keys(laneConflictMap).forEach((k) => {
+    delete laneConflictMap[k]
+  })
+}
+
+const clearLanePrecheckTimer = () => {
+  if (lanePrecheckTimer.value) {
+    clearTimeout(lanePrecheckTimer.value)
+    lanePrecheckTimer.value = null
+  }
+}
+
+const buildDropPayload = (drag, targetDay, targetLane) => {
+  const srcDay = new Date(`${drag.dayKey}T00:00:00`)
+  const dstDay = new Date(`${targetDay.key}T00:00:00`)
+  if (Number.isNaN(srcDay.getTime()) || Number.isNaN(dstDay.getTime())) {
+    return null
+  }
+
+  const start = new Date(String(drag.startTime).replace(' ', 'T'))
+  const end = new Date(String(drag.endTime).replace(' ', 'T'))
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null
+  }
+
+  const durationMs = end.getTime() - start.getTime()
+  const nextStart = new Date(dstDay)
+  nextStart.setHours(targetLane.startHour, targetLane.startMinute, 0, 0)
+  const nextEnd = new Date(nextStart.getTime() + durationMs)
+
+  return {
+    nextStart,
+    nextEnd,
+    sameTime: nextStart.getTime() === start.getTime() && nextEnd.getTime() === end.getTime()
+  }
+}
+
+const precheckLaneConflict = (day, lane) => {
+  const drag = draggingSlot.value
+  if (!drag || !day?.key || !lane) return
+  const laneKey = getLaneKey(day, lane)
+
+  clearLanePrecheckTimer()
+  lanePrecheckTimer.value = setTimeout(async () => {
+    const next = buildDropPayload(drag, day, lane)
+    if (!next || next.sameTime) {
+      laneConflictMap[laneKey] = null
+      return
+    }
+
+    const payload = {
+      scheduleId: drag.id,
+      classroomId: drag.classroomId,
+      teacherId: drag.teacherId,
+      startTime: toApiDateTime(next.nextStart),
+      endTime: toApiDateTime(next.nextEnd)
+    }
+    if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+      payload.institutionId = currentInstitutionId.value
+    }
+
+    try {
+      const res = await checkScheduleConflict(payload)
+      laneConflictMap[laneKey] = res?.hasConflict ? (res.conflict || true) : null
+    } catch (err) {
+      laneConflictMap[laneKey] = null
+    }
+  }, 180)
+}
+
+const startQuickUndoCountdown = () => {
+  if (quickUndoTimer.value) {
+    clearInterval(quickUndoTimer.value)
+    quickUndoTimer.value = null
+  }
+  quickUndoSeconds.value = 8
+  quickUndoTimer.value = setInterval(() => {
+    quickUndoSeconds.value -= 1
+    if (quickUndoSeconds.value <= 0) {
+      quickUndoSeconds.value = 0
+      clearInterval(quickUndoTimer.value)
+      quickUndoTimer.value = null
+    }
+  }, 1000)
+}
+
+const dismissQuickUndo = () => {
+  if (quickUndoTimer.value) {
+    clearInterval(quickUndoTimer.value)
+    quickUndoTimer.value = null
+  }
+  quickUndoSeconds.value = 0
+}
+
 const getSlotStyle = (item) => {
   if (scheduleColorMode.value === 'none') return {}
   const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
@@ -504,6 +615,7 @@ const moveWeek = async (step) => {
 }
 
 const handleSlotDragStart = (item, day) => {
+  clearLaneConflictMap()
   draggingSlot.value = {
     id: item.id,
     dayKey: day.key,
@@ -517,16 +629,19 @@ const handleSlotDragStart = (item, day) => {
 const handleSlotDragEnd = () => {
   draggingSlot.value = null
   dragHoverLaneKey.value = ''
+  clearLaneConflictMap()
 }
 
 const handleLaneDragEnter = (day, lane) => {
   if (!draggingSlot.value) return
   dragHoverLaneKey.value = getLaneKey(day, lane)
+  precheckLaneConflict(day, lane)
 }
 
 const handleLaneDragOver = (day, lane) => {
   if (!draggingSlot.value) return
   dragHoverLaneKey.value = getLaneKey(day, lane)
+  precheckLaneConflict(day, lane)
 }
 
 const handleLaneDragLeave = (day, lane) => {
@@ -540,37 +655,26 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   const drag = draggingSlot.value
   if (!drag || !targetDay?.key || !targetLane) return
   dragHoverLaneKey.value = ''
+  clearLanePrecheckTimer()
 
-  const srcDay = new Date(`${drag.dayKey}T00:00:00`)
-  const dstDay = new Date(`${targetDay.key}T00:00:00`)
-  if (Number.isNaN(srcDay.getTime()) || Number.isNaN(dstDay.getTime())) {
+  const next = buildDropPayload(drag, targetDay, targetLane)
+  if (!next) {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
+    clearLaneConflictMap()
     return
   }
 
-  const start = new Date(String(drag.startTime).replace(' ', 'T'))
-  const end = new Date(String(drag.endTime).replace(' ', 'T'))
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+  if (next.sameTime) {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
-    return
-  }
-
-  const durationMs = end.getTime() - start.getTime()
-  const nextStart = new Date(dstDay)
-  nextStart.setHours(targetLane.startHour, targetLane.startMinute, 0, 0)
-  const nextEnd = new Date(nextStart.getTime() + durationMs)
-
-  if (nextStart.getTime() === start.getTime() && nextEnd.getTime() === end.getTime()) {
-    draggingSlot.value = null
-    dragHoverLaneKey.value = ''
+    clearLaneConflictMap()
     return
   }
 
   const payload = {
-    startTime: toApiDateTime(nextStart),
-    endTime: toApiDateTime(nextEnd)
+    startTime: toApiDateTime(next.nextStart),
+    endTime: toApiDateTime(next.nextEnd)
   }
   if (userStore.isPlatformAdmin && currentInstitutionId.value) {
     payload.institutionId = currentInstitutionId.value
@@ -608,6 +712,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
       newEndTime: payload.endTime
     }
     ElMessage.success('已调整到新时段')
+    startQuickUndoCountdown()
     await loadSchedules()
   } catch (err) {
     const conflict = err?.data
@@ -623,6 +728,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   } finally {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
+    clearLaneConflictMap()
   }
 }
 
@@ -640,6 +746,7 @@ const undoLastMove = async () => {
     await updateSchedule(move.id, payload)
     ElMessage.success('已撤销上次拖拽')
     lastScheduleMove.value = null
+    dismissQuickUndo()
     await loadSchedules()
   } catch (err) {
     ElMessage.error('撤销失败')
@@ -856,6 +963,11 @@ onMounted(async () => {
   await loadTeachers()
   await applyScheduleViewRange()
 })
+
+onBeforeUnmount(() => {
+  clearLanePrecheckTimer()
+  dismissQuickUndo()
+})
 </script>
 
 <style scoped>
@@ -946,6 +1058,20 @@ onMounted(async () => {
   border-bottom: 1px dashed #ebeef5;
 }
 
+.quick-undo-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #fff7e6;
+  border-bottom: 1px dashed #ffd591;
+}
+
+.quick-undo-text {
+  font-size: 12px;
+  color: #ad6800;
+}
+
 .week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -993,6 +1119,11 @@ onMounted(async () => {
 .week-lane.is-drop-target {
   border-color: #409eff;
   background: #f0f9ff;
+}
+
+.week-lane.is-conflict-target {
+  border-color: #ff4d4f;
+  background: #fff1f0;
 }
 
 .week-lane-title {
