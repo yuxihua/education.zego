@@ -27,6 +27,46 @@ function canAccessByCourseInstitution(req, courseInstitutionId) {
   return courseInstitutionId === getOperatorInstitutionId(req);
 }
 
+async function gradeHomeworkById(req, res, homeworkId, score, comment) {
+  const homework = await Homework.findByPk(homeworkId, {
+    include: [
+      { model: Course, as: 'course', attributes: ['title', 'institutionId'] },
+      { model: Student, as: 'student', attributes: ['id', 'openid'] }
+    ]
+  });
+
+  if (!homework) {
+    return fail(res, '作业不存在', 404, 404);
+  }
+
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权批改该机构作业', 403, 403);
+  }
+
+  if (homework.status !== 'submitted') {
+    return fail(res, '作业尚未提交', 400, 400);
+  }
+
+  await homework.update({
+    score,
+    comment,
+    status: 'graded',
+    gradeTime: new Date()
+  });
+
+  if (homework.student?.openid) {
+    notifyHomeworkGraded(
+      homework.student.openid,
+      homework.course.title,
+      homework.title,
+      score,
+      `/pages/homework/detail?id=${homeworkId}`
+    ).catch(err => console.error('[推送] 作业批改通知失败:', err.message));
+  }
+
+  return success(res, homework, '批改完成');
+}
+
 /**
  * @GET /api/homework/list
  * 作业列表（按课程）
@@ -78,6 +118,97 @@ router.get('/list', auth, asyncHandler(async (req, res) => {
       pageSize: pageSizeNum
     }
   });
+}));
+
+/**
+ * @POST /api/homework/create
+ * 兼容旧前端：布置作业
+ */
+router.post('/create', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { courseId, title, content, deadline } = req.body;
+
+  const course = await Course.findByPk(courseId);
+  if (!course) {
+    return fail(res, '课程不存在', 404, 404);
+  }
+
+  if (!canAccessByCourseInstitution(req, course.institutionId || 0)) {
+    return fail(res, '无权在该机构课程布置作业', 403, 403);
+  }
+
+  const homework = await Homework.create({
+    courseId,
+    studentId: 0,
+    title,
+    content,
+    deadline,
+    status: 'pending'
+  });
+
+  success(res, homework, '作业布置成功');
+}));
+
+/**
+ * @GET /api/homework/submissions
+ * 兼容旧前端：按作业查看提交
+ */
+router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { homeworkId } = req.query;
+  if (!homeworkId) {
+    return fail(res, '缺少 homeworkId', 400, 400);
+  }
+
+  const source = await Homework.findByPk(homeworkId, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!source) {
+    return fail(res, '作业不存在', 404, 404);
+  }
+  if (!canAccessByCourseInstitution(req, source.course?.institutionId || 0)) {
+    return fail(res, '无权查看该机构作业提交', 403, 403);
+  }
+
+  const rows = await Homework.findAll({
+    where: {
+      courseId: source.courseId,
+      title: source.title
+    },
+    include: [
+      { model: Student, as: 'student', attributes: ['id', 'nickname', 'realName', 'phone'] }
+    ],
+    order: [['submitTime', 'DESC']]
+  });
+
+  const list = rows
+    .filter((row) => Number(row.studentId || 0) > 0)
+    .map((item) => {
+      const row = item.toJSON();
+      return {
+        id: row.id,
+        studentId: row.studentId,
+        studentName: row.student?.realName || row.student?.nickname || '-',
+        submitTime: row.submitTime,
+        content: row.content,
+        score: row.score,
+        comment: row.comment,
+        status: row.status
+      };
+    });
+
+  success(res, { list });
+}));
+
+/**
+ * @POST /api/homework/grade
+ * 兼容旧前端：批改作业
+ */
+router.post('/grade', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { homeworkId, score, comment } = req.body;
+  if (!homeworkId) {
+    return fail(res, '缺少 homeworkId', 400, 400);
+  }
+
+  await gradeHomeworkById(req, res, homeworkId, score, comment);
 }));
 
 /**
@@ -187,44 +318,7 @@ router.post('/:id/grade', auth, requireRole(['admin', 'superadmin', 'teacher']),
   const { id } = req.params;
   const { score, comment } = req.body;
 
-  const homework = await Homework.findByPk(id, {
-    include: [
-      { model: Course, as: 'course', attributes: ['title'] },
-      { model: Student, as: 'student', attributes: ['id', 'openid'] }
-    ]
-  });
-
-  if (!homework) {
-    return fail(res, '作业不存在', 404, 404);
-  }
-
-  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
-    return fail(res, '无权批改该机构作业', 403, 403);
-  }
-
-  if (homework.status !== 'submitted') {
-    return fail(res, '作业尚未提交', 400, 400);
-  }
-
-  await homework.update({
-    score,
-    comment,
-    status: 'graded',
-    gradeTime: new Date()
-  });
-
-  // 发送批改通知
-  if (homework.student?.openid) {
-    notifyHomeworkGraded(
-      homework.student.openid,
-      homework.course.title,
-      homework.title,
-      score,
-      `/pages/homework/detail?id=${id}`
-    ).catch(err => console.error('[推送] 作业批改通知失败:', err.message));
-  }
-
-  success(res, homework, '批改完成');
+  await gradeHomeworkById(req, res, id, score, comment);
 }));
 
 /**

@@ -42,6 +42,35 @@
       </el-table>
     </el-card>
 
+    <el-dialog v-model="publishVisible" title="布置作业" width="560px">
+      <el-form ref="publishFormRef" :model="publishForm" :rules="publishRules" label-width="100px">
+        <el-form-item label="关联课程" prop="courseId">
+          <el-select v-model="publishForm.courseId" placeholder="请选择课程" style="width: 100%">
+            <el-option v-for="c in courseList" :key="c.id" :label="c.title" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="作业标题" prop="title">
+          <el-input v-model="publishForm.title" placeholder="请输入作业标题" />
+        </el-form-item>
+        <el-form-item label="作业内容" prop="content">
+          <el-input v-model="publishForm.content" type="textarea" :rows="4" placeholder="请输入作业说明" />
+        </el-form-item>
+        <el-form-item label="截止时间" prop="deadline">
+          <el-date-picker
+            v-model="publishForm.deadline"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="请选择截止时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="publishVisible = false">取消</el-button>
+        <el-button type="primary" :loading="publishing" @click="submitPublish">确定</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="submissionVisible" title="作业提交列表" width="900px">
       <el-table :data="submissionList" border size="small">
         <el-table-column prop="studentName" label="学员" width="120" />
@@ -84,7 +113,8 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getHomeworkList, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
+import { getHomeworkList, createHomework, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
+import { getCourseList } from '@/api/course'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
@@ -95,6 +125,17 @@ const searchForm = reactive({ institutionId: null })
 const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
+
+const publishVisible = ref(false)
+const publishFormRef = ref()
+const publishing = ref(false)
+const publishForm = reactive({ courseId: null, title: '', content: '', deadline: '' })
+const publishRules = {
+  courseId: [{ required: true, message: '请选择课程', trigger: 'change' }],
+  title: [{ required: true, message: '请输入作业标题', trigger: 'blur' }],
+  content: [{ required: true, message: '请输入作业内容', trigger: 'blur' }]
+}
+const courseList = ref([])
 
 const gradeVisible = ref(false)
 const currentSubmission = ref(null)
@@ -108,8 +149,27 @@ const loadData = async () => {
   }
 
   const res = await getHomeworkList(params)
-  tableData.value = res.list
+  tableData.value = (res.list || []).map((item) => {
+    const row = { ...item }
+    const submitted = ['submitted', 'graded', 'returned'].includes(row.status)
+    return {
+      ...row,
+      courseName: row.course?.title || '-',
+      submitCount: submitted ? 1 : 0,
+      totalCount: 1,
+      status: row.deadline && new Date(row.deadline) < new Date() ? 'ended' : 'ongoing'
+    }
+  })
   loading.value = false
+}
+
+const loadCourseOptions = async () => {
+  const params = { page: 1, size: 1000, status: 'published' }
+  if (userStore.isPlatformAdmin && searchForm.institutionId !== null && searchForm.institutionId !== undefined) {
+    params.institutionId = searchForm.institutionId
+  }
+  const res = await getCourseList(params)
+  courseList.value = res.list || []
 }
 
 const handleSearch = () => {
@@ -122,7 +182,9 @@ const handleReset = () => {
 }
 
 const handlePublish = () => {
-  ElMessage.info('打开布置作业弹窗')
+  Object.assign(publishForm, { courseId: null, title: '', content: '', deadline: '' })
+  publishVisible.value = true
+  loadCourseOptions()
 }
 
 const handleSubmissions = async (row) => {
@@ -149,6 +211,23 @@ const submitGrade = async () => {
   gradeVisible.value = false
   const res = await getHomeworkSubmissions({ homeworkId: currentHomeworkId.value })
   submissionList.value = res.list
+}
+
+const submitPublish = async () => {
+  await publishFormRef.value.validate()
+  publishing.value = true
+  try {
+    await createHomework(publishForm)
+    ElMessage.success('作业布置成功')
+    publishVisible.value = false
+    await loadData()
+  } finally {
+    publishing.value = false
+  }
+}
+
+const handleEdit = () => {
+  ElMessage.info('编辑作业功能将复用布置弹窗，下一步完善')
 }
 
 onMounted(loadData)
