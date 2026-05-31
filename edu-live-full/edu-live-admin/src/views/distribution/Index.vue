@@ -111,6 +111,7 @@
         default-expand-all
         :props="treeProps"
         empty-text="暂无层级关系数据"
+        @node-click="handleTreeNodeClick"
       />
     </el-card>
 
@@ -256,6 +257,37 @@ const loadOrders = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const handleTreeNodeClick = (node) => {
+  if (!node || !node.nodeType) return
+
+  if (node.nodeType === 'level') {
+    filters.salesLevel = node.salesLevel || null
+    if (!isSalesRole.value) {
+      filters.salesUserId = null
+    }
+  }
+
+  if (node.nodeType === 'sales') {
+    filters.salesLevel = node.salesLevel || null
+    if (!isSalesRole.value) {
+      filters.salesUserId = node.salesUserId || null
+    }
+  }
+
+  if (node.nodeType === 'student') {
+    filters.salesLevel = node.salesLevel || null
+    if (!isSalesRole.value) {
+      filters.salesUserId = node.salesUserId || null
+    }
+    if (node.studentId) {
+      filters.keyword = String(node.studentId)
+    }
+  }
+
+  pagination.page = 1
+  loadOrders()
 }
 
 const handleSearch = () => {

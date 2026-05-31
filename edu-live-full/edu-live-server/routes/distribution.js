@@ -271,9 +271,9 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
 
   const salesNameMap = Object.fromEntries(salesList.map((s) => [s.id, s.nickname || s.username]));
   const levelMap = {
-    1: { id: 'level-1', label: '一级分销', children: [] },
-    2: { id: 'level-2', label: '二级分销', children: [] },
-    3: { id: 'level-3', label: '三级分销', children: [] }
+    1: { id: 'level-1', nodeType: 'level', salesLevel: 1, label: '一级分销', children: [] },
+    2: { id: 'level-2', nodeType: 'level', salesLevel: 2, label: '二级分销', children: [] },
+    3: { id: 'level-3', nodeType: 'level', salesLevel: 3, label: '三级分销', children: [] }
   };
 
   const salesNodeMap = {};
@@ -286,6 +286,9 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     if (!salesNodeMap[key]) {
       salesNodeMap[key] = {
         id: `sales-${level}-${sid}`,
+        nodeType: 'sales',
+        salesLevel: level,
+        salesUserId: sid,
         label: `${salesNameMap[sid] || `销售${sid}`}`,
         children: []
       };
@@ -295,6 +298,10 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     const name = stu.realName || stu.nickname || '未命名学员';
     salesNodeMap[key].children.push({
       id: `student-${stu.id}`,
+      nodeType: 'student',
+      salesLevel: level,
+      salesUserId: sid,
+      studentId: stu.id,
       label: `${name}${stu.phone ? `（${stu.phone}）` : ''}`
     });
   }
