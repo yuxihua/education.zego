@@ -153,7 +153,7 @@ router.post('/create', auth, requireRole(['admin', 'superadmin', 'teacher']), as
  * 兼容旧前端：按作业查看提交
  */
 router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
-  const { homeworkId } = req.query;
+  const { homeworkId, keyword, status } = req.query;
   if (!homeworkId) {
     return fail(res, '缺少 homeworkId', 400, 400);
   }
@@ -179,7 +179,7 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
     order: [['submitTime', 'DESC']]
   });
 
-  const list = rows
+  let list = rows
     .filter((row) => Number(row.studentId || 0) > 0)
     .map((item) => {
       const row = item.toJSON();
@@ -194,6 +194,18 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
         status: row.status
       };
     });
+
+  if (keyword) {
+    const text = String(keyword).trim().toLowerCase();
+    list = list.filter((item) => (
+      String(item.studentName || '').toLowerCase().includes(text)
+      || String(item.content || '').toLowerCase().includes(text)
+    ));
+  }
+
+  if (status) {
+    list = list.filter((item) => item.status === status);
+  }
 
   success(res, { list });
 }));

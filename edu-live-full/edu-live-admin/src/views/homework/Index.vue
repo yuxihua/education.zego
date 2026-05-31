@@ -90,12 +90,34 @@
     </el-dialog>
 
     <el-dialog v-model="submissionVisible" title="作业提交列表" width="900px">
+      <el-form :inline="true" :model="submissionSearch" class="submission-search-form">
+        <el-form-item label="关键词">
+          <el-input
+            v-model="submissionSearch.keyword"
+            placeholder="学员名/作答内容"
+            clearable
+            style="width: 220px"
+            @input="handleSubmissionFilter"
+          />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="submissionSearch.status" placeholder="全部" clearable style="width: 140px" @change="handleSubmissionFilter">
+            <el-option label="已提交" value="submitted" />
+            <el-option label="已批改" value="graded" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleSubmissionFilterReset">重置</el-button>
+          <el-button type="success" @click="exportSubmissionsCsv">导出CSV</el-button>
+        </el-form-item>
+      </el-form>
+
       <el-row :gutter="12" style="margin-bottom: 12px">
         <el-col :span="8"><el-tag type="info">总提交：{{ submissionSummary.total }}</el-tag></el-col>
         <el-col :span="8"><el-tag type="success">已批改：{{ submissionSummary.graded }}</el-tag></el-col>
         <el-col :span="8"><el-tag type="warning">待批改：{{ submissionSummary.pending }}</el-tag></el-col>
       </el-row>
-      <el-table :data="submissionList" border size="small">
+      <el-table :data="filteredSubmissionList" border size="small">
         <el-table-column prop="studentName" label="学员" width="120" />
         <el-table-column prop="submitTime" label="提交时间" width="160" />
         <el-table-column prop="content" label="作答内容" min-width="200" show-overflow-tooltip />
@@ -134,7 +156,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHomeworkList, createHomework, updateHomework, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
 import { getCourseList } from '@/api/course'
@@ -151,6 +173,7 @@ const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
 const submissionSummary = reactive({ total: 0, graded: 0, pending: 0 })
+const submissionSearch = reactive({ keyword: '', status: '' })
 const institutionOptions = ref([])
 
 const publishVisible = ref(false)
@@ -169,6 +192,26 @@ const courseList = ref([])
 const gradeVisible = ref(false)
 const currentSubmission = ref(null)
 const gradeForm = reactive({ score: 0, comment: '' })
+
+const filteredSubmissionList = computed(() => {
+  const keyword = String(submissionSearch.keyword || '').trim().toLowerCase()
+  const status = submissionSearch.status
+
+  return (submissionList.value || []).filter((item) => {
+    const matchKeyword = !keyword
+      || String(item.studentName || '').toLowerCase().includes(keyword)
+      || String(item.content || '').toLowerCase().includes(keyword)
+    const matchStatus = !status || item.status === status
+    return matchKeyword && matchStatus
+  })
+})
+
+const refreshSubmissionSummary = () => {
+  const list = filteredSubmissionList.value || []
+  submissionSummary.total = list.length
+  submissionSummary.graded = list.filter(item => item.status === 'graded').length
+  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
+}
 
 const loadData = async () => {
   loading.value = true
@@ -238,11 +281,11 @@ const handlePublish = () => {
 
 const handleSubmissions = async (row) => {
   currentHomeworkId.value = row.id
+  submissionSearch.keyword = ''
+  submissionSearch.status = ''
   const res = await getHomeworkSubmissions({ homeworkId: row.id })
   submissionList.value = res.list || []
-  submissionSummary.total = submissionList.value.length
-  submissionSummary.graded = submissionList.value.filter(item => item.status === 'graded').length
-  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
+  refreshSubmissionSummary()
   submissionVisible.value = true
 }
 
@@ -263,9 +306,54 @@ const submitGrade = async () => {
   gradeVisible.value = false
   const res = await getHomeworkSubmissions({ homeworkId: currentHomeworkId.value })
   submissionList.value = res.list || []
-  submissionSummary.total = submissionList.value.length
-  submissionSummary.graded = submissionList.value.filter(item => item.status === 'graded').length
-  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
+  refreshSubmissionSummary()
+}
+
+const handleSubmissionFilter = () => {
+  refreshSubmissionSummary()
+}
+
+const handleSubmissionFilterReset = () => {
+  submissionSearch.keyword = ''
+  submissionSearch.status = ''
+  refreshSubmissionSummary()
+}
+
+const exportSubmissionsCsv = () => {
+  const rows = filteredSubmissionList.value || []
+  if (!rows.length) {
+    ElMessage.warning('当前没有可导出的提交记录')
+    return
+  }
+
+  const csvHeader = ['学员', '提交时间', '作答内容', '得分', '评语', '状态']
+  const csvRows = rows.map((row) => [
+    row.studentName || '-',
+    row.submitTime || '-',
+    row.content || '-',
+    row.score ?? '',
+    row.comment || '',
+    row.status === 'graded' ? '已批改' : (row.status === 'submitted' ? '已提交' : row.status || '-')
+  ])
+
+  const escapeCell = (value) => {
+    const text = String(value ?? '')
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`
+    }
+    return text
+  }
+
+  const content = [csvHeader, ...csvRows].map((line) => line.map(escapeCell).join(',')).join('\n')
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `homework_submissions_${currentHomeworkId.value || 'all'}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 const submitPublish = async () => {
@@ -318,5 +406,9 @@ onMounted(async () => {
 
 .search-form {
   margin-bottom: 12px;
+}
+
+.submission-search-form {
+  margin-bottom: 10px;
 }
 </style>
