@@ -196,6 +196,128 @@ router.get('/sales/list', auth, requireRole(VIEW_ROLES), asyncHandler(async (req
   })));
 }));
 
+router.get('/students/search', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const { keyword = '', limit = 50 } = req.query;
+
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.query.institutionId || 0)
+    : getInstitutionId(req);
+
+  const where = { institutionId };
+  if (keyword) {
+    where[Op.or] = [
+      { realName: { [Op.like]: `%${keyword}%` } },
+      { nickname: { [Op.like]: `%${keyword}%` } },
+      { phone: { [Op.like]: `%${keyword}%` } }
+    ];
+  }
+
+  const list = await Student.findAll({
+    where,
+    attributes: ['id', 'realName', 'nickname', 'phone', 'salesUserId', 'salesLevel'],
+    order: [['id', 'DESC']],
+    limit: Math.min(Number(limit) || 50, 200)
+  });
+
+  success(res, list.map((item) => {
+    const name = item.realName || item.nickname || '未命名学员';
+    return {
+      id: item.id,
+      name,
+      phone: item.phone,
+      salesUserId: item.salesUserId,
+      salesLevel: item.salesLevel,
+      label: `${name}${item.phone ? `（${item.phone}）` : ''} #${item.id}`
+    };
+  }));
+}));
+
+router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.query.institutionId || 0)
+    : getInstitutionId(req);
+
+  const salesWhere = {
+    role: 'sales',
+    status: 1,
+    institutionId
+  };
+  if (req.user.role === 'sales') {
+    salesWhere.id = req.user.id;
+  }
+
+  const salesList = await User.findAll({
+    where: salesWhere,
+    attributes: ['id', 'username', 'nickname']
+  });
+
+  const saleIds = salesList.map((i) => i.id);
+  const studentWhere = {
+    institutionId,
+    salesUserId: { [Op.ne]: null },
+    salesLevel: { [Op.in]: [1, 2, 3] }
+  };
+  if (saleIds.length) {
+    studentWhere.salesUserId = { [Op.in]: saleIds };
+  }
+
+  const students = saleIds.length
+    ? await Student.findAll({
+      where: studentWhere,
+      attributes: ['id', 'realName', 'nickname', 'phone', 'salesUserId', 'salesLevel'],
+      order: [['id', 'DESC']]
+    })
+    : [];
+
+  const salesNameMap = Object.fromEntries(salesList.map((s) => [s.id, s.nickname || s.username]));
+  const levelMap = {
+    1: { id: 'level-1', label: '一级分销', children: [] },
+    2: { id: 'level-2', label: '二级分销', children: [] },
+    3: { id: 'level-3', label: '三级分销', children: [] }
+  };
+
+  const salesNodeMap = {};
+  for (const stu of students) {
+    const level = Number(stu.salesLevel || 0);
+    const sid = Number(stu.salesUserId || 0);
+    if (![1, 2, 3].includes(level) || !sid) continue;
+
+    const key = `${level}_${sid}`;
+    if (!salesNodeMap[key]) {
+      salesNodeMap[key] = {
+        id: `sales-${level}-${sid}`,
+        label: `${salesNameMap[sid] || `销售${sid}`}`,
+        children: []
+      };
+      levelMap[level].children.push(salesNodeMap[key]);
+    }
+
+    const name = stu.realName || stu.nickname || '未命名学员';
+    salesNodeMap[key].children.push({
+      id: `student-${stu.id}`,
+      label: `${name}${stu.phone ? `（${stu.phone}）` : ''}`
+    });
+  }
+
+  for (const level of [1, 2, 3]) {
+    levelMap[level].children.forEach((node) => {
+      node.label = `${node.label}（${node.children.length}人）`;
+    });
+    const salesCount = levelMap[level].children.length;
+    const studentCount = levelMap[level].children.reduce((sum, node) => sum + node.children.length, 0);
+    levelMap[level].label = `${levelMap[level].label}（销售${salesCount}人，学员${studentCount}人）`;
+  }
+
+  const tree = [levelMap[1], levelMap[2], levelMap[3]];
+  success(res, {
+    tree,
+    stats: {
+      salesCount: salesList.length,
+      studentCount: students.length
+    }
+  });
+}));
+
 router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
   const { username, password, nickname, phone, email } = req.body;
   if (!username || !password) {

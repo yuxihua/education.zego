@@ -100,14 +100,43 @@
     <el-card v-if="!isSalesRole" style="margin-top: 16px">
       <template #header>
         <div class="card-header">
+          <span>分销层级关系图（树形）</span>
+          <el-button @click="loadTree">刷新树图</el-button>
+        </div>
+      </template>
+
+      <el-tree
+        :data="treeData"
+        node-key="id"
+        default-expand-all
+        :props="treeProps"
+        empty-text="暂无层级关系数据"
+      />
+    </el-card>
+
+    <el-card v-if="!isSalesRole" style="margin-top: 16px">
+      <template #header>
+        <div class="card-header">
           <span>销售与学员归属</span>
           <el-button type="primary" @click="openCreateSales">新增销售账号</el-button>
         </div>
       </template>
 
       <el-form :inline="true" :model="assignForm" class="search-form">
-        <el-form-item label="学员ID">
-          <el-input-number v-model="assignForm.studentId" :min="1" controls-position="right" />
+        <el-form-item label="学员">
+          <el-select
+            v-model="assignForm.studentId"
+            placeholder="按姓名/手机号搜索学员"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            style="width: 320px"
+            :remote-method="searchStudents"
+            @visible-change="handleStudentSelectorVisible"
+          >
+            <el-option v-for="s in studentOptions" :key="s.id" :label="s.label" :value="s.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="销售">
           <el-select v-model="assignForm.salesUserId" placeholder="选择销售" filterable style="width: 220px">
@@ -151,7 +180,9 @@ import {
   createSalesUser,
   getDistributionConfig,
   getDistributionOrders,
+  getDistributionTree,
   getSalesList,
+  searchDistributionStudents,
   saveDistributionConfig
 } from '@/api/distribution'
 
@@ -167,6 +198,9 @@ const filters = reactive({ month: '', salesUserId: null, salesLevel: null, keywo
 
 const configList = ref([])
 const salesList = ref([])
+const treeData = ref([])
+const treeProps = { children: 'children', label: 'label' }
+const studentOptions = ref([])
 
 const assignForm = reactive({ studentId: null, salesUserId: null, salesLevel: 1 })
 
@@ -181,6 +215,23 @@ const loadSales = async () => {
 const loadConfig = async () => {
   if (isSalesRole.value) return
   configList.value = await getDistributionConfig({})
+}
+
+const loadTree = async () => {
+  if (isSalesRole.value) return
+  const res = await getDistributionTree({})
+  treeData.value = res.tree || []
+}
+
+const searchStudents = async (keyword = '') => {
+  studentOptions.value = await searchDistributionStudents({ keyword })
+}
+
+const handleStudentSelectorVisible = (visible) => {
+  if (!visible) return
+  if (!studentOptions.value.length) {
+    searchStudents('')
+  }
 }
 
 const loadOrders = async () => {
@@ -233,6 +284,7 @@ const submitAssign = async () => {
   }
   await assignStudentSales(assignForm)
   ElMessage.success('学员分销归属已设置')
+  await loadTree()
 }
 
 const openCreateSales = () => {
@@ -276,7 +328,7 @@ const exportOrders = () => {
 }
 
 const loadAll = async () => {
-  await Promise.all([loadSales(), loadConfig(), loadOrders()])
+  await Promise.all([loadSales(), loadConfig(), loadOrders(), loadTree()])
 }
 
 onMounted(loadAll)
