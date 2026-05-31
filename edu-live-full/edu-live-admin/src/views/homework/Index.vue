@@ -374,10 +374,42 @@ const submitGrade = async () => {
   await loadSubmissions()
 }
 
-const exportSubmissionsCsv = () => {
-  const rows = submissionList.value || []
+const exportSubmissionsCsv = async () => {
+  if (!currentHomeworkId.value) {
+    ElMessage.warning('请先选择作业')
+    return
+  }
+
+  const pageSize = 500
+  let pageNum = 1
+  let total = 0
+  const rows = []
+
+  while (true) {
+    const res = await getHomeworkSubmissions({
+      homeworkId: currentHomeworkId.value,
+      keyword: submissionSearch.keyword,
+      status: submissionSearch.status,
+      page: pageNum,
+      size: pageSize
+    })
+
+    const list = res.list || []
+    rows.push(...list)
+    total = Number(res.pagination?.total || rows.length)
+
+    if (!list.length || rows.length >= total) {
+      break
+    }
+
+    pageNum += 1
+    if (pageNum > 200) {
+      break
+    }
+  }
+
   if (!rows.length) {
-    ElMessage.warning('当前没有可导出的提交记录')
+    ElMessage.warning('当前筛选条件下没有可导出的提交记录')
     return
   }
 
@@ -404,11 +436,13 @@ const exportSubmissionsCsv = () => {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `homework_submissions_${currentHomeworkId.value || 'all'}.csv`
+  link.download = `homework_submissions_${currentHomeworkId.value}_all.csv`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+
+  ElMessage.success(`导出成功，共 ${rows.length} 条`) 
 }
 
 onMounted(async () => {
