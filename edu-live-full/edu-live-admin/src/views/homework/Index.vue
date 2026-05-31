@@ -29,7 +29,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="作业标题" min-width="200" />
         <el-table-column prop="courseName" label="关联课程" width="180" />
-        <el-table-column prop="deadline" label="截止时间" width="160" />
+        <el-table-column prop="deadline" label="截止时间" width="180" />
         <el-table-column prop="submitCount" label="提交/总人数" width="120">
           <template #default="{ row }">{{ row.submitCount }}/{{ row.totalCount }}</template>
         </el-table-column>
@@ -97,16 +97,17 @@
             placeholder="学员名/作答内容"
             clearable
             style="width: 220px"
-            @input="handleSubmissionFilter"
+            @keyup.enter="handleSubmissionFilter"
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="submissionSearch.status" placeholder="全部" clearable style="width: 140px" @change="handleSubmissionFilter">
+          <el-select v-model="submissionSearch.status" placeholder="全部" clearable style="width: 140px">
             <el-option label="已提交" value="submitted" />
             <el-option label="已批改" value="graded" />
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-button type="primary" @click="handleSubmissionFilter">查询</el-button>
           <el-button @click="handleSubmissionFilterReset">重置</el-button>
           <el-button type="success" @click="exportSubmissionsCsv">导出CSV</el-button>
         </el-form-item>
@@ -117,14 +118,15 @@
         <el-col :span="8"><el-tag type="success">已批改：{{ submissionSummary.graded }}</el-tag></el-col>
         <el-col :span="8"><el-tag type="warning">待批改：{{ submissionSummary.pending }}</el-tag></el-col>
       </el-row>
-      <el-table :data="filteredSubmissionList" border size="small">
+
+      <el-table :data="submissionList" border size="small">
         <el-table-column prop="studentName" label="学员" width="120" />
-        <el-table-column prop="submitTime" label="提交时间" width="160" />
-        <el-table-column prop="content" label="作答内容" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="submitTime" label="提交时间" width="170" />
+        <el-table-column prop="content" label="作答内容" min-width="220" show-overflow-tooltip />
         <el-table-column prop="score" label="得分" width="100">
           <template #default="{ row }">
             <span :style="{ color: row.score !== null ? '#67C23A' : '#999' }">
-              {{ row.score !== null ? row.score + '分' : '未批改' }}
+              {{ row.score !== null ? `${row.score}分` : '未批改' }}
             </span>
           </template>
         </el-table-column>
@@ -134,6 +136,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination
+        v-model:current-page="submissionPagination.page"
+        v-model:page-size="submissionPagination.size"
+        :total="submissionPagination.total"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        style="margin-top: 12px; justify-content: flex-end"
+        @size-change="handleSubmissionPageChange"
+        @current-change="handleSubmissionPageChange"
+      />
     </el-dialog>
 
     <el-dialog v-model="gradeVisible" title="批改作业" width="500px">
@@ -156,7 +169,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHomeworkList, createHomework, updateHomework, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
 import { getCourseList } from '@/api/course'
@@ -172,9 +185,9 @@ const pagination = reactive({ page: 1, size: 20, total: 0 })
 const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
-const submissionSummary = reactive({ total: 0, graded: 0, pending: 0 })
 const submissionSearch = reactive({ keyword: '', status: '' })
-const institutionOptions = ref([])
+const submissionPagination = reactive({ page: 1, size: 10, total: 0 })
+const submissionSummary = reactive({ total: 0, graded: 0, pending: 0 })
 
 const publishVisible = ref(false)
 const isEditHomework = ref(false)
@@ -187,53 +200,38 @@ const publishRules = {
   title: [{ required: true, message: '请输入作业标题', trigger: 'blur' }],
   content: [{ required: true, message: '请输入作业内容', trigger: 'blur' }]
 }
+
 const courseList = ref([])
+const institutionOptions = ref([])
 
 const gradeVisible = ref(false)
 const currentSubmission = ref(null)
 const gradeForm = reactive({ score: 0, comment: '' })
 
-const filteredSubmissionList = computed(() => {
-  const keyword = String(submissionSearch.keyword || '').trim().toLowerCase()
-  const status = submissionSearch.status
-
-  return (submissionList.value || []).filter((item) => {
-    const matchKeyword = !keyword
-      || String(item.studentName || '').toLowerCase().includes(keyword)
-      || String(item.content || '').toLowerCase().includes(keyword)
-    const matchStatus = !status || item.status === status
-    return matchKeyword && matchStatus
-  })
-})
-
-const refreshSubmissionSummary = () => {
-  const list = filteredSubmissionList.value || []
-  submissionSummary.total = list.length
-  submissionSummary.graded = list.filter(item => item.status === 'graded').length
-  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
-}
-
 const loadData = async () => {
   loading.value = true
-  const params = { page: pagination.page, size: pagination.size, ...searchForm }
-  if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
-    delete params.institutionId
-  }
-
-  const res = await getHomeworkList(params)
-  tableData.value = (res.list || []).map((item) => {
-    const row = { ...item }
-    const submitted = ['submitted', 'graded', 'returned'].includes(row.status)
-    return {
-      ...row,
-      courseName: row.course?.title || '-',
-      submitCount: submitted ? 1 : 0,
-      totalCount: 1,
-      status: row.deadline && new Date(row.deadline) < new Date() ? 'ended' : 'ongoing'
+  try {
+    const params = { page: pagination.page, size: pagination.size, ...searchForm }
+    if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
+      delete params.institutionId
     }
-  })
-  pagination.total = Number(res.pagination?.total || tableData.value.length || 0)
-  loading.value = false
+
+    const res = await getHomeworkList(params)
+    tableData.value = (res.list || []).map((item) => {
+      const row = { ...item }
+      const submitted = ['submitted', 'graded', 'returned'].includes(row.status)
+      return {
+        ...row,
+        courseName: row.course?.title || '-',
+        submitCount: submitted ? 1 : 0,
+        totalCount: 1,
+        status: row.deadline && new Date(row.deadline) < new Date() ? 'ended' : 'ongoing'
+      }
+    })
+    pagination.total = Number(res.pagination?.total || tableData.value.length || 0)
+  } finally {
+    loading.value = false
+  }
 }
 
 const loadInstitutionOptions = async () => {
@@ -249,6 +247,24 @@ const loadCourseOptions = async () => {
   }
   const res = await getCourseList(params)
   courseList.value = res.list || []
+}
+
+const loadSubmissions = async () => {
+  if (!currentHomeworkId.value) return
+
+  const res = await getHomeworkSubmissions({
+    homeworkId: currentHomeworkId.value,
+    keyword: submissionSearch.keyword,
+    status: submissionSearch.status,
+    page: submissionPagination.page,
+    size: submissionPagination.size
+  })
+
+  submissionList.value = res.list || []
+  submissionPagination.total = Number(res.pagination?.total || 0)
+  submissionSummary.total = Number(res.summary?.total || submissionPagination.total || 0)
+  submissionSummary.graded = Number(res.summary?.graded || 0)
+  submissionSummary.pending = Number(res.summary?.pending || 0)
 }
 
 const handleSearch = () => {
@@ -279,14 +295,65 @@ const handlePublish = () => {
   loadCourseOptions()
 }
 
+const handleEdit = async (row) => {
+  if (userStore.isPlatformAdmin && (searchForm.institutionId === null || searchForm.institutionId === undefined)) {
+    ElMessage.warning('请先选择机构后再编辑作业')
+    return
+  }
+
+  isEditHomework.value = true
+  editingHomeworkId.value = row.id
+  await loadCourseOptions()
+  Object.assign(publishForm, {
+    courseId: row.courseId,
+    title: row.title,
+    content: row.content || '',
+    deadline: row.deadline || ''
+  })
+  publishVisible.value = true
+}
+
+const submitPublish = async () => {
+  await publishFormRef.value.validate()
+  publishing.value = true
+  try {
+    if (isEditHomework.value && editingHomeworkId.value) {
+      await updateHomework(editingHomeworkId.value, publishForm)
+      ElMessage.success('作业更新成功')
+    } else {
+      await createHomework(publishForm)
+      ElMessage.success('作业布置成功')
+    }
+    publishVisible.value = false
+    await loadData()
+  } finally {
+    publishing.value = false
+  }
+}
+
 const handleSubmissions = async (row) => {
   currentHomeworkId.value = row.id
   submissionSearch.keyword = ''
   submissionSearch.status = ''
-  const res = await getHomeworkSubmissions({ homeworkId: row.id })
-  submissionList.value = res.list || []
-  refreshSubmissionSummary()
+  submissionPagination.page = 1
+  await loadSubmissions()
   submissionVisible.value = true
+}
+
+const handleSubmissionFilter = () => {
+  submissionPagination.page = 1
+  loadSubmissions()
+}
+
+const handleSubmissionFilterReset = () => {
+  submissionSearch.keyword = ''
+  submissionSearch.status = ''
+  submissionPagination.page = 1
+  loadSubmissions()
+}
+
+const handleSubmissionPageChange = () => {
+  loadSubmissions()
 }
 
 const handleGrade = (row) => {
@@ -304,23 +371,11 @@ const submitGrade = async () => {
   })
   ElMessage.success('批改成功')
   gradeVisible.value = false
-  const res = await getHomeworkSubmissions({ homeworkId: currentHomeworkId.value })
-  submissionList.value = res.list || []
-  refreshSubmissionSummary()
-}
-
-const handleSubmissionFilter = () => {
-  refreshSubmissionSummary()
-}
-
-const handleSubmissionFilterReset = () => {
-  submissionSearch.keyword = ''
-  submissionSearch.status = ''
-  refreshSubmissionSummary()
+  await loadSubmissions()
 }
 
 const exportSubmissionsCsv = () => {
-  const rows = filteredSubmissionList.value || []
+  const rows = submissionList.value || []
   if (!rows.length) {
     ElMessage.warning('当前没有可导出的提交记录')
     return
@@ -354,42 +409,6 @@ const exportSubmissionsCsv = () => {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
-}
-
-const submitPublish = async () => {
-  await publishFormRef.value.validate()
-  publishing.value = true
-  try {
-    if (isEditHomework.value && editingHomeworkId.value) {
-      await updateHomework(editingHomeworkId.value, publishForm)
-      ElMessage.success('作业更新成功')
-    } else {
-      await createHomework(publishForm)
-      ElMessage.success('作业布置成功')
-    }
-    publishVisible.value = false
-    await loadData()
-  } finally {
-    publishing.value = false
-  }
-}
-
-const handleEdit = async (row) => {
-  if (userStore.isPlatformAdmin && (searchForm.institutionId === null || searchForm.institutionId === undefined)) {
-    ElMessage.warning('请先选择机构后再编辑作业')
-    return
-  }
-
-  isEditHomework.value = true
-  editingHomeworkId.value = row.id
-  await loadCourseOptions()
-  Object.assign(publishForm, {
-    courseId: row.courseId,
-    title: row.title,
-    content: row.content || '',
-    deadline: row.deadline || ''
-  })
-  publishVisible.value = true
 }
 
 onMounted(async () => {

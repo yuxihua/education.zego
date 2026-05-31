@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const { Op } = require('sequelize');
 const { Homework, Course, Student } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
@@ -153,7 +154,7 @@ router.post('/create', auth, requireRole(['admin', 'superadmin', 'teacher']), as
  * 兼容旧前端：按作业查看提交
  */
 router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
-  const { homeworkId, keyword, status } = req.query;
+  const { homeworkId, keyword, status, page = 1, size = 10 } = req.query;
   if (!homeworkId) {
     return fail(res, '缺少 homeworkId', 400, 400);
   }
@@ -168,46 +169,82 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
     return fail(res, '无权查看该机构作业提交', 403, 403);
   }
 
-  const rows = await Homework.findAll({
-    where: {
-      courseId: source.courseId,
-      title: source.title
-    },
-    include: [
-      { model: Student, as: 'student', attributes: ['id', 'nickname', 'realName', 'phone'] }
-    ],
-    order: [['submitTime', 'DESC']]
-  });
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(size, 10) || 10;
 
-  let list = rows
-    .filter((row) => Number(row.studentId || 0) > 0)
-    .map((item) => {
-      const row = item.toJSON();
-      return {
-        id: row.id,
-        studentId: row.studentId,
-        studentName: row.student?.realName || row.student?.nickname || '-',
-        submitTime: row.submitTime,
-        content: row.content,
-        score: row.score,
-        comment: row.comment,
-        status: row.status
-      };
-    });
+  const baseWhere = {
+    courseId: source.courseId,
+    title: source.title,
+    studentId: { [Op.gt]: 0 }
+  };
 
   if (keyword) {
-    const text = String(keyword).trim().toLowerCase();
-    list = list.filter((item) => (
-      String(item.studentName || '').toLowerCase().includes(text)
-      || String(item.content || '').toLowerCase().includes(text)
-    ));
+    const text = String(keyword).trim();
+    baseWhere[Op.or] = [
+      { content: { [Op.like]: `%${text}%` } },
+      { '$student.nickname$': { [Op.like]: `%${text}%` } },
+      { '$student.realName$': { [Op.like]: `%${text}%` } },
+      { '$student.phone$': { [Op.like]: `%${text}%` } }
+    ];
   }
 
+  const where = { ...baseWhere };
   if (status) {
-    list = list.filter((item) => item.status === status);
+    where.status = status;
   }
 
-  success(res, { list });
+  const include = [
+    { model: Student, as: 'student', attributes: ['id', 'nickname', 'realName', 'phone'] }
+  ];
+
+  const { count, rows } = await Homework.findAndCountAll({
+    where,
+    include,
+    distinct: true,
+    subQuery: false,
+    order: [['submitTime', 'DESC'], ['createdAt', 'DESC']],
+    offset: (pageNum - 1) * pageSizeNum,
+    limit: pageSizeNum
+  });
+
+  const list = rows.map((item) => {
+    const row = item.toJSON();
+    return {
+      id: row.id,
+      studentId: row.studentId,
+      studentName: row.student?.realName || row.student?.nickname || '-',
+      submitTime: row.submitTime,
+      content: row.content,
+      score: row.score,
+      comment: row.comment,
+      status: row.status
+    };
+  });
+
+  const gradedCount = status === 'submitted'
+    ? 0
+    : (status === 'graded'
+      ? Number(count || 0)
+      : await Homework.count({
+          where: { ...baseWhere, status: 'graded' },
+          include,
+          distinct: true,
+          subQuery: false
+        }));
+
+  success(res, {
+    list,
+    pagination: {
+      total: Number(count || 0),
+      page: pageNum,
+      size: pageSizeNum
+    },
+    summary: {
+      total: Number(count || 0),
+      graded: Number(gradedCount || 0),
+      pending: Number(count || 0) - Number(gradedCount || 0)
+    }
+  });
 }));
 
 /**
