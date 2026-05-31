@@ -147,6 +147,7 @@
                       'week-lane',
                       {
                         'is-drop-target': dragHoverLaneKey === getLaneKey(day, lane),
+                        'is-recommended-target': laneRecommendMap[getLaneKey(day, lane)] && !laneConflictMap[getLaneKey(day, lane)],
                         'is-conflict-target': laneConflictMap[getLaneKey(day, lane)]
                       }
                     ]"
@@ -325,6 +326,8 @@ const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 const draggingSlot = ref(null)
 const dragHoverLaneKey = ref('')
 const laneConflictMap = reactive({})
+const laneRecommendMap = reactive({})
+const currentRecommendDayKey = ref('')
 const lanePrecheckTimer = ref(null)
 const quickUndoSeconds = ref(0)
 const quickUndoTimer = ref(null)
@@ -478,6 +481,18 @@ const clearLaneConflictMap = () => {
   })
 }
 
+const clearLaneRecommendMap = () => {
+  Object.keys(laneRecommendMap).forEach((k) => {
+    delete laneRecommendMap[k]
+  })
+  currentRecommendDayKey.value = ''
+}
+
+const clearLanePreviewMaps = () => {
+  clearLaneConflictMap()
+  clearLaneRecommendMap()
+}
+
 const clearLanePrecheckTimer = () => {
   if (lanePrecheckTimer.value) {
     clearTimeout(lanePrecheckTimer.value)
@@ -513,40 +528,56 @@ const buildDropPayload = (drag, targetDay, targetLane) => {
 const precheckLaneConflict = (day, lane) => {
   const drag = draggingSlot.value
   if (!drag || !day?.key || !lane) return
-  const laneKey = getLaneKey(day, lane)
 
   clearLanePrecheckTimer()
   lanePrecheckTimer.value = setTimeout(async () => {
-    const next = buildDropPayload(drag, day, lane)
-    if (!next || next.sameTime) {
-      laneConflictMap[laneKey] = null
-      return
+    if (currentRecommendDayKey.value !== day.key) {
+      clearLanePreviewMaps()
+      currentRecommendDayKey.value = day.key
     }
 
-    const payload = {
-      scheduleId: drag.id,
-      classroomId: drag.classroomId,
-      teacherId: drag.teacherId,
-      startTime: toApiDateTime(next.nextStart),
-      endTime: toApiDateTime(next.nextEnd)
-    }
-    if (userStore.isPlatformAdmin && currentInstitutionId.value) {
-      payload.institutionId = currentInstitutionId.value
-    }
+    const checks = await Promise.all((timeLanes.value || []).map(async (laneItem) => {
+      const laneKey = getLaneKey(day, laneItem)
+      const next = buildDropPayload(drag, day, laneItem)
+      if (!next || next.sameTime) {
+        return { laneKey, conflict: null, recommended: false }
+      }
 
-    try {
-      const res = await checkScheduleConflict(payload)
-      laneConflictMap[laneKey] = res?.hasConflict
-        ? (res.conflict || {
-          courseName: '未知课程',
-          classroomName: '-',
-          teacherName: '-',
-          timeRangeText: '-'
-        })
-        : null
-    } catch (err) {
-      laneConflictMap[laneKey] = null
-    }
+      const payload = {
+        scheduleId: drag.id,
+        classroomId: drag.classroomId,
+        teacherId: drag.teacherId,
+        startTime: toApiDateTime(next.nextStart),
+        endTime: toApiDateTime(next.nextEnd)
+      }
+      if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+        payload.institutionId = currentInstitutionId.value
+      }
+
+      try {
+        const res = await checkScheduleConflict(payload)
+        if (res?.hasConflict) {
+          return {
+            laneKey,
+            conflict: res.conflict || {
+              courseName: '未知课程',
+              classroomName: '-',
+              teacherName: '-',
+              timeRangeText: '-'
+            },
+            recommended: false
+          }
+        }
+        return { laneKey, conflict: null, recommended: true }
+      } catch (err) {
+        return { laneKey, conflict: null, recommended: false }
+      }
+    }))
+
+    checks.forEach((item) => {
+      laneConflictMap[item.laneKey] = item.conflict
+      laneRecommendMap[item.laneKey] = item.recommended
+    })
   }, 180)
 }
 
@@ -647,7 +678,7 @@ const moveWeek = async (step) => {
 }
 
 const handleSlotDragStart = (item, day) => {
-  clearLaneConflictMap()
+  clearLanePreviewMaps()
   draggingSlot.value = {
     id: item.id,
     dayKey: day.key,
@@ -661,7 +692,7 @@ const handleSlotDragStart = (item, day) => {
 const handleSlotDragEnd = () => {
   draggingSlot.value = null
   dragHoverLaneKey.value = ''
-  clearLaneConflictMap()
+  clearLanePreviewMaps()
 }
 
 const handleLaneDragEnter = (day, lane) => {
@@ -693,14 +724,14 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   if (!next) {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
-    clearLaneConflictMap()
+    clearLanePreviewMaps()
     return
   }
 
   if (next.sameTime) {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
-    clearLaneConflictMap()
+    clearLanePreviewMaps()
     return
   }
 
@@ -760,7 +791,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   } finally {
     draggingSlot.value = null
     dragHoverLaneKey.value = ''
-    clearLaneConflictMap()
+    clearLanePreviewMaps()
   }
 }
 
@@ -998,6 +1029,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearLanePrecheckTimer()
+  clearLaneRecommendMap()
   dismissQuickUndo()
 })
 </script>
@@ -1151,6 +1183,11 @@ onBeforeUnmount(() => {
 .week-lane.is-drop-target {
   border-color: #409eff;
   background: #f0f9ff;
+}
+
+.week-lane.is-recommended-target {
+  border-color: #52c41a;
+  background: #f6ffed;
 }
 
 .week-lane.is-conflict-target {
