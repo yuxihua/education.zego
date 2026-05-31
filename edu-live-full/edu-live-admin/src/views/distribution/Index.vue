@@ -430,11 +430,15 @@ const exportOrders = () => {
       ElMessage.error('导出失败')
       return
     }
+    const disposition = res.headers.get('Content-Disposition') || ''
+    const match = disposition.match(/filename="?([^";]+)"?/i)
+    const filename = match?.[1] || 'distribution_orders.csv'
+
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'distribution_orders.csv'
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

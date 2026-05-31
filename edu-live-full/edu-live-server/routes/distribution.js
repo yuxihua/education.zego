@@ -681,6 +681,13 @@ router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (
       keyword
     });
 
+  const finalMonthKey = monthKey || (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const sourceTag = lockedSettlement ? 'locked' : 'realtime';
+  const filename = `distribution_orders_${finalMonthKey}_${sourceTag}.csv`;
+
   const escapeCell = (value) => {
     const text = String(value ?? '');
     if (/[",\n]/.test(text)) {
@@ -706,7 +713,7 @@ router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (
   const csv = [header.map(escapeCell).join(','), ...lines].join('\n');
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="distribution_orders.csv"');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(`\uFEFF${csv}`);
 }));
 
