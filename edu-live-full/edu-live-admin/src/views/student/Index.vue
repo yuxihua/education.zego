@@ -103,6 +103,9 @@
         <el-form-item label="手机号">
           <el-input v-model="createForm.phone" />
         </el-form-item>
+        <el-form-item label="登录密码">
+          <el-input v-model="createForm.password" type="password" show-password placeholder="至少6位" />
+        </el-form-item>
         <el-form-item label="邮箱">
           <el-input v-model="createForm.email" />
         </el-form-item>
@@ -174,6 +177,7 @@ const createForm = reactive({
   nickname: '',
   realName: '',
   phone: '',
+  password: '',
   email: '',
   region: '',
   salesUserId: null,
@@ -230,6 +234,7 @@ const resetCreateForm = () => {
     nickname: '',
     realName: '',
     phone: '',
+    password: '',
     email: '',
     region: '',
     salesUserId: null,
@@ -248,6 +253,16 @@ const openCreateDialog = async () => {
 }
 
 const handleCreateStudent = async () => {
+  if (!createForm.phone) {
+    ElMessage.warning('请填写学员手机号')
+    return
+  }
+
+  if (!createForm.password || String(createForm.password).trim().length < 6) {
+    ElMessage.warning('请填写至少6位学员登录密码')
+    return
+  }
+
   if ((createForm.salesUserId && !createForm.salesLevel) || (!createForm.salesUserId && createForm.salesLevel)) {
     ElMessage.warning('设置分销时需要同时选择归属销售和分销层级')
     return

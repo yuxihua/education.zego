@@ -3,6 +3,7 @@
  */
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
+const bcrypt = require('bcryptjs');
 
 const Student = sequelize.define('Student', {
   id: {
@@ -46,6 +47,12 @@ const Student = sequelize.define('Student', {
     allowNull: true,
     unique: true,
     comment: '手机号'
+  },
+  // 密码
+  password: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: '学员登录密码（加密）'
   },
   // 邮箱
   email: {
@@ -109,7 +116,24 @@ const Student = sequelize.define('Student', {
   }
 }, {
   tableName: 'students',
-  timestamps: true
+  timestamps: true,
+  hooks: {
+    beforeCreate: async (student) => {
+      if (student.password) {
+        student.password = await bcrypt.hash(student.password, 10);
+      }
+    },
+    beforeUpdate: async (student) => {
+      if (student.changed('password') && student.password) {
+        student.password = await bcrypt.hash(student.password, 10);
+      }
+    }
+  }
 });
+
+Student.prototype.validatePassword = async function(password) {
+  if (!this.password) return false;
+  return bcrypt.compare(password, this.password);
+};
 
 module.exports = Student;

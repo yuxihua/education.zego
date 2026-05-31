@@ -8,8 +8,99 @@ const { Order, Student, Course } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
+const { generateOrderNo } = require('../utils/pay');
 
 const ADMIN_ROLES = ['superadmin', 'admin', 'assistant', 'teacher'];
+const ORDER_CREATE_ROLES = ['superadmin', 'admin', 'assistant'];
+
+/**
+ * @POST /api/order/create
+ * 后台手工创建学员订单
+ */
+router.post('/create', auth, requireRole(ORDER_CREATE_ROLES), asyncHandler(async (req, res) => {
+  const {
+    studentId,
+    courseId,
+    amount,
+    payType = 'free',
+    status = 'paid',
+    remark,
+    institutionId
+  } = req.body;
+
+  const studentIdNum = Number(studentId || 0);
+  const courseIdNum = Number(courseId || 0);
+  if (!studentIdNum || !courseIdNum) {
+    return fail(res, 'studentId 和 courseId 必填', 400, 400);
+  }
+
+  if (!['wxpay', 'alipay', 'free'].includes(payType)) {
+    return fail(res, 'payType 仅支持 wxpay/alipay/free', 400, 400);
+  }
+
+  if (!['pending', 'paid'].includes(status)) {
+    return fail(res, 'status 仅支持 pending/paid', 400, 400);
+  }
+
+  const student = await Student.findByPk(studentIdNum);
+  if (!student) return fail(res, '学员不存在', 404, 404);
+
+  const course = await Course.findByPk(courseIdNum);
+  if (!course) return fail(res, '课程不存在', 404, 404);
+
+  const operatorInstitutionId = req.user.role === 'superadmin'
+    ? Number(institutionId || course.institutionId || student.institutionId || 0)
+    : Number(req.user.institutionId || 0);
+
+  if (req.user.role !== 'superadmin') {
+    if (student.institutionId && student.institutionId !== operatorInstitutionId) {
+      return fail(res, '学员不属于当前机构', 403, 403);
+    }
+    if (course.institutionId && course.institutionId !== operatorInstitutionId) {
+      return fail(res, '课程不属于当前机构', 403, 403);
+    }
+  }
+
+  const finalInstitutionId = Number(course.institutionId || student.institutionId || operatorInstitutionId || 0);
+
+  const paidExist = await Order.findOne({
+    where: {
+      studentId: studentIdNum,
+      courseId: courseIdNum,
+      status: 'paid'
+    }
+  });
+  if (paidExist) {
+    return fail(res, '该学员已存在本课程已支付订单', 409, 409);
+  }
+
+  const amountNum = Number(amount);
+  const finalAmount = Number.isFinite(amountNum) && amountNum >= 0 ? amountNum : Number(course.price || 0);
+  const orderNo = generateOrderNo('M');
+  const now = new Date();
+
+  const order = await Order.create({
+    orderNo,
+    studentId: studentIdNum,
+    courseId: courseIdNum,
+    institutionId: finalInstitutionId,
+    amount: finalAmount,
+    payType,
+    status,
+    payTime: status === 'paid' ? now : null,
+    remark: remark || null
+  });
+
+  if (!student.institutionId && finalInstitutionId) {
+    await student.update({ institutionId: finalInstitutionId });
+  }
+
+  if (status === 'paid') {
+    await Course.increment('studentCount', { where: { id: courseIdNum } });
+  }
+
+  success(res, order, '订单创建成功');
+}));
 
 /**
  * @GET /api/order/list

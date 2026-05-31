@@ -6,6 +6,9 @@
         <el-form-item label="手机号">
           <el-input v-model="form.phone" placeholder="请输入手机号" />
         </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="form.password" type="password" show-password placeholder="请输入登录密码" />
+        </el-form-item>
         <el-form-item label="昵称">
           <el-input v-model="form.nickname" placeholder="首次登录可填写昵称" />
         </el-form-item>
@@ -67,6 +70,7 @@ const institutionId = computed(() => getInstitutionId())
 
 const form = reactive({
   phone: '',
+  password: '',
   nickname: '',
   openid: '',
   institutionId: null
@@ -162,6 +166,11 @@ const createWxQrLogin = async (silent = false) => {
 const handleLogin = async () => {
   if (!form.phone && !form.openid) {
     ElMessage.warning('手机号或OpenID至少填写一个')
+    return
+  }
+
+  if (form.phone && !form.password) {
+    ElMessage.warning('请输入登录密码')
     return
   }
 

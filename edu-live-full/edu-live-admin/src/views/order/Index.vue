@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span>订单财务</span>
-          <el-button type="success" @click="handleExport">导出报表</el-button>
+          <div class="header-actions">
+            <el-button type="primary" @click="openCreateOrderDialog">新增学员订单</el-button>
+            <el-button type="success" @click="handleExport">导出报表</el-button>
+          </div>
         </div>
       </template>
 
@@ -64,7 +67,7 @@
           <template #default="{ row }"><strong style="color: #f56c6c">¥{{ row.amount }}</strong></template>
         </el-table-column>
         <el-table-column prop="payType" label="支付方式" width="120">
-          <template #default="{ row }">{{ { wxpay: '微信支付', alipay: '支付宝' }[row.payType] }}</template>
+          <template #default="{ row }">{{ { wxpay: '微信支付', alipay: '支付宝', free: '免费' }[row.payType] || row.payType }}</template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
@@ -92,14 +95,67 @@
         @current-change="handlePageChange"
       />
     </el-card>
+
+    <el-dialog v-model="createDialogVisible" title="新增学员订单" width="640px">
+      <el-form :model="createForm" label-width="110px">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="createForm.institutionId" :min="0" controls-position="right" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="学员">
+          <el-select
+            v-model="createForm.studentId"
+            filterable
+            remote
+            reserve-keyword
+            clearable
+            placeholder="输入姓名或手机号搜索"
+            style="width: 100%"
+            :remote-method="searchStudents"
+            @visible-change="onStudentSelectVisible"
+          >
+            <el-option v-for="item in studentOptions" :key="item.id" :label="item.label" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="课程">
+          <el-select v-model="createForm.courseId" filterable clearable placeholder="请选择课程" style="width: 100%">
+            <el-option v-for="item in courseOptions" :key="item.id" :label="item.title" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="createForm.amount" :min="0" :precision="2" :step="10" controls-position="right" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="支付方式">
+          <el-select v-model="createForm.payType" style="width: 100%">
+            <el-option label="免费" value="free" />
+            <el-option label="微信支付" value="wxpay" />
+            <el-option label="支付宝" value="alipay" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="订单状态">
+          <el-select v-model="createForm.status" style="width: 100%">
+            <el-option label="已支付" value="paid" />
+            <el-option label="待支付" value="pending" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="createForm.remark" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="createLoading" @click="handleCreateOrder">创建订单</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getOrderList, getOrderStats, refundOrder } from '@/api/order'
+import { getOrderList, getOrderStats, refundOrder, createOrder } from '@/api/order'
 import { useUserStore } from '@/stores/user'
+import { getCourseList } from '@/api/course'
+import { getStudentList } from '@/api/student'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -107,6 +163,98 @@ const tableData = ref([])
 const stats = reactive({ todayCount: 0, todayAmount: 0, monthCount: 0, monthAmount: 0 })
 const searchForm = reactive({ keyword: '', status: '', payType: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
+const createDialogVisible = ref(false)
+const createLoading = ref(false)
+const courseOptions = ref([])
+const studentOptions = ref([])
+const createForm = reactive({
+  institutionId: null,
+  studentId: null,
+  courseId: null,
+  amount: 0,
+  payType: 'free',
+  status: 'paid',
+  remark: ''
+})
+
+const resetCreateForm = () => {
+  Object.assign(createForm, {
+    institutionId: userStore.isPlatformAdmin ? (searchForm.institutionId ?? null) : null,
+    studentId: null,
+    courseId: null,
+    amount: 0,
+    payType: 'free',
+    status: 'paid',
+    remark: ''
+  })
+}
+
+const loadCourseOptions = async () => {
+  const params = { page: 1, size: 1000 }
+  if (userStore.isPlatformAdmin && createForm.institutionId !== null && createForm.institutionId !== undefined) {
+    params.institutionId = createForm.institutionId
+  }
+  const res = await getCourseList(params)
+  courseOptions.value = res.list || []
+}
+
+const searchStudents = async (keyword = '') => {
+  const params = { page: 1, size: 50 }
+  if (userStore.isPlatformAdmin && createForm.institutionId !== null && createForm.institutionId !== undefined) {
+    params.institutionId = createForm.institutionId
+  }
+  if (/^\d{6,}$/.test(String(keyword || '').trim())) {
+    params.phone = String(keyword || '').trim()
+  } else if (keyword) {
+    params.nickname = String(keyword || '').trim()
+  }
+  const res = await getStudentList(params)
+  studentOptions.value = (res.list || []).map((item) => ({
+    id: item.id,
+    label: `${item.nickname || item.realName || '未命名'}（${item.phone || '无手机号'}）`
+  }))
+}
+
+const onStudentSelectVisible = (visible) => {
+  if (!visible) return
+  if (!studentOptions.value.length) searchStudents('')
+}
+
+const openCreateOrderDialog = async () => {
+  resetCreateForm()
+  studentOptions.value = []
+  await loadCourseOptions()
+  createDialogVisible.value = true
+}
+
+const handleCreateOrder = async () => {
+  if (!createForm.studentId || !createForm.courseId) {
+    ElMessage.warning('请选择学员和课程')
+    return
+  }
+
+  const payload = {
+    studentId: createForm.studentId,
+    courseId: createForm.courseId,
+    amount: createForm.amount,
+    payType: createForm.payType,
+    status: createForm.status,
+    remark: createForm.remark
+  }
+  if (userStore.isPlatformAdmin && createForm.institutionId !== null && createForm.institutionId !== undefined) {
+    payload.institutionId = createForm.institutionId
+  }
+
+  createLoading.value = true
+  try {
+    await createOrder(payload)
+    ElMessage.success('订单创建成功')
+    createDialogVisible.value = false
+    await loadData()
+  } finally {
+    createLoading.value = false
+  }
+}
 
 const loadData = async () => {
   loading.value = true
@@ -165,3 +313,11 @@ const handleExport = () => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+</style>

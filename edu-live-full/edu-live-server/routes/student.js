@@ -207,7 +207,7 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
  * 学员登录（手机号/微信标识）
  */
 router.post('/login', asyncHandler(async (req, res) => {
-  const { phone, nickname, openid, unionid, avatar, source = 'web', institutionId } = req.body;
+  const { phone, password, nickname, openid, unionid, avatar, source = 'web', institutionId } = req.body;
   const institutionIdNum = institutionId ? Number(institutionId) : 0;
 
   if (!phone && !openid) {
@@ -216,40 +216,54 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   let student = null;
 
-  if (openid) {
-    student = await Student.findOne({ where: { openid } });
-  }
+  if (phone) {
+    if (!password) {
+      return fail(res, '请输入密码', 400, 400);
+    }
 
-  if (!student && phone) {
     student = await Student.findOne({ where: { phone } });
-  }
+    if (!student) {
+      return fail(res, '学员账号不存在，请联系机构创建', 404, 404);
+    }
 
-  if (!student) {
-    const randomSuffix = Date.now().toString().slice(-4);
-    student = await Student.create({
-      phone: phone || null,
-      openid: openid || null,
-      unionid: unionid || null,
-      nickname: nickname || `学员${randomSuffix}`,
-      avatar: avatar || null,
-      institutionId: institutionIdNum,
-      source,
-      status: 1
-    });
-  } else {
+    if (!student.password) {
+      return fail(res, '该学员账号未设置密码，请联系机构管理员重置密码', 400, 400);
+    }
+
     if (institutionIdNum && student.institutionId && student.institutionId !== institutionIdNum) {
       return fail(res, '该账号不属于当前机构', 403, 403);
     }
 
+    const isValid = await student.validatePassword(password);
+    if (!isValid) {
+      return fail(res, '手机号或密码错误', 401, 401);
+    }
+
     const patch = {};
-    if (phone && !student.phone) patch.phone = phone;
-    if (openid && !student.openid) patch.openid = openid;
-    if (unionid && !student.unionid) patch.unionid = unionid;
     if (nickname) patch.nickname = nickname;
     if (avatar) patch.avatar = avatar;
+    if (openid && !student.openid) patch.openid = openid;
+    if (unionid && !student.unionid) patch.unionid = unionid;
     if (!student.institutionId && institutionIdNum) patch.institutionId = institutionIdNum;
-    if (Object.keys(patch).length) {
-      await student.update(patch);
+    if (Object.keys(patch).length) await student.update(patch);
+  } else {
+    student = await Student.findOne({ where: { openid } });
+    if (!student && unionid) {
+      student = await Student.findOne({ where: { unionid } });
+    }
+
+    if (!student) {
+      const randomSuffix = Date.now().toString().slice(-4);
+      student = await Student.create({
+        phone: null,
+        openid: openid || null,
+        unionid: unionid || null,
+        nickname: nickname || `学员${randomSuffix}`,
+        avatar: avatar || null,
+        institutionId: institutionIdNum,
+        source,
+        status: 1
+      });
     }
   }
 
@@ -357,6 +371,7 @@ router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant']), 
     nickname,
     realName,
     phone,
+    password,
     email,
     region,
     source = 'admin',
@@ -365,8 +380,12 @@ router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant']), 
     salesLevel
   } = req.body;
 
-  if (!nickname && !realName && !phone) {
-    return fail(res, '昵称、姓名、手机号至少填写一个', 400, 400);
+  if (!phone) {
+    return fail(res, '学员手机号必填（用于密码登录）', 400, 400);
+  }
+
+  if (!password || String(password).trim().length < 6) {
+    return fail(res, '学员登录密码至少6位', 400, 400);
   }
 
   if (phone) {
@@ -417,6 +436,7 @@ router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant']), 
     nickname: nickname || realName || '新学员',
     realName: realName || null,
     phone: phone || null,
+    password: String(password).trim(),
     email: email || null,
     region: region || null,
     source,
