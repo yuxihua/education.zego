@@ -111,6 +111,9 @@
       <div class="tree-link-state" v-if="treeLinkedFilterText">
         <el-tag type="info">当前联动筛选：{{ treeLinkedFilterText }}</el-tag>
       </div>
+      <div class="tree-link-state" v-if="treeStats.orderCount || treeStats.commissionAmount">
+        <el-tag type="success">树图统计：月订单 {{ treeStats.orderCount }} 单，月提成 ¥{{ treeStats.commissionAmount }}</el-tag>
+      </div>
 
       <el-tree
         :data="treeData"
@@ -210,6 +213,7 @@ const treeData = ref([])
 const treeProps = { children: 'children', label: 'label' }
 const studentOptions = ref([])
 const treeLinkedFilterText = ref('')
+const treeStats = reactive({ orderCount: 0, commissionAmount: 0 })
 
 const assignForm = reactive({ studentId: null, salesUserId: null, salesLevel: 1 })
 
@@ -228,8 +232,12 @@ const loadConfig = async () => {
 
 const loadTree = async () => {
   if (isSalesRole.value) return
-  const res = await getDistributionTree({})
+  const res = await getDistributionTree({ month: filters.month })
   treeData.value = res.tree || []
+  Object.assign(treeStats, {
+    orderCount: Number(res.stats?.orderCount || 0),
+    commissionAmount: Number(res.stats?.commissionAmount || 0)
+  })
 }
 
 const searchStudents = async (keyword = '') => {
@@ -313,6 +321,7 @@ const clearTreeLinkFilters = () => {
 const handleSearch = () => {
   pagination.page = 1
   loadOrders()
+  loadTree()
 }
 
 const handleReset = () => {
@@ -322,6 +331,7 @@ const handleReset = () => {
   filters.keyword = ''
   pagination.page = 1
   loadOrders()
+  loadTree()
 }
 
 const saveConfig = async () => {

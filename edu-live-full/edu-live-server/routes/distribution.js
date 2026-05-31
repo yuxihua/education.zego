@@ -236,6 +236,7 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
   const institutionId = req.user.role === 'superadmin'
     ? Number(req.query.institutionId || 0)
     : getInstitutionId(req);
+  const { month } = req.query;
 
   const salesWhere = {
     role: 'sales',
@@ -271,10 +272,33 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
 
   const salesNameMap = Object.fromEntries(salesList.map((s) => [s.id, s.nickname || s.username]));
   const levelMap = {
-    1: { id: 'level-1', nodeType: 'level', salesLevel: 1, label: '一级分销', children: [] },
-    2: { id: 'level-2', nodeType: 'level', salesLevel: 2, label: '二级分销', children: [] },
-    3: { id: 'level-3', nodeType: 'level', salesLevel: 3, label: '三级分销', children: [] }
+    1: { id: 'level-1', nodeType: 'level', salesLevel: 1, label: '一级分销', children: [], orderCount: 0, commissionAmount: 0 },
+    2: { id: 'level-2', nodeType: 'level', salesLevel: 2, label: '二级分销', children: [], orderCount: 0, commissionAmount: 0 },
+    3: { id: 'level-3', nodeType: 'level', salesLevel: 3, label: '三级分销', children: [], orderCount: 0, commissionAmount: 0 }
   };
+
+  const rows = await buildCommissionRows({
+    institutionId,
+    salesUserId: req.user.role === 'sales' ? req.user.id : null,
+    salesLevel: null,
+    month,
+    keyword: ''
+  });
+  const salesMetricsMap = {};
+  rows.forEach((row) => {
+    const sid = Number(row.salesUserId || 0);
+    const level = Number(row.salesLevel || 0);
+    if (!sid || ![1, 2, 3].includes(level)) return;
+    const key = `${level}_${sid}`;
+    if (!salesMetricsMap[key]) {
+      salesMetricsMap[key] = { orderCount: 0, commissionAmount: 0 };
+    }
+    salesMetricsMap[key].orderCount += 1;
+    salesMetricsMap[key].commissionAmount += Number(row.commissionAmount || 0);
+
+    levelMap[level].orderCount += 1;
+    levelMap[level].commissionAmount += Number(row.commissionAmount || 0);
+  });
 
   const salesNodeMap = {};
   for (const stu of students) {
@@ -284,11 +308,14 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
 
     const key = `${level}_${sid}`;
     if (!salesNodeMap[key]) {
+      const metrics = salesMetricsMap[key] || { orderCount: 0, commissionAmount: 0 };
       salesNodeMap[key] = {
         id: `sales-${level}-${sid}`,
         nodeType: 'sales',
         salesLevel: level,
         salesUserId: sid,
+        orderCount: metrics.orderCount,
+        commissionAmount: Number(metrics.commissionAmount.toFixed(2)),
         label: `${salesNameMap[sid] || `销售${sid}`}`,
         children: []
       };
@@ -308,11 +335,12 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
 
   for (const level of [1, 2, 3]) {
     levelMap[level].children.forEach((node) => {
-      node.label = `${node.label}（${node.children.length}人）`;
+      node.label = `${node.label}（学员${node.children.length}人，月订单${node.orderCount || 0}单，月提成¥${Number(node.commissionAmount || 0).toFixed(2)}）`;
     });
     const salesCount = levelMap[level].children.length;
     const studentCount = levelMap[level].children.reduce((sum, node) => sum + node.children.length, 0);
-    levelMap[level].label = `${levelMap[level].label}（销售${salesCount}人，学员${studentCount}人）`;
+    levelMap[level].label = `${levelMap[level].label}（销售${salesCount}人，学员${studentCount}人，月订单${levelMap[level].orderCount}单，月提成¥${Number(levelMap[level].commissionAmount || 0).toFixed(2)}）`;
+    levelMap[level].commissionAmount = Number(levelMap[level].commissionAmount.toFixed(2));
   }
 
   const tree = [levelMap[1], levelMap[2], levelMap[3]];
@@ -320,7 +348,9 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     tree,
     stats: {
       salesCount: salesList.length,
-      studentCount: students.length
+      studentCount: students.length,
+      orderCount: rows.length,
+      commissionAmount: Number(rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0).toFixed(2))
     }
   });
 }));
