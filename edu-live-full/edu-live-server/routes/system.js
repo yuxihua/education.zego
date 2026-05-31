@@ -152,7 +152,17 @@ router.post('/accounts/:id/reset-password', auth, requireRole(ACCOUNT_ROLES), [
 }));
 
 router.get('/operation-logs', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {
-  const { keyword, method, path, success: successFlag, page = 1, size = 20, institutionId } = req.query;
+  const {
+    keyword,
+    method,
+    path,
+    success: successFlag,
+    startTime,
+    endTime,
+    page = 1,
+    size = 20,
+    institutionId
+  } = req.query;
   const where = {};
 
   if (req.user.role !== 'superadmin') {
@@ -165,6 +175,11 @@ router.get('/operation-logs', auth, requireRole(ACCOUNT_ROLES), asyncHandler(asy
   if (method) where.method = method;
   if (path) where.path = { [Op.like]: `%${path}%` };
   if (successFlag !== undefined && successFlag !== '') where.success = Number(successFlag) === 1;
+  if (startTime || endTime) {
+    where.createdAt = {};
+    if (startTime) where.createdAt[Op.gte] = new Date(startTime);
+    if (endTime) where.createdAt[Op.lte] = new Date(endTime);
+  }
 
   if (keyword) {
     where[Op.or] = [
@@ -190,6 +205,82 @@ router.get('/operation-logs', auth, requireRole(ACCOUNT_ROLES), asyncHandler(asy
     page: pageNum,
     size: sizeNum
   });
+}));
+
+router.get('/operation-logs/export', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {
+  const {
+    keyword,
+    method,
+    path,
+    success: successFlag,
+    startTime,
+    endTime,
+    institutionId
+  } = req.query;
+  const where = {};
+
+  if (req.user.role !== 'superadmin') {
+    where.institutionId = getScopeInstitutionId(req);
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) where.institutionId = institutionIdNum;
+  }
+
+  if (method) where.method = method;
+  if (path) where.path = { [Op.like]: `%${path}%` };
+  if (successFlag !== undefined && successFlag !== '') where.success = Number(successFlag) === 1;
+  if (startTime || endTime) {
+    where.createdAt = {};
+    if (startTime) where.createdAt[Op.gte] = new Date(startTime);
+    if (endTime) where.createdAt[Op.lte] = new Date(endTime);
+  }
+
+  if (keyword) {
+    where[Op.or] = [
+      { username: { [Op.like]: `%${keyword}%` } },
+      { role: { [Op.like]: `%${keyword}%` } },
+      { path: { [Op.like]: `%${keyword}%` } },
+      { ip: { [Op.like]: `%${keyword}%` } }
+    ];
+  }
+
+  const rows = await OperationLog.findAll({
+    where,
+    order: [['id', 'DESC']],
+    limit: 5000
+  });
+
+  const escapeCell = (value) => {
+    const text = String(value ?? '');
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const header = ['ID', '时间', '操作人', '角色', '机构ID', '方法', '路径', 'IP', '状态码', '结果', '消息', '请求参数'];
+  const lines = rows.map((row) => [
+    row.id,
+    row.createdAt,
+    row.username || '-',
+    row.role || '-',
+    row.institutionId,
+    row.method,
+    row.path,
+    row.ip || '-',
+    row.statusCode,
+    row.success ? '成功' : '失败',
+    row.message || '-',
+    JSON.stringify(row.requestBody || {})
+  ].map(escapeCell).join(','));
+
+  const csv = [header.map(escapeCell).join(','), ...lines].join('\n');
+  const today = new Date();
+  const dateTag = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="operation_logs_${dateTag}.csv"`);
+  res.send(`\uFEFF${csv}`);
 }));
 
 module.exports = router;

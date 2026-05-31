@@ -6,3 +6,4 @@ export const updateSystemAccountStatus = (id, data) => request.put(`/system/acco
 export const resetSystemAccountPassword = (id, data) => request.post(`/system/accounts/${id}/reset-password`, data)
 
 export const getOperationLogs = (params) => request.get('/system/operation-logs', { params })
+export const exportOperationLogs = (params) => request.get('/system/operation-logs/export', { params, responseType: 'blob' })

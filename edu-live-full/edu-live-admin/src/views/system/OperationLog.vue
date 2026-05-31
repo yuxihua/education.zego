@@ -23,6 +23,16 @@
         <el-form-item label="路径">
           <el-input v-model="searchForm.path" placeholder="如 /api/system/accounts" clearable />
         </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="searchForm.timeRange"
+            type="datetimerange"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+          />
+        </el-form-item>
         <el-form-item label="结果">
           <el-select v-model="searchForm.success" placeholder="全部" clearable style="width: 120px">
             <el-option label="成功" :value="1" />
@@ -35,6 +45,7 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
+          <el-button type="success" @click="handleExport">导出CSV</el-button>
         </el-form-item>
       </el-form>
 
@@ -81,6 +92,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getOperationLogs } from '@/api/system'
 
@@ -92,6 +104,7 @@ const searchForm = reactive({
   keyword: '',
   method: '',
   path: '',
+  timeRange: [],
   success: null,
   institutionId: null
 })
@@ -110,6 +123,11 @@ const loadData = async () => {
     if (!params.method) delete params.method
     if (!params.path) delete params.path
     if (params.success === null || params.success === undefined) delete params.success
+    if (Array.isArray(params.timeRange) && params.timeRange.length === 2) {
+      params.startTime = params.timeRange[0]
+      params.endTime = params.timeRange[1]
+    }
+    delete params.timeRange
     if (!userStore.isPlatformAdmin) delete params.institutionId
     if (params.institutionId === null || params.institutionId === undefined) delete params.institutionId
 
@@ -130,10 +148,53 @@ const handleReset = async () => {
   searchForm.keyword = ''
   searchForm.method = ''
   searchForm.path = ''
+  searchForm.timeRange = []
   searchForm.success = null
   searchForm.institutionId = null
   pagination.page = 1
   await loadData()
+}
+
+const handleExport = async () => {
+  try {
+    const params = new URLSearchParams()
+    if (searchForm.keyword) params.set('keyword', searchForm.keyword)
+    if (searchForm.method) params.set('method', searchForm.method)
+    if (searchForm.path) params.set('path', searchForm.path)
+    if (searchForm.success !== null && searchForm.success !== undefined) params.set('success', String(searchForm.success))
+    if (Array.isArray(searchForm.timeRange) && searchForm.timeRange.length === 2) {
+      params.set('startTime', searchForm.timeRange[0])
+      params.set('endTime', searchForm.timeRange[1])
+    }
+    if (userStore.isPlatformAdmin && searchForm.institutionId !== null && searchForm.institutionId !== undefined) {
+      params.set('institutionId', String(searchForm.institutionId))
+    }
+
+    const token = localStorage.getItem('token') || ''
+    const res = await fetch(`/api/system/operation-logs/export?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!res.ok) {
+      throw new Error('导出失败')
+    }
+
+    const disposition = res.headers.get('Content-Disposition') || ''
+    const match = disposition.match(/filename="?([^";]+)"?/i)
+    const filename = match?.[1] || 'operation_logs.csv'
+
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (err) {
+    ElMessage.error(err?.message || '导出失败')
+  }
 }
 
 const showPayload = (row) => {
