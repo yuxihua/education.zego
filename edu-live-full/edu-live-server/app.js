@@ -90,6 +90,17 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// 反向代理场景（Nginx/SLB）下启用代理信任，确保 req.ip 和限流逻辑正确。
+const trustProxy = process.env.TRUST_PROXY;
+if (trustProxy === 'true') {
+  app.set('trust proxy', true);
+} else if (trustProxy && !Number.isNaN(Number(trustProxy))) {
+  app.set('trust proxy', Number(trustProxy));
+} else {
+  // 默认按单层代理处理，适配常见 Nginx -> Node 部署。
+  app.set('trust proxy', 1);
+}
+
 // 安全中间件
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
