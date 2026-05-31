@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const { Op } = require('sequelize');
 const { LiveRoom, Course, PPTFile, User } = require('../models');
 const { success, fail, page } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
@@ -11,11 +12,28 @@ const { auth, requireRole } = require('../middleware/auth');
 const { liveLimiter } = require('../middleware/ratelimit');
 const redis = require('../config/redis');
 
+function getOperatorInstitutionId(req) {
+  return req.user?.institutionId || 0;
+}
+
+function checkCourseInstitutionAccess(req, res, course) {
+  if (req.user?.role === 'superadmin') return true;
+  if (!course) {
+    fail(res, '关联课程不存在', 404, 404);
+    return false;
+  }
+  if (course.institutionId !== getOperatorInstitutionId(req)) {
+    fail(res, '无权访问该机构直播数据', 403, 403);
+    return false;
+  }
+  return true;
+}
+
 /**
  * @GET /api/live/rooms
  * 获取直播间列表
  */
-router.get('/rooms', asyncHandler(async (req, res) => {
+router.get('/rooms', auth, asyncHandler(async (req, res) => {
   const { 
     page = 1, 
     pageSize = 10, 
@@ -28,14 +46,22 @@ router.get('/rooms', asyncHandler(async (req, res) => {
   if (status) where.status = status;
   if (courseId) where.courseId = courseId;
   if (keyword) {
-    where.title = { [require('sequelize').Op.like]: `%${keyword}%` };
+    where.title = { [Op.like]: `%${keyword}%` };
+  }
+
+  const courseInclude = {
+    model: Course,
+    as: 'course',
+    attributes: ['id', 'title', 'cover', 'price', 'institutionId']
+  };
+  if (req.user.role !== 'superadmin') {
+    courseInclude.where = { institutionId: getOperatorInstitutionId(req) };
+    courseInclude.required = true;
   }
 
   const { count, rows } = await LiveRoom.findAndCountAll({
     where,
-    include: [
-      { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'price'] }
-    ],
+    include: [courseInclude],
     order: [['createdAt', 'DESC']],
     offset: (page - 1) * pageSize,
     limit: parseInt(pageSize)
@@ -55,12 +81,12 @@ router.get('/rooms', asyncHandler(async (req, res) => {
  * @GET /api/live/room/:id
  * 获取直播间详情
  */
-router.get('/room/:id', asyncHandler(async (req, res) => {
+router.get('/room/:id', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const room = await LiveRoom.findByPk(id, {
     include: [
-      { model: Course, as: 'course' },
+      { model: Course, as: 'course', attributes: { exclude: ['detail'] } },
       { model: PPTFile, as: 'pptFiles' }
     ]
   });
@@ -68,6 +94,8 @@ router.get('/room/:id', asyncHandler(async (req, res) => {
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   // 增加观看次数
   await LiveRoom.increment('totalViewCount', { where: { id } });
@@ -87,6 +115,7 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
   if (!course) {
     return fail(res, '课程不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, course)) return;
 
   // 检查是否已创建
   const existRoom = await LiveRoom.findOne({ where: { courseId } });
@@ -98,7 +127,11 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
   let anchorName = req.user.nickname || req.user.username;
 
   if (teacherId) {
-    const teacher = await User.findOne({ where: { id: teacherId, role: 'teacher', status: 1 } });
+    const teacherWhere = { id: teacherId, role: 'teacher', status: 1 };
+    if (req.user.role !== 'superadmin') {
+      teacherWhere.institutionId = getOperatorInstitutionId(req);
+    }
+    const teacher = await User.findOne({ where: teacherWhere });
     if (!teacher) {
       return fail(res, '讲师不存在', 404, 404);
     }
@@ -131,10 +164,13 @@ router.put('/room/:id', auth, requireRole(['admin', 'superadmin', 'teacher']), a
   const { id } = req.params;
   const { title, password, chatEnabled, settings } = req.body;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   // 权限检查
   if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
@@ -166,6 +202,7 @@ router.post('/room/:id/start', auth, requireRole(['admin', 'superadmin', 'teache
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
     return fail(res, '无权操作', 403, 403);
@@ -194,10 +231,13 @@ router.post('/room/:id/start', auth, requireRole(['admin', 'superadmin', 'teache
 router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
     return fail(res, '无权操作', 403, 403);
@@ -218,9 +258,16 @@ router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'teacher
 router.post('/room/:id/pause', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
+
+  if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
+    return fail(res, '无权操作', 403, 403);
   }
 
   await room.update({ status: 'paused' });
@@ -234,9 +281,16 @@ router.post('/room/:id/pause', auth, requireRole(['admin', 'superadmin', 'teache
 router.post('/room/:id/resume', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
+
+  if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
+    return fail(res, '无权操作', 403, 403);
   }
 
   await room.update({ status: 'living' });
@@ -253,6 +307,18 @@ router.post('/room/:id/chat/mute-all', auth, requireRole(['admin', 'superadmin',
   const { id } = req.params;
   const { mute } = req.body;
 
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!room) {
+    return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
+
+  if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
+    return fail(res, '无权操作', 403, 403);
+  }
+
   await LiveRoom.update(
     { allMuted: mute },
     { where: { id } }
@@ -265,14 +331,17 @@ router.post('/room/:id/chat/mute-all', auth, requireRole(['admin', 'superadmin',
  * @POST /api/live/room/:id/chat/send
  * 发送聊天消息
  */
-router.post('/room/:id/chat/send', liveLimiter, asyncHandler(async (req, res) => {
+router.post('/room/:id/chat/send', auth, liveLimiter, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { content, userId, nickname, avatar } = req.body;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   if (room.allMuted) {
     return fail(res, '当前全员禁言中', 403, 403);
@@ -282,8 +351,8 @@ router.post('/room/:id/chat/send', liveLimiter, asyncHandler(async (req, res) =>
   const message = {
     id: Date.now().toString(),
     roomId: id,
-    userId: userId || 'anonymous',
-    nickname: nickname || '匿名用户',
+    userId: userId || req.user.id || 'anonymous',
+    nickname: nickname || req.user.nickname || req.user.username || '匿名用户',
     avatar: avatar || '',
     content,
     createdAt: new Date().toISOString()
@@ -301,9 +370,17 @@ router.post('/room/:id/chat/send', liveLimiter, asyncHandler(async (req, res) =>
  * @GET /api/live/room/:id/chat/history
  * 获取聊天历史
  */
-router.get('/room/:id/chat/history', asyncHandler(async (req, res) => {
+router.get('/room/:id/chat/history', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { limit = 50 } = req.query;
+
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!room) {
+    return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   const messages = await redis.lrange(`chat:${id}`, 0, parseInt(limit) - 1);
   const list = messages.map(msg => JSON.parse(msg)).reverse();
@@ -317,14 +394,17 @@ router.get('/room/:id/chat/history', asyncHandler(async (req, res) => {
  * @POST /api/live/room/:id/online
  * 用户进入直播间（上报在线）
  */
-router.post('/room/:id/online', asyncHandler(async (req, res) => {
+router.post('/room/:id/online', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { userId } = req.body;
 
-  const room = await LiveRoom.findByPk(id);
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   // 使用 Redis 统计在线人数（Set 去重）
   await redis.sadd(`room:${id}:online`, userId || `guest_${Date.now()}`);
@@ -346,9 +426,17 @@ router.post('/room/:id/online', asyncHandler(async (req, res) => {
  * @POST /api/live/room/:id/offline
  * 用户离开直播间
  */
-router.post('/room/:id/offline', asyncHandler(async (req, res) => {
+router.post('/room/:id/offline', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { userId } = req.body;
+
+  const room = await LiveRoom.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!room) {
+    return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
   if (userId) {
     await redis.srem(`room:${id}:online`, userId);

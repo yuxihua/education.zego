@@ -10,6 +10,23 @@ const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
 const { notifyHomeworkGraded } = require('../utils/push');
 
+function isStudentIdentity(req) {
+  return !req.user?.role || req.user.role === 'student';
+}
+
+function getCurrentStudentId(req) {
+  return req.user?.studentId || req.user?.id;
+}
+
+function getOperatorInstitutionId(req) {
+  return req.user?.institutionId || 0;
+}
+
+function canAccessByCourseInstitution(req, courseInstitutionId) {
+  if (req.user?.role === 'superadmin') return true;
+  return courseInstitutionId === getOperatorInstitutionId(req);
+}
+
 /**
  * @GET /api/homework/list
  * 作业列表（按课程）
@@ -23,14 +40,20 @@ router.get('/list', auth, asyncHandler(async (req, res) => {
   if (status) where.status = status;
 
   // 学员只能看自己的
-  if (req.user.role === 'student' || !req.user.role) {
-    where.studentId = req.user.id;
+  if (isStudentIdentity(req)) {
+    where.studentId = getCurrentStudentId(req);
+  }
+
+  const includeCourse = { model: Course, as: 'course', attributes: ['id', 'title', 'institutionId'] };
+  if (req.user.role !== 'superadmin') {
+    includeCourse.where = { institutionId: getOperatorInstitutionId(req) };
+    includeCourse.required = true;
   }
 
   const { count, rows } = await Homework.findAndCountAll({
     where,
     include: [
-      { model: Course, as: 'course', attributes: ['id', 'title'] },
+      includeCourse,
       { model: Student, as: 'student', attributes: ['id', 'nickname', 'openid'] }
     ],
     order: [['createdAt', 'DESC']],
@@ -66,6 +89,14 @@ router.get('/:id', auth, asyncHandler(async (req, res) => {
     return fail(res, '作业不存在', 404, 404);
   }
 
+  if (isStudentIdentity(req) && homework.studentId !== getCurrentStudentId(req)) {
+    return fail(res, '无权查看该作业', 403, 403);
+  }
+
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权查看该机构作业', 403, 403);
+  }
+
   success(res, homework);
 }));
 
@@ -79,6 +110,10 @@ router.post('/', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHan
   const course = await Course.findByPk(courseId);
   if (!course) {
     return fail(res, '课程不存在', 404, 404);
+  }
+
+  if (!canAccessByCourseInstitution(req, course.institutionId || 0)) {
+    return fail(res, '无权在该机构课程布置作业', 403, 403);
   }
 
   const homework = await Homework.create({
@@ -99,11 +134,24 @@ router.post('/', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHan
 router.post('/:id/submit', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { content, attachments } = req.body;
-  const studentId = req.user.id;
+  if (!isStudentIdentity(req)) {
+    return fail(res, '仅学员可提交作业', 403, 403);
+  }
+  const studentId = getCurrentStudentId(req);
 
-  const homework = await Homework.findByPk(id);
+  const homework = await Homework.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
   if (!homework) {
     return fail(res, '作业不存在', 404, 404);
+  }
+
+  if (homework.studentId && homework.studentId !== studentId) {
+    return fail(res, '无权提交该作业', 403, 403);
+  }
+
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权提交该机构作业', 403, 403);
   }
 
   // 检查截止日期
@@ -141,6 +189,10 @@ router.post('/:id/grade', auth, requireRole(['admin', 'superadmin', 'teacher']),
     return fail(res, '作业不存在', 404, 404);
   }
 
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权批改该机构作业', 403, 403);
+  }
+
   if (homework.status !== 'submitted') {
     return fail(res, '作业尚未提交', 400, 400);
   }
@@ -174,7 +226,18 @@ router.put('/:id', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncH
   const { id } = req.params;
   const { title, content, deadline } = req.body;
 
-  await Homework.update({ title, content, deadline }, { where: { id } });
+  const homework = await Homework.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!homework) {
+    return fail(res, '作业不存在', 404, 404);
+  }
+
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权更新该机构作业', 403, 403);
+  }
+
+  await homework.update({ title, content, deadline });
   success(res, null, '更新成功');
 }));
 
@@ -185,7 +248,18 @@ router.put('/:id', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncH
 router.delete('/:id', auth, requireRole(['admin', 'superadmin']), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  await Homework.destroy({ where: { id } });
+  const homework = await Homework.findByPk(id, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!homework) {
+    return fail(res, '作业不存在', 404, 404);
+  }
+
+  if (!canAccessByCourseInstitution(req, homework.course?.institutionId || 0)) {
+    return fail(res, '无权删除该机构作业', 403, 403);
+  }
+
+  await homework.destroy();
   success(res, null, '作业已删除');
 }));
 

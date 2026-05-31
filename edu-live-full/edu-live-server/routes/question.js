@@ -7,6 +7,7 @@ const { Op } = require('sequelize');
 const { Question } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
+const { auth, requireRole } = require('../middleware/auth');
 
 const categoryList = [
   { label: '未分类', value: '' },
@@ -16,7 +17,7 @@ const categoryList = [
   { label: '编程', value: 'programming' }
 ];
 
-router.get('/list', asyncHandler(async (req, res) => {
+router.get('/list', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { type, keyword, page = 1, size = 10 } = req.query;
 
   const where = {};
@@ -38,11 +39,11 @@ router.get('/list', asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/categories', asyncHandler(async (req, res) => {
+router.get('/categories', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   success(res, categoryList);
 }));
 
-router.post('/create', asyncHandler(async (req, res) => {
+router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { type, content, options, answer, analysis, difficulty, categoryName } = req.body;
 
   if (!content) {
@@ -62,7 +63,7 @@ router.post('/create', asyncHandler(async (req, res) => {
   success(res, question, '创建成功');
 }));
 
-router.post('/update', asyncHandler(async (req, res) => {
+router.post('/update', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { id, type, content, options, answer, analysis, difficulty, categoryName } = req.body;
 
   const question = await Question.findByPk(id);
@@ -83,7 +84,7 @@ router.post('/update', asyncHandler(async (req, res) => {
   success(res, question, '更新成功');
 }));
 
-router.post('/delete', asyncHandler(async (req, res) => {
+router.post('/delete', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.body;
   const question = await Question.findByPk(id);
 
