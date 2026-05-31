@@ -62,6 +62,18 @@ async function findConflictSchedule({ institutionId, classroomId, teacherId, sta
   });
 }
 
+function buildConflictPayload(conflict) {
+  return {
+    scheduleId: conflict.id,
+    courseName: conflict.courseName,
+    classroomName: conflict.classroom?.name || '-',
+    teacherName: conflict.teacher?.nickname || conflict.teacher?.username || '-',
+    startTime: conflict.startTime,
+    endTime: conflict.endTime,
+    timeRangeText: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
+  };
+}
+
 function escapeCsvCell(value) {
   if (value === null || value === undefined) return '';
   const text = String(value).replace(/\r?\n/g, ' ');
@@ -266,6 +278,51 @@ router.get('/schedules', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req
   success(res, list);
 }));
 
+router.post('/schedules/check-conflict', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const scheduleId = Number(req.body.scheduleId || 0);
+
+  let classroomId = Number(req.body.classroomId || 0);
+  let teacherId = Number(req.body.teacherId || 0);
+  let startTime = parseDate(req.body.startTime);
+  let endTime = parseDate(req.body.endTime);
+
+  let currentSchedule = null;
+  if (scheduleId) {
+    currentSchedule = await TeachingSchedule.findOne({ where: { id: scheduleId, institutionId } });
+    if (!currentSchedule) return fail(res, '排课不存在', 404, 404);
+    if (!classroomId) classroomId = Number(currentSchedule.classroomId || 0);
+    if (!teacherId) teacherId = Number(currentSchedule.teacherId || 0);
+    if (!startTime) startTime = parseDate(currentSchedule.startTime);
+    if (!endTime) endTime = parseDate(currentSchedule.endTime);
+  }
+
+  if (!classroomId || !teacherId || !startTime || !endTime || startTime >= endTime) {
+    return fail(res, '缺少有效的冲突检测参数', 400, 400);
+  }
+
+  const conflict = await findConflictSchedule({
+    institutionId,
+    classroomId,
+    teacherId,
+    startTime,
+    endTime,
+    excludeId: scheduleId || undefined
+  });
+
+  if (!conflict) {
+    return success(res, {
+      hasConflict: false,
+      conflict: null
+    });
+  }
+
+  success(res, {
+    hasConflict: true,
+    conflict: buildConflictPayload(conflict)
+  });
+}));
+
 router.get('/schedules/export', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
   const institutionId = getInstitutionId(req);
   const { classroomId, teacherId, startDate, endDate } = req.query;
@@ -425,15 +482,7 @@ router.post('/schedules', auth, requireRole(ADMIN_ROLES), [
 
   const conflict = await findConflictSchedule({ institutionId, classroomId, teacherId, startTime, endTime });
   if (conflict) {
-    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, {
-      scheduleId: conflict.id,
-      courseName: conflict.courseName,
-      classroomName: conflict.classroom?.name || '-',
-      teacherName: conflict.teacher?.nickname || conflict.teacher?.username || '-',
-      startTime: conflict.startTime,
-      endTime: conflict.endTime,
-      timeRangeText: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
-    });
+    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, buildConflictPayload(conflict));
   }
 
   const row = await TeachingSchedule.create({
@@ -466,15 +515,7 @@ router.put('/schedules/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
 
   const conflict = await findConflictSchedule({ institutionId, classroomId, teacherId, startTime, endTime, excludeId: row.id });
   if (conflict) {
-    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, {
-      scheduleId: conflict.id,
-      courseName: conflict.courseName,
-      classroomName: conflict.classroom?.name || '-',
-      teacherName: conflict.teacher?.nickname || conflict.teacher?.username || '-',
-      startTime: conflict.startTime,
-      endTime: conflict.endTime,
-      timeRangeText: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
-    });
+    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, buildConflictPayload(conflict));
   }
 
   await row.update({

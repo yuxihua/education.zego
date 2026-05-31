@@ -137,7 +137,15 @@
                   <div class="week-day-date">{{ day.dateText }}</div>
                 </div>
                 <div class="week-day-body">
-                  <div class="week-lane" v-for="lane in timeLanes" :key="`${day.key}_${lane.key}`" @dragover.prevent @drop="handleLaneDrop(day, lane)">
+                  <div
+                    :class="['week-lane', { 'is-drop-target': dragHoverLaneKey === getLaneKey(day, lane) }]"
+                    v-for="lane in timeLanes"
+                    :key="`${day.key}_${lane.key}`"
+                    @dragenter.prevent="handleLaneDragEnter(day, lane)"
+                    @dragover.prevent="handleLaneDragOver(day, lane)"
+                    @dragleave="handleLaneDragLeave(day, lane)"
+                    @drop="handleLaneDrop(day, lane)"
+                  >
                     <div class="week-lane-title">{{ lane.label }}</div>
                     <div
                       class="week-slot"
@@ -251,6 +259,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
 import {
+  checkScheduleConflict,
   createClassroom,
   copyWeekSchedules,
   createSchedule,
@@ -293,6 +302,7 @@ const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, co
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
 const draggingSlot = ref(null)
+const dragHoverLaneKey = ref('')
 const lastScheduleMove = ref(null)
 
 const SLOT_THEMES = [
@@ -419,6 +429,8 @@ const getLaneItems = (day, lane) => {
   })
 }
 
+const getLaneKey = (day, lane) => `${day?.key || ''}_${lane?.key || ''}`
+
 const getSlotStyle = (item) => {
   if (scheduleColorMode.value === 'none') return {}
   const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
@@ -495,6 +507,8 @@ const handleSlotDragStart = (item, day) => {
   draggingSlot.value = {
     id: item.id,
     dayKey: day.key,
+    classroomId: item.classroomId,
+    teacherId: item.teacherId,
     startTime: item.startTime,
     endTime: item.endTime
   }
@@ -502,16 +516,36 @@ const handleSlotDragStart = (item, day) => {
 
 const handleSlotDragEnd = () => {
   draggingSlot.value = null
+  dragHoverLaneKey.value = ''
+}
+
+const handleLaneDragEnter = (day, lane) => {
+  if (!draggingSlot.value) return
+  dragHoverLaneKey.value = getLaneKey(day, lane)
+}
+
+const handleLaneDragOver = (day, lane) => {
+  if (!draggingSlot.value) return
+  dragHoverLaneKey.value = getLaneKey(day, lane)
+}
+
+const handleLaneDragLeave = (day, lane) => {
+  const current = getLaneKey(day, lane)
+  if (dragHoverLaneKey.value === current) {
+    dragHoverLaneKey.value = ''
+  }
 }
 
 const handleLaneDrop = async (targetDay, targetLane) => {
   const drag = draggingSlot.value
   if (!drag || !targetDay?.key || !targetLane) return
+  dragHoverLaneKey.value = ''
 
   const srcDay = new Date(`${drag.dayKey}T00:00:00`)
   const dstDay = new Date(`${targetDay.key}T00:00:00`)
   if (Number.isNaN(srcDay.getTime()) || Number.isNaN(dstDay.getTime())) {
     draggingSlot.value = null
+    dragHoverLaneKey.value = ''
     return
   }
 
@@ -519,6 +553,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   const end = new Date(String(drag.endTime).replace(' ', 'T'))
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     draggingSlot.value = null
+    dragHoverLaneKey.value = ''
     return
   }
 
@@ -529,6 +564,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
 
   if (nextStart.getTime() === start.getTime() && nextEnd.getTime() === end.getTime()) {
     draggingSlot.value = null
+    dragHoverLaneKey.value = ''
     return
   }
 
@@ -541,6 +577,28 @@ const handleLaneDrop = async (targetDay, targetLane) => {
   }
 
   try {
+    const precheckPayload = {
+      scheduleId: drag.id,
+      classroomId: drag.classroomId,
+      teacherId: drag.teacherId,
+      startTime: payload.startTime,
+      endTime: payload.endTime
+    }
+    if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+      precheckPayload.institutionId = currentInstitutionId.value
+    }
+
+    const precheck = await checkScheduleConflict(precheckPayload)
+    if (precheck?.hasConflict && precheck?.conflict) {
+      const conflict = precheck.conflict
+      ElMessageBox.alert(
+        `冲突排课：${conflict.courseName || '-'}\n教室：${conflict.classroomName || '-'}\n讲师：${conflict.teacherName || '-'}\n时间：${conflict.timeRangeText || '-'}`,
+        '拖拽冲突预警',
+        { type: 'warning' }
+      )
+      return
+    }
+
     await updateSchedule(drag.id, payload)
     lastScheduleMove.value = {
       id: drag.id,
@@ -549,7 +607,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
       newStartTime: payload.startTime,
       newEndTime: payload.endTime
     }
-    ElMessage.success('已调整到新日期')
+    ElMessage.success('已调整到新时段')
     await loadSchedules()
   } catch (err) {
     const conflict = err?.data
@@ -564,6 +622,7 @@ const handleLaneDrop = async (targetDay, targetLane) => {
     }
   } finally {
     draggingSlot.value = null
+    dragHoverLaneKey.value = ''
   }
 }
 
@@ -929,6 +988,11 @@ onMounted(async () => {
   border: 1px dashed #e4e7ed;
   border-radius: 6px;
   padding: 6px;
+}
+
+.week-lane.is-drop-target {
+  border-color: #409eff;
+  background: #f0f9ff;
 }
 
 .week-lane-title {
