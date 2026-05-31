@@ -34,6 +34,7 @@ const redis = require('./config/redis');
 // 中间件
 const { notFound, errorHandler } = require('./middleware/error');
 const { commonLimiter } = require('./middleware/ratelimit');
+const { operationLog } = require('./middleware/operationLog');
 
 // 路由
 const routes = require('./routes');
@@ -126,6 +127,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 限流
 app.use(commonLimiter);
+
+// 系统操作日志（记录写操作）
+app.use(operationLog);
 
 // 请求日志
 app.use((req, res, next) => {

@@ -15,6 +15,7 @@ const Homework = require('./Homework');
 const Question = require('./Question');
 const DistributionConfig = require('./DistributionConfig');
 const DistributionSettlement = require('./DistributionSettlement');
+const OperationLog = require('./OperationLog');
 
 // ========== 定义模型关联关系 ==========
 
@@ -64,6 +65,10 @@ Homework.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 User.hasMany(Student, { foreignKey: 'salesUserId', as: 'salesStudents' });
 Student.belongsTo(User, { foreignKey: 'salesUserId', as: 'salesUser' });
 
+// 用户 - 操作日志：一对多
+User.hasMany(OperationLog, { foreignKey: 'userId', as: 'operationLogs' });
+OperationLog.belongsTo(User, { foreignKey: 'userId', as: 'operator' });
+
 // 题库：独立模块
 
 
@@ -81,5 +86,6 @@ module.exports = {
   Homework,
   Question,
   DistributionConfig,
-  DistributionSettlement
+  DistributionSettlement,
+  OperationLog
 };

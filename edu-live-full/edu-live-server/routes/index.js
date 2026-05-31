@@ -33,5 +33,6 @@ router.use('/homework', require('./homework'));
 router.use('/upload', require('./upload'));
 router.use('/platform', require('./platform'));
 router.use('/distribution', require('./distribution'));
+router.use('/system', require('./system'));
 
 module.exports = router;

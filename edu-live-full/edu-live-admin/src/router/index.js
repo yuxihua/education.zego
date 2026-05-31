@@ -108,6 +108,18 @@ export const routes = [
         name: 'Audit',
         component: () => import('@/views/platform/Audit.vue'),
         meta: { title: '审核中心', icon: 'Stamp', platformOnly: true }
+      },
+      {
+        path: 'system/account',
+        name: 'SystemAccount',
+        component: () => import('@/views/system/Account.vue'),
+        meta: { title: '系统账号', icon: 'UserFilled', roles: ['superadmin', 'admin'] }
+      },
+      {
+        path: 'system/operation-log',
+        name: 'SystemOperationLog',
+        component: () => import('@/views/system/OperationLog.vue'),
+        meta: { title: '操作日志', icon: 'Document', roles: ['superadmin', 'admin'] }
       }
     ]
   },
