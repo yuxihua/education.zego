@@ -105,8 +105,9 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
     payTime: { [Op.ne]: null }
   };
 
-  if (salesUserId) where['$student.salesUserId$'] = salesUserId;
-  if (salesLevel) where['$student.salesLevel$'] = salesLevel;
+  const studentWhere = {};
+  if (salesUserId) studentWhere.salesUserId = salesUserId;
+  if (salesLevel) studentWhere.salesLevel = salesLevel;
 
   const monthRange = getMonthRange(month);
   if (monthRange) {
@@ -134,6 +135,7 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
         model: Student,
         as: 'student',
         attributes: ['id', 'nickname', 'realName', 'phone', 'salesUserId', 'salesLevel'],
+        ...(Object.keys(studentWhere).length ? { where: studentWhere, required: true } : {}),
         include: [{ model: User, as: 'salesUser', attributes: ['id', 'username', 'nickname'] }]
       },
       { model: Course, as: 'course', attributes: ['id', 'title'] }
