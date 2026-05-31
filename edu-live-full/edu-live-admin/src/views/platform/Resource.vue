@@ -157,7 +157,17 @@
                     @dragleave="handleLaneDragLeave(day, lane)"
                     @drop="handleLaneDrop(day, lane)"
                   >
-                    <div class="week-lane-title">{{ lane.label }}</div>
+                    <div class="week-lane-title-row">
+                      <div class="week-lane-title">{{ lane.label }}</div>
+                      <el-tooltip
+                        v-if="getLaneConflict(day, lane)"
+                        placement="top"
+                        effect="light"
+                        :content="formatLaneConflictText(getLaneConflict(day, lane))"
+                      >
+                        <span class="week-lane-conflict-tag">冲突</span>
+                      </el-tooltip>
+                    </div>
                     <div
                       class="week-slot"
                       v-for="item in getLaneItems(day, lane)"
@@ -447,6 +457,21 @@ const getLaneItems = (day, lane) => {
 
 const getLaneKey = (day, lane) => `${day?.key || ''}_${lane?.key || ''}`
 
+const getLaneConflict = (day, lane) => {
+  const value = laneConflictMap[getLaneKey(day, lane)]
+  if (!value || value === true) return null
+  return value
+}
+
+const formatLaneConflictText = (conflict) => {
+  if (!conflict) return '该时段存在冲突'
+  const course = conflict.courseName || '-'
+  const classroom = conflict.classroomName || '-'
+  const teacher = conflict.teacherName || '-'
+  const time = conflict.timeRangeText || '-'
+  return `冲突课程：${course}；教室：${classroom}；讲师：${teacher}；时间：${time}`
+}
+
 const clearLaneConflictMap = () => {
   Object.keys(laneConflictMap).forEach((k) => {
     delete laneConflictMap[k]
@@ -511,7 +536,14 @@ const precheckLaneConflict = (day, lane) => {
 
     try {
       const res = await checkScheduleConflict(payload)
-      laneConflictMap[laneKey] = res?.hasConflict ? (res.conflict || true) : null
+      laneConflictMap[laneKey] = res?.hasConflict
+        ? (res.conflict || {
+          courseName: '未知课程',
+          classroomName: '-',
+          teacherName: '-',
+          timeRangeText: '-'
+        })
+        : null
     } catch (err) {
       laneConflictMap[laneKey] = null
     }
@@ -1131,6 +1163,25 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #909399;
   margin-bottom: 6px;
+}
+
+.week-lane-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.week-lane-conflict-tag {
+  font-size: 11px;
+  line-height: 1;
+  color: #cf1322;
+  border: 1px solid #ffccc7;
+  border-radius: 10px;
+  background: #fff1f0;
+  padding: 3px 6px;
+  cursor: help;
 }
 
 .week-slot {
