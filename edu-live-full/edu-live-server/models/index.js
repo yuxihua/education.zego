@@ -10,9 +10,11 @@ const Student = require('./Student');
 const Course = require('./Course');
 const Order = require('./Order');
 const LiveRoom = require('./LiveRoom');
+const Classroom = require('./Classroom');
 const PPTFile = require('./PPTFile');
 const Homework = require('./Homework');
 const Question = require('./Question');
+const TeachingSchedule = require('./TeachingSchedule');
 const DistributionConfig = require('./DistributionConfig');
 const DistributionSettlement = require('./DistributionSettlement');
 const OperationLog = require('./OperationLog');
@@ -27,6 +29,18 @@ Course.belongsTo(User, { foreignKey: 'institutionId', as: 'institution' });
 // 课程 - 直播间：一对一
 Course.hasOne(LiveRoom, { foreignKey: 'courseId', as: 'liveRoom' });
 LiveRoom.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
+
+// 机构 - 教室：一对多
+User.hasMany(Classroom, { foreignKey: 'institutionId', as: 'classrooms' });
+Classroom.belongsTo(User, { foreignKey: 'institutionId', as: 'institution' });
+
+// 教室 - 排课：一对多
+Classroom.hasMany(TeachingSchedule, { foreignKey: 'classroomId', as: 'schedules' });
+TeachingSchedule.belongsTo(Classroom, { foreignKey: 'classroomId', as: 'classroom' });
+
+// 讲师 - 排课：一对多
+User.hasMany(TeachingSchedule, { foreignKey: 'teacherId', as: 'teachingSchedules' });
+TeachingSchedule.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 
 // 学生 - 课程：多对多（通过订单）
 Student.belongsToMany(Course, { 
@@ -91,9 +105,11 @@ module.exports = {
   Course,
   Order,
   LiveRoom,
+  Classroom,
   PPTFile,
   Homework,
   Question,
+  TeachingSchedule,
   DistributionConfig,
   DistributionSettlement,
   OperationLog,

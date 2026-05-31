@@ -110,6 +110,12 @@ export const routes = [
         meta: { title: '审核中心', icon: 'Stamp', platformOnly: true, permission: 'platform.audit.manage' }
       },
       {
+        path: 'platform/resource',
+        name: 'PlatformResource',
+        component: () => import('@/views/platform/Resource.vue'),
+        meta: { title: '教室/讲师管理', icon: 'School', permission: 'platform.resource.manage' }
+      },
+      {
         path: 'system/account',
         name: 'SystemAccount',
         component: () => import('@/views/system/Account.vue'),

@@ -53,7 +53,8 @@ const PERMISSION_GROUPS = [
     name: '平台管理',
     items: [
       { key: 'platform.institution.manage', name: '机构管理' },
-      { key: 'platform.audit.manage', name: '审核中心' }
+      { key: 'platform.audit.manage', name: '审核中心' },
+      { key: 'platform.resource.manage', name: '教室/讲师管理' }
     ]
   },
   {
@@ -81,6 +82,7 @@ const ROLE_DEFAULT_PERMISSIONS = {
     'order.manage',
     'checkin.manage',
     'distribution.manage',
+    'platform.resource.manage',
     'system.account.manage',
     'system.log.view',
     'system.permission.manage'
