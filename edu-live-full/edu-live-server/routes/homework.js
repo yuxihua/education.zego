@@ -28,6 +28,35 @@ function canAccessByCourseInstitution(req, courseInstitutionId) {
   return courseInstitutionId === getOperatorInstitutionId(req);
 }
 
+function buildSubmissionQuery(source, keyword, status) {
+  const baseWhere = {
+    courseId: source.courseId,
+    title: source.title,
+    studentId: { [Op.gt]: 0 }
+  };
+
+  if (keyword) {
+    const text = String(keyword).trim();
+    baseWhere[Op.or] = [
+      { content: { [Op.like]: `%${text}%` } },
+      { '$student.nickname$': { [Op.like]: `%${text}%` } },
+      { '$student.realName$': { [Op.like]: `%${text}%` } },
+      { '$student.phone$': { [Op.like]: `%${text}%` } }
+    ];
+  }
+
+  const where = { ...baseWhere };
+  if (status) {
+    where.status = status;
+  }
+
+  const include = [
+    { model: Student, as: 'student', attributes: ['id', 'nickname', 'realName', 'phone'] }
+  ];
+
+  return { baseWhere, where, include };
+}
+
 async function gradeHomeworkById(req, res, homeworkId, score, comment) {
   const homework = await Homework.findByPk(homeworkId, {
     include: [
@@ -172,30 +201,7 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
   const pageNum = parseInt(page, 10) || 1;
   const pageSizeNum = parseInt(size, 10) || 10;
 
-  const baseWhere = {
-    courseId: source.courseId,
-    title: source.title,
-    studentId: { [Op.gt]: 0 }
-  };
-
-  if (keyword) {
-    const text = String(keyword).trim();
-    baseWhere[Op.or] = [
-      { content: { [Op.like]: `%${text}%` } },
-      { '$student.nickname$': { [Op.like]: `%${text}%` } },
-      { '$student.realName$': { [Op.like]: `%${text}%` } },
-      { '$student.phone$': { [Op.like]: `%${text}%` } }
-    ];
-  }
-
-  const where = { ...baseWhere };
-  if (status) {
-    where.status = status;
-  }
-
-  const include = [
-    { model: Student, as: 'student', attributes: ['id', 'nickname', 'realName', 'phone'] }
-  ];
+  const { baseWhere, where, include } = buildSubmissionQuery(source, keyword, status);
 
   const { count, rows } = await Homework.findAndCountAll({
     where,
@@ -245,6 +251,67 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
       pending: Number(count || 0) - Number(gradedCount || 0)
     }
   });
+}));
+
+/**
+ * @GET /api/homework/submissions/export
+ * 导出作业提交 CSV（按筛选条件导出全量）
+ */
+router.get('/submissions/export', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { homeworkId, keyword, status } = req.query;
+  if (!homeworkId) {
+    return fail(res, '缺少 homeworkId', 400, 400);
+  }
+
+  const source = await Homework.findByPk(homeworkId, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!source) {
+    return fail(res, '作业不存在', 404, 404);
+  }
+  if (!canAccessByCourseInstitution(req, source.course?.institutionId || 0)) {
+    return fail(res, '无权导出该机构作业提交', 403, 403);
+  }
+
+  const { where, include } = buildSubmissionQuery(source, keyword, status);
+
+  const rows = await Homework.findAll({
+    where,
+    include,
+    subQuery: false,
+    order: [['submitTime', 'DESC'], ['createdAt', 'DESC']]
+  });
+
+  const escapeCell = (value) => {
+    const text = String(value ?? '');
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const header = ['学员', '提交时间', '作答内容', '得分', '评语', '状态'];
+  const lines = rows.map((item) => {
+    const row = item.toJSON();
+    const statusText = row.status === 'graded'
+      ? '已批改'
+      : (row.status === 'submitted' ? '已提交' : (row.status || '-'));
+    return [
+      row.student?.realName || row.student?.nickname || '-',
+      row.submitTime || '-',
+      row.content || '-',
+      row.score ?? '',
+      row.comment || '',
+      statusText
+    ].map(escapeCell).join(',');
+  });
+
+  const csv = [header.map(escapeCell).join(','), ...lines].join('\n');
+  const fileName = `homework_submissions_${homeworkId}_all.csv`;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.send(`\uFEFF${csv}`);
 }));
 
 /**

@@ -380,59 +380,28 @@ const exportSubmissionsCsv = async () => {
     return
   }
 
-  const pageSize = 500
-  let pageNum = 1
-  let total = 0
-  const rows = []
-
-  while (true) {
-    const res = await getHomeworkSubmissions({
-      homeworkId: currentHomeworkId.value,
-      keyword: submissionSearch.keyword,
-      status: submissionSearch.status,
-      page: pageNum,
-      size: pageSize
-    })
-
-    const list = res.list || []
-    rows.push(...list)
-    total = Number(res.pagination?.total || rows.length)
-
-    if (!list.length || rows.length >= total) {
-      break
-    }
-
-    pageNum += 1
-    if (pageNum > 200) {
-      break
-    }
+  const params = new URLSearchParams({ homeworkId: String(currentHomeworkId.value) })
+  if (submissionSearch.keyword) {
+    params.set('keyword', submissionSearch.keyword)
+  }
+  if (submissionSearch.status) {
+    params.set('status', submissionSearch.status)
   }
 
-  if (!rows.length) {
-    ElMessage.warning('当前筛选条件下没有可导出的提交记录')
+  const token = localStorage.getItem('token') || ''
+  const response = await fetch(`/api/homework/submissions/export?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+
+  if (!response.ok) {
+    ElMessage.error('导出失败，请稍后重试')
     return
   }
 
-  const csvHeader = ['学员', '提交时间', '作答内容', '得分', '评语', '状态']
-  const csvRows = rows.map((row) => [
-    row.studentName || '-',
-    row.submitTime || '-',
-    row.content || '-',
-    row.score ?? '',
-    row.comment || '',
-    row.status === 'graded' ? '已批改' : (row.status === 'submitted' ? '已提交' : row.status || '-')
-  ])
-
-  const escapeCell = (value) => {
-    const text = String(value ?? '')
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`
-    }
-    return text
-  }
-
-  const content = [csvHeader, ...csvRows].map((line) => line.map(escapeCell).join(',')).join('\n')
-  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
+  const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -442,7 +411,7 @@ const exportSubmissionsCsv = async () => {
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
 
-  ElMessage.success(`导出成功，共 ${rows.length} 条`) 
+  ElMessage.success('导出成功')
 }
 
 onMounted(async () => {
