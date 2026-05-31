@@ -101,9 +101,16 @@
       <template #header>
         <div class="card-header">
           <span>分销层级关系图（树形）</span>
-          <el-button @click="loadTree">刷新树图</el-button>
+          <div class="header-actions">
+            <el-button @click="clearTreeLinkFilters">清空联动筛选</el-button>
+            <el-button @click="loadTree">刷新树图</el-button>
+          </div>
         </div>
       </template>
+
+      <div class="tree-link-state" v-if="treeLinkedFilterText">
+        <el-tag type="info">当前联动筛选：{{ treeLinkedFilterText }}</el-tag>
+      </div>
 
       <el-tree
         :data="treeData"
@@ -202,6 +209,7 @@ const salesList = ref([])
 const treeData = ref([])
 const treeProps = { children: 'children', label: 'label' }
 const studentOptions = ref([])
+const treeLinkedFilterText = ref('')
 
 const assignForm = reactive({ studentId: null, salesUserId: null, salesLevel: 1 })
 
@@ -267,6 +275,7 @@ const handleTreeNodeClick = (node) => {
     if (!isSalesRole.value) {
       filters.salesUserId = null
     }
+    treeLinkedFilterText.value = `层级：${node.salesLevel}级`
   }
 
   if (node.nodeType === 'sales') {
@@ -274,6 +283,7 @@ const handleTreeNodeClick = (node) => {
     if (!isSalesRole.value) {
       filters.salesUserId = node.salesUserId || null
     }
+    treeLinkedFilterText.value = `层级：${node.salesLevel}级，销售ID：${node.salesUserId}`
   }
 
   if (node.nodeType === 'student') {
@@ -284,8 +294,18 @@ const handleTreeNodeClick = (node) => {
     if (node.studentId) {
       filters.keyword = String(node.studentId)
     }
+    treeLinkedFilterText.value = `层级：${node.salesLevel}级，销售ID：${node.salesUserId}，学员ID：${node.studentId}`
   }
 
+  pagination.page = 1
+  loadOrders()
+}
+
+const clearTreeLinkFilters = () => {
+  filters.salesLevel = null
+  filters.salesUserId = null
+  filters.keyword = ''
+  treeLinkedFilterText.value = ''
   pagination.page = 1
   loadOrders()
 }
@@ -373,11 +393,21 @@ onMounted(loadAll)
   justify-content: space-between;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .search-form {
   margin-bottom: 12px;
 }
 
 .summary-row {
   margin-bottom: 12px;
+}
+
+.tree-link-state {
+  margin-bottom: 10px;
 }
 </style>
