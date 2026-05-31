@@ -18,8 +18,20 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function buildScheduleConflictWhere({ classroomId, teacherId, startTime, endTime, excludeId }) {
+function formatDateTime(dateValue) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '-';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
+function buildScheduleConflictWhere({ institutionId, classroomId, teacherId, startTime, endTime, excludeId }) {
   const where = {
+    institutionId,
     status: 1,
     [Op.or]: [
       { classroomId },
@@ -30,6 +42,17 @@ function buildScheduleConflictWhere({ classroomId, teacherId, startTime, endTime
   };
   if (excludeId) where.id = { [Op.ne]: excludeId };
   return where;
+}
+
+async function findConflictSchedule({ institutionId, classroomId, teacherId, startTime, endTime, excludeId }) {
+  return TeachingSchedule.findOne({
+    where: buildScheduleConflictWhere({ institutionId, classroomId, teacherId, startTime, endTime, excludeId }),
+    include: [
+      { model: Classroom, as: 'classroom', attributes: ['id', 'name'] },
+      { model: User, as: 'teacher', attributes: ['id', 'nickname', 'username'] }
+    ],
+    order: [['startTime', 'ASC']]
+  });
 }
 
 router.get('/classrooms', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
@@ -255,8 +278,18 @@ router.post('/schedules', auth, requireRole(ADMIN_ROLES), [
   const teacher = await User.findOne({ where: { id: teacherId, role: 'teacher', institutionId, status: 1 } });
   if (!teacher) return fail(res, '讲师不存在或已停用', 404, 404);
 
-  const conflict = await TeachingSchedule.findOne({ where: buildScheduleConflictWhere({ classroomId, teacherId, startTime, endTime }) });
-  if (conflict) return fail(res, '教室或讲师在该时间段已有排课', 409, 409);
+  const conflict = await findConflictSchedule({ institutionId, classroomId, teacherId, startTime, endTime });
+  if (conflict) {
+    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, {
+      scheduleId: conflict.id,
+      courseName: conflict.courseName,
+      classroomName: conflict.classroom?.name || '-',
+      teacherName: conflict.teacher?.nickname || conflict.teacher?.username || '-',
+      startTime: conflict.startTime,
+      endTime: conflict.endTime,
+      timeRangeText: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
+    });
+  }
 
   const row = await TeachingSchedule.create({
     institutionId,
@@ -286,8 +319,18 @@ router.put('/schedules/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
     return fail(res, '排课时间范围无效', 400, 400);
   }
 
-  const conflict = await TeachingSchedule.findOne({ where: buildScheduleConflictWhere({ classroomId, teacherId, startTime, endTime, excludeId: row.id }) });
-  if (conflict) return fail(res, '教室或讲师在该时间段已有排课', 409, 409);
+  const conflict = await findConflictSchedule({ institutionId, classroomId, teacherId, startTime, endTime, excludeId: row.id });
+  if (conflict) {
+    return fail(res, '教室或讲师在该时间段已有排课', 409, 409, {
+      scheduleId: conflict.id,
+      courseName: conflict.courseName,
+      classroomName: conflict.classroom?.name || '-',
+      teacherName: conflict.teacher?.nickname || conflict.teacher?.username || '-',
+      startTime: conflict.startTime,
+      endTime: conflict.endTime,
+      timeRangeText: `${formatDateTime(conflict.startTime)} ~ ${formatDateTime(conflict.endTime)}`
+    });
+  }
 
   await row.update({
     classroomId,

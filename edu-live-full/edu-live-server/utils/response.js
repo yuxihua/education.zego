@@ -25,11 +25,11 @@ function success(res, data = null, message = '操作成功', statusCode = 200) {
  * @param {number} statusCode - HTTP 状态码
  * @param {number} errorCode - 业务错误码
  */
-function fail(res, message = '操作失败', statusCode = 400, errorCode = 400) {
+function fail(res, message = '操作失败', statusCode = 400, errorCode = 400, data = null) {
   return res.status(statusCode).json({
     code: errorCode,
     message,
-    data: null,
+    data,
     timestamp: Date.now()
   });
 }

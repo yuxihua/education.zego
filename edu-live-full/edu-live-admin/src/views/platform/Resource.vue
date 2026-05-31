@@ -72,7 +72,13 @@
           <template #header>
             <div class="card-header">
               <span>排课安排</span>
-              <el-button type="primary" size="small" @click="openScheduleDialog()">新增</el-button>
+              <div class="schedule-header-actions">
+                <el-radio-group v-model="scheduleViewMode" size="small" @change="applyScheduleViewRange">
+                  <el-radio-button label="week">周视图</el-radio-button>
+                  <el-radio-button label="month">月视图</el-radio-button>
+                </el-radio-group>
+                <el-button type="primary" size="small" @click="openScheduleDialog()">新增</el-button>
+              </div>
             </div>
           </template>
 
@@ -89,6 +95,9 @@
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="loadSchedules">查询</el-button>
+            </el-form-item>
+            <el-form-item>
+              <el-button @click="applyScheduleViewRange">按{{ scheduleViewMode === 'week' ? '本周' : '本月' }}刷新</el-button>
             </el-form-item>
           </el-form>
 
@@ -192,7 +201,8 @@ const teacherLoading = ref(false)
 const scheduleLoading = ref(false)
 const classroomKeyword = ref('')
 const teacherKeyword = ref('')
-const scheduleSearch = reactive({ classroomId: null, teacherId: null })
+const scheduleSearch = reactive({ classroomId: null, teacherId: null, startDate: '', endDate: '' })
+const scheduleViewMode = ref('week')
 
 const classroomDialogVisible = ref(false)
 const classroomForm = reactive({ id: null, name: '', location: '', capacity: 0, description: '', status: 1 })
@@ -206,6 +216,32 @@ const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, co
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
   return `${fmt(start)} ~ ${fmt(end)}`
+}
+
+const toDateString = (date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d} 00:00:00`
+}
+
+const applyScheduleViewRange = async () => {
+  const now = new Date()
+  const start = new Date(now)
+  const end = new Date(now)
+
+  if (scheduleViewMode.value === 'week') {
+    const day = now.getDay() || 7
+    start.setDate(now.getDate() - (day - 1))
+    end.setDate(start.getDate() + 7)
+  } else {
+    start.setDate(1)
+    end.setMonth(now.getMonth() + 1, 1)
+  }
+
+  scheduleSearch.startDate = toDateString(start)
+  scheduleSearch.endDate = toDateString(end)
+  await loadSchedules()
 }
 
 const buildCommonParams = () => {
@@ -333,8 +369,21 @@ const saveSchedule = async () => {
   if (userStore.isPlatformAdmin && currentInstitutionId.value) {
     payload.institutionId = currentInstitutionId.value
   }
-  if (payload.id) await updateSchedule(payload.id, payload)
-  else await createSchedule(payload)
+  try {
+    if (payload.id) await updateSchedule(payload.id, payload)
+    else await createSchedule(payload)
+  } catch (err) {
+    const conflict = err?.data
+    if (err?.code === 409 && conflict) {
+      ElMessageBox.alert(
+        `冲突排课：${conflict.courseName || '-'}\n教室：${conflict.classroomName || '-'}\n讲师：${conflict.teacherName || '-'}\n时间：${conflict.timeRangeText || '-'}`,
+        '排课冲突',
+        { type: 'warning' }
+      )
+      return
+    }
+    throw err
+  }
   ElMessage.success('排课已保存')
   scheduleDialogVisible.value = false
   await loadSchedules()
@@ -351,7 +400,7 @@ onMounted(async () => {
   await loadInstitutions()
   await loadClassrooms()
   await loadTeachers()
-  await loadSchedules()
+  await applyScheduleViewRange()
 })
 </script>
 
@@ -364,5 +413,11 @@ onMounted(async () => {
 
 .search-form {
   margin-bottom: 12px;
+}
+
+.schedule-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>
