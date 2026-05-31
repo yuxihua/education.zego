@@ -86,6 +86,12 @@ export const routes = [
         meta: { title: '订单财务', icon: 'Money' }
       },
       {
+        path: 'distribution',
+        name: 'Distribution',
+        component: () => import('@/views/distribution/Index.vue'),
+        meta: { title: '分销管理', icon: 'Connection', roles: ['superadmin', 'admin', 'sales'] }
+      },
+      {
         path: 'checkin',
         name: 'Checkin',
         component: () => import('@/views/checkin/Index.vue'),

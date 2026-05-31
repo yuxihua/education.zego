@@ -32,9 +32,9 @@ const User = sequelize.define('User', {
   },
   // 角色
   role: {
-    type: DataTypes.ENUM('superadmin', 'admin', 'teacher', 'assistant'),
+    type: DataTypes.ENUM('superadmin', 'admin', 'teacher', 'assistant', 'sales'),
     defaultValue: 'admin',
-    comment: '角色：超管/机构管理员/讲师/助教'
+    comment: '角色：超管/机构管理员/讲师/助教/销售'
   },
   // 手机号
   phone: {

@@ -30,6 +30,7 @@ const menuList = computed(() => {
   return adminRoutes.filter(r => {
     if (r.meta?.hidden) return false
     if (r.meta?.platformOnly && !userStore.isPlatformAdmin) return false
+    if (r.meta?.roles?.length && !r.meta.roles.includes(userStore.userInfo?.role)) return false
     return true
   })
 })

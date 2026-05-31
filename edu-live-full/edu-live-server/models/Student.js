@@ -77,6 +77,18 @@ const Student = sequelize.define('Student', {
     defaultValue: 0,
     comment: '所属机构ID'
   },
+  // 所属销售
+  salesUserId: {
+    type: DataTypes.BIGINT.UNSIGNED,
+    allowNull: true,
+    comment: '所属销售人员ID'
+  },
+  // 销售层级
+  salesLevel: {
+    type: DataTypes.TINYINT.UNSIGNED,
+    allowNull: true,
+    comment: '销售层级：1/2/3'
+  },
   // 来源
   source: {
     type: DataTypes.STRING(50),

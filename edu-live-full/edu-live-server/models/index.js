@@ -13,6 +13,7 @@ const LiveRoom = require('./LiveRoom');
 const PPTFile = require('./PPTFile');
 const Homework = require('./Homework');
 const Question = require('./Question');
+const DistributionConfig = require('./DistributionConfig');
 
 // ========== 定义模型关联关系 ==========
 
@@ -58,6 +59,10 @@ Homework.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
 Student.hasMany(Homework, { foreignKey: 'studentId', as: 'submissions' });
 Homework.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
+// 销售 - 学员：一对多
+User.hasMany(Student, { foreignKey: 'salesUserId', as: 'salesStudents' });
+Student.belongsTo(User, { foreignKey: 'salesUserId', as: 'salesUser' });
+
 // 题库：独立模块
 
 
@@ -73,5 +78,6 @@ module.exports = {
   LiveRoom,
   PPTFile,
   Homework,
-  Question
+  Question,
+  DistributionConfig
 };
