@@ -21,6 +21,8 @@ export const createSchedule = (data) => request.post('/resource/schedules', data
 export const updateSchedule = (id, data) => request.put(`/resource/schedules/${id}`, data)
 export const deleteSchedule = (id, params) => request.delete(`/resource/schedules/${id}`, { params })
 export const copyWeekSchedules = (data) => request.post('/resource/schedules/copy-week', data)
+export const getTimeLanes = (params) => request.get('/resource/time-lanes', { params })
+export const saveTimeLanes = (data) => request.post('/resource/time-lanes', data)
 
 export const exportSchedules = async (params = {}) => {
 	const search = new URLSearchParams()

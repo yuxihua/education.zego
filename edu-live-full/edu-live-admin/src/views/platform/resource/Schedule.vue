@@ -24,6 +24,7 @@
               <el-button size="small" @click="moveWeek(1)">下一周</el-button>
               <el-button size="small" :disabled="!lastScheduleMove" @click="undoLastMove">撤销上次拖拽</el-button>
             </template>
+            <el-button size="small" @click="openTimeLaneDialog">时段设置</el-button>
             <el-button size="small" @click="handleCopyPrevToCurrent">上周复制到本周</el-button>
             <el-button size="small" @click="handleCopyCurrentToNext">本周复制到下周</el-button>
             <el-button size="small" type="success" @click="handleExportSchedules">导出CSV</el-button>
@@ -34,7 +35,7 @@
 
       <el-form :inline="true" class="search-form">
         <el-form-item label="教室">
-          <el-select v-model="scheduleSearch.classroomId" clearable placeholder="全部" style="width: 160px">
+          <el-select v-model="scheduleSearch.classroomId" clearable placeholder="全部" style="width: 300px">
             <el-option v-for="room in classrooms" :key="room.id" :label="`${room.location || '-'} / ${room.name}`" :value="room.id" />
           </el-select>
         </el-form-item>
@@ -71,7 +72,7 @@
             <span class="week-legend-text">{{ item.label }}</span>
           </div>
         </div>
-        <div class="week-drag-tips">拖拽课程到指定日期栏的“上午/下午/晚间”分区，可同时调整日期和时间段。</div>
+        <div class="week-drag-tips">拖拽课程到指定日期栏分区，可同时调整日期和时间段。当前时段：{{ timeLaneTipsText }}</div>
         <div class="quick-undo-bar" v-if="quickUndoVisible">
           <span class="quick-undo-text">已完成拖拽改期，可在 {{ quickUndoSeconds }}s 内快速撤销。</span>
           <el-button link type="warning" @click="undoLastMove">立即撤销</el-button>
@@ -101,7 +102,7 @@
                 @drop="handleLaneDrop(day, lane)"
               >
                 <div class="week-lane-title-row">
-                  <div class="week-lane-title">{{ lane.label }}</div>
+                  <div class="week-lane-title">{{ lane.label }}（{{ lane.start }}-{{ lane.end }}）</div>
                   <el-tooltip
                     v-if="getLaneConflict(day, lane)"
                     placement="top"
@@ -164,7 +165,19 @@
             <el-option v-for="teacher in teachers" :key="teacher.id" :label="teacher.nickname || teacher.username" :value="teacher.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="课程名称"><el-input v-model="scheduleForm.courseName" /></el-form-item>
+        <el-form-item label="课程名称">
+          <el-select
+            v-model="scheduleForm.courseName"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            placeholder="请选择课程名称"
+            style="width: 100%"
+          >
+            <el-option v-for="name in courseOptions" :key="name" :label="name" :value="name" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="开始时间"><el-date-picker v-model="scheduleForm.startTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" /></el-form-item>
         <el-form-item label="结束时间"><el-date-picker v-model="scheduleForm.endTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="scheduleForm.remarks" type="textarea" :rows="3" /></el-form-item>
@@ -191,6 +204,46 @@
         <el-table-column prop="conflictTimeRange" label="冲突时间" min-width="180" />
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="timeLaneDialogVisible" title="时段设置" width="560px">
+      <el-alert title="设置上午/下午/晚间的具体时间段后，周视图分区和拖拽改期将按新规则生效。" type="info" :closable="false" style="margin-bottom: 12px" />
+      <el-form label-width="90px">
+        <el-row v-for="item in timeLaneDraft" :key="item.key" :gutter="12" style="margin-bottom: 8px">
+          <el-col :span="6">
+            <el-form-item :label="item.label">
+              <el-input :model-value="item.label" disabled />
+            </el-form-item>
+          </el-col>
+          <el-col :span="9">
+            <el-form-item label="开始">
+              <el-time-picker
+                v-model="item.start"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="开始时间"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="9">
+            <el-form-item label="结束">
+              <el-time-picker
+                v-model="item.end"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="结束时间"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetTimeLanesToDefault">恢复默认</el-button>
+        <el-button @click="timeLaneDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveTimeLaneSettings">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -199,6 +252,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
+import { getCourseList } from '@/api/course'
 import {
   checkScheduleConflict,
   copyWeekSchedules,
@@ -208,6 +262,8 @@ import {
   getClassrooms,
   getSchedules,
   getTeachers,
+  getTimeLanes,
+  saveTimeLanes,
   updateSchedule
 } from '@/api/resource'
 
@@ -217,6 +273,7 @@ const currentInstitutionId = ref(userStore.currentInstitutionId || null)
 
 const classrooms = ref([])
 const teachers = ref([])
+const courseOptions = ref([])
 const schedules = ref([])
 const scheduleLoading = ref(false)
 const scheduleViewMode = ref('week')
@@ -227,6 +284,7 @@ const scheduleDialogVisible = ref(false)
 const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, courseName: '', startTime: '', endTime: '', remarks: '', status: 1 })
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
+const timeLaneDialogVisible = ref(false)
 const draggingSlot = ref(null)
 const dragHoverLaneKey = ref('')
 const laneConflictMap = reactive({})
@@ -249,13 +307,120 @@ const SLOT_THEMES = [
   { bg: '#fcffe6', border: '#d3f261', text: '#5b8c00' }
 ]
 
-const TIME_LANES = [
-  { key: 'morning', label: '上午', startHour: 9, startMinute: 0, endHour: 12, endMinute: 0 },
-  { key: 'afternoon', label: '下午', startHour: 13, startMinute: 30, endHour: 17, endMinute: 30 },
-  { key: 'evening', label: '晚间', startHour: 19, startMinute: 0, endHour: 22, endMinute: 0 }
+const DEFAULT_TIME_LANE_SETTINGS = [
+  { key: 'morning', label: '上午', start: '09:00', end: '12:00' },
+  { key: 'afternoon', label: '下午', start: '13:30', end: '17:30' },
+  { key: 'evening', label: '晚间', start: '19:00', end: '22:00' }
 ]
 
-const timeLanes = computed(() => TIME_LANES)
+const cloneTimeLanes = (list = []) => (list || []).map((item) => ({ ...item }))
+const timeLaneSettings = ref(cloneTimeLanes(DEFAULT_TIME_LANE_SETTINGS))
+const timeLaneDraft = ref(cloneTimeLanes(DEFAULT_TIME_LANE_SETTINGS))
+
+const parseHmToMinute = (value) => {
+  if (!value || typeof value !== 'string' || !value.includes(':')) return null
+  const [hh, mm] = value.split(':').map((x) => Number(x))
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return hh * 60 + mm
+}
+
+const minuteToParts = (minute = 0) => {
+  const hour = Math.floor(minute / 60)
+  const mins = minute % 60
+  return { hour, minute: mins }
+}
+
+const normalizeTimeLanes = (list = []) => {
+  const baseMap = new Map(DEFAULT_TIME_LANE_SETTINGS.map((item) => [item.key, item]))
+  return DEFAULT_TIME_LANE_SETTINGS.map((base) => {
+    const target = (list || []).find((item) => item?.key === base.key) || {}
+    const start = typeof target.start === 'string' ? target.start : base.start
+    const end = typeof target.end === 'string' ? target.end : base.end
+    return { ...baseMap.get(base.key), start, end }
+  })
+}
+
+const validateTimeLanes = (list = []) => {
+  const ranges = []
+  for (const lane of list) {
+    const startMinute = parseHmToMinute(lane.start)
+    const endMinute = parseHmToMinute(lane.end)
+    if (startMinute === null || endMinute === null) {
+      return { ok: false, message: `${lane.label} 时间格式不正确` }
+    }
+    if (startMinute >= endMinute) {
+      return { ok: false, message: `${lane.label} 的开始时间必须早于结束时间` }
+    }
+    ranges.push({ ...lane, startMinute, endMinute })
+  }
+
+  for (let i = 1; i < ranges.length; i += 1) {
+    if (ranges[i].startMinute < ranges[i - 1].endMinute) {
+      return { ok: false, message: `${ranges[i - 1].label} 与 ${ranges[i].label} 时间段重叠，请调整` }
+    }
+  }
+  return { ok: true }
+}
+
+const loadTimeLaneSettings = async () => {
+  try {
+    const res = await getTimeLanes(buildCommonParams())
+    const normalized = normalizeTimeLanes(Array.isArray(res) ? res : [])
+    const check = validateTimeLanes(normalized)
+    timeLaneSettings.value = check.ok ? normalized : cloneTimeLanes(DEFAULT_TIME_LANE_SETTINGS)
+  } catch (err) {
+    timeLaneSettings.value = cloneTimeLanes(DEFAULT_TIME_LANE_SETTINGS)
+  }
+}
+
+const persistTimeLaneSettings = (list = []) => {
+  return saveTimeLanes({ lanes: list, ...(buildCommonParams() || {}) })
+}
+
+const openTimeLaneDialog = () => {
+  timeLaneDraft.value = cloneTimeLanes(timeLaneSettings.value)
+  timeLaneDialogVisible.value = true
+}
+
+const saveTimeLaneSettings = async () => {
+  const normalized = normalizeTimeLanes(timeLaneDraft.value)
+  const check = validateTimeLanes(normalized)
+  if (!check.ok) {
+    ElMessage.warning(check.message)
+    return
+  }
+  try {
+    await persistTimeLaneSettings(normalized)
+    timeLaneSettings.value = cloneTimeLanes(normalized)
+    clearLanePreviewMaps()
+    timeLaneDialogVisible.value = false
+    ElMessage.success('时段设置已保存')
+  } catch (err) {
+    ElMessage.error('保存时段设置失败')
+  }
+}
+
+const resetTimeLanesToDefault = () => {
+  timeLaneDraft.value = cloneTimeLanes(DEFAULT_TIME_LANE_SETTINGS)
+}
+
+const timeLanes = computed(() => {
+  return (timeLaneSettings.value || []).map((lane) => {
+    const startMinute = parseHmToMinute(lane.start) || 0
+    const endMinute = parseHmToMinute(lane.end) || 0
+    const startParts = minuteToParts(startMinute)
+    const endParts = minuteToParts(endMinute)
+    return {
+      ...lane,
+      startHour: startParts.hour,
+      startMinute: startParts.minute,
+      endHour: endParts.hour,
+      endMinute: endParts.minute
+    }
+  })
+})
+
+const timeLaneTipsText = computed(() => (timeLanes.value || []).map((lane) => `${lane.label} ${lane.start}-${lane.end}`).join('，'))
 
 const buildCommonParams = () => {
   const params = {}
@@ -565,12 +730,14 @@ const loadInstitutions = async () => {
 }
 
 const loadBaseData = async () => {
-  const [roomList, teacherList] = await Promise.all([
+  const [roomList, teacherList, courseRes] = await Promise.all([
     getClassrooms(buildCommonParams()),
-    getTeachers(buildCommonParams())
+    getTeachers(buildCommonParams()),
+    getCourseList({ page: 1, size: 1000, ...buildCommonParams() })
   ])
   classrooms.value = roomList || []
   teachers.value = teacherList || []
+  courseOptions.value = [...new Set((courseRes?.list || []).map((item) => item.title).filter(Boolean))]
 }
 
 const loadSchedules = async () => {
@@ -856,12 +1023,14 @@ const handleExportSchedules = async () => {
 }
 
 const reloadAll = async () => {
+  await loadTimeLaneSettings()
   await loadBaseData()
   await applyScheduleViewRange()
 }
 
 onMounted(async () => {
   await loadInstitutions()
+  await loadTimeLaneSettings()
   await loadBaseData()
   await applyScheduleViewRange()
 })

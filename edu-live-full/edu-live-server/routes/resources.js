@@ -8,6 +8,12 @@ const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
 
 const ADMIN_ROLES = ['superadmin', 'admin'];
+const DEFAULT_TIME_LANES = [
+  { key: 'morning', label: '上午', start: '09:00', end: '12:00' },
+  { key: 'afternoon', label: '下午', start: '13:30', end: '17:30' },
+  { key: 'evening', label: '晚间', start: '19:00', end: '22:00' }
+]
+const timeLaneSettingsByInstitution = new Map();
 
 function getInstitutionId(req) {
   return req.user.role === 'superadmin' ? Number(req.query.institutionId || req.body.institutionId || 0) : Number(req.user.institutionId || 0);
@@ -34,6 +40,51 @@ function formatDateTime(dateValue) {
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
   return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
+function cloneTimeLanes(list = []) {
+  return (list || []).map((item) => ({ ...item }));
+}
+
+function normalizeTimeLanes(list = []) {
+  return DEFAULT_TIME_LANES.map((base) => {
+    const found = (list || []).find((item) => item && item.key === base.key) || {};
+    return {
+      ...base,
+      start: typeof found.start === 'string' && found.start ? found.start : base.start,
+      end: typeof found.end === 'string' && found.end ? found.end : base.end
+    };
+  });
+}
+
+function getTimeLaneSettings(institutionId) {
+  const key = Number(institutionId || 0) || 0;
+  const stored = timeLaneSettingsByInstitution.get(key);
+  return normalizeTimeLanes(stored || DEFAULT_TIME_LANES);
+}
+
+function validateTimeLanes(list = []) {
+  const toMinute = (value) => {
+    if (!value || typeof value !== 'string' || !value.includes(':')) return null;
+    const [hh, mm] = value.split(':').map((part) => Number(part));
+    if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    return hh * 60 + mm;
+  };
+
+  const ranges = [];
+  for (const lane of list) {
+    const start = toMinute(lane.start);
+    const end = toMinute(lane.end);
+    if (start === null || end === null) return `${lane.label} 时间格式不正确`;
+    if (start >= end) return `${lane.label} 的开始时间必须早于结束时间`;
+    ranges.push({ ...lane, start, end });
+  }
+
+  for (let i = 1; i < ranges.length; i += 1) {
+    if (ranges[i].start < ranges[i - 1].end) return `${ranges[i - 1].label} 与 ${ranges[i].label} 时间段重叠，请调整`;
+  }
+
+  return null;
 }
 
 function buildScheduleConflictWhere({ institutionId, classroomId, teacherId, startTime, endTime, excludeId }) {
@@ -376,6 +427,23 @@ router.get('/schedules', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req
   });
 
   success(res, list);
+}));
+
+router.get('/time-lanes', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  success(res, getTimeLaneSettings(institutionId));
+}));
+
+router.post('/time-lanes', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const lanes = Array.isArray(req.body?.lanes) ? req.body.lanes : [];
+  const normalized = normalizeTimeLanes(lanes);
+  const error = validateTimeLanes(normalized);
+  if (error) return fail(res, error, 400, 400);
+
+  const key = Number(institutionId || 0) || 0;
+  timeLaneSettingsByInstitution.set(key, cloneTimeLanes(normalized));
+  success(res, normalized, '排课时段设置已保存');
 }));
 
 router.post('/schedules/check-conflict', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
