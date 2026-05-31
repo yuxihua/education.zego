@@ -66,6 +66,10 @@ Homework.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 User.hasMany(Student, { foreignKey: 'salesUserId', as: 'salesStudents' });
 Student.belongsTo(User, { foreignKey: 'salesUserId', as: 'salesUser' });
 
+// 销售上下级：一对多
+User.hasMany(User, { foreignKey: 'parentSalesUserId', as: 'downlineSales' });
+User.belongsTo(User, { foreignKey: 'parentSalesUserId', as: 'parentSales' });
+
 // 用户 - 操作日志：一对多
 User.hasMany(OperationLog, { foreignKey: 'userId', as: 'operationLogs' });
 OperationLog.belongsTo(User, { foreignKey: 'userId', as: 'operator' });

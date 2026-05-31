@@ -66,6 +66,18 @@ const User = sequelize.define('User', {
     allowNull: true,
     comment: '机构名称'
   },
+  // 销售层级（仅销售角色使用）
+  salesLevel: {
+    type: DataTypes.TINYINT.UNSIGNED,
+    allowNull: true,
+    comment: '销售层级：1/2/3'
+  },
+  // 上级销售ID（仅销售角色使用）
+  parentSalesUserId: {
+    type: DataTypes.BIGINT.UNSIGNED,
+    allowNull: true,
+    comment: '上级销售用户ID'
+  },
   // 状态
   status: {
     type: DataTypes.TINYINT,

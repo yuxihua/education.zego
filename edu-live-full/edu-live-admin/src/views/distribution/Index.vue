@@ -59,6 +59,7 @@
         <el-table-column prop="salesUserName" label="销售" width="130" />
         <el-table-column prop="salesLevel" label="层级" width="80" />
         <el-table-column prop="amount" label="订单金额" width="110" />
+        <el-table-column prop="teamSalesAmount" label="团队销量" width="120" />
         <el-table-column prop="monthlyOrderSeq" label="月序号" width="90" />
         <el-table-column prop="commissionRate" label="提成比例" width="100">
           <template #default="{ row }">{{ Number(row.commissionRate || 0) * 100 }}%</template>
@@ -90,7 +91,7 @@
         <el-table-column prop="level" label="层级" width="90">
           <template #default="{ row }">{{ row.level }}级</template>
         </el-table-column>
-        <el-table-column label="阈值（月新增订单）" width="180">
+        <el-table-column label="阈值（团队月销量）" width="190">
           <template #default="{ row }">
             <el-input-number v-model="row.tierThreshold" :min="0" controls-position="right" />
           </template>
@@ -183,6 +184,23 @@
         <el-form-item label="登录账号"><el-input v-model="createSalesForm.username" /></el-form-item>
         <el-form-item label="登录密码"><el-input v-model="createSalesForm.password" type="password" show-password /></el-form-item>
         <el-form-item label="姓名"><el-input v-model="createSalesForm.nickname" /></el-form-item>
+        <el-form-item label="销售层级">
+          <el-select v-model="createSalesForm.salesLevel" style="width: 100%" @change="onSalesLevelChange">
+            <el-option label="一级" :value="1" />
+            <el-option label="二级" :value="2" />
+            <el-option label="三级" :value="3" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="上级销售" v-if="createSalesForm.salesLevel > 1">
+          <el-select v-model="createSalesForm.parentSalesUserId" placeholder="请选择上级销售" style="width: 100%" filterable>
+            <el-option
+              v-for="s in parentSalesOptions"
+              :key="s.id"
+              :label="`${s.name}（${s.username}）`"
+              :value="s.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="手机号"><el-input v-model="createSalesForm.phone" /></el-form-item>
       </el-form>
       <template #footer>
@@ -233,7 +251,13 @@ const settlementStatus = reactive({ isLocked: false, lockAt: '' })
 const assignForm = reactive({ studentId: null, salesUserId: null, salesLevel: 1 })
 
 const createSalesVisible = ref(false)
-const createSalesForm = reactive({ username: '', password: '', nickname: '', phone: '' })
+const createSalesForm = reactive({ username: '', password: '', nickname: '', phone: '', salesLevel: 1, parentSalesUserId: null })
+
+const parentSalesOptions = computed(() => {
+  const parentLevel = Number(createSalesForm.salesLevel || 1) - 1
+  if (parentLevel < 1) return []
+  return (salesList.value || []).filter((item) => Number(item.salesLevel || 0) === parentLevel)
+})
 
 const loadSales = async () => {
   if (!userStore.userInfo) return
@@ -403,12 +427,29 @@ const submitAssign = async () => {
   await loadTree()
 }
 
+const onSalesLevelChange = () => {
+  if (Number(createSalesForm.salesLevel || 1) <= 1) {
+    createSalesForm.parentSalesUserId = null
+  }
+}
+
 const openCreateSales = () => {
-  Object.assign(createSalesForm, { username: '', password: '', nickname: '', phone: '' })
+  Object.assign(createSalesForm, {
+    username: '',
+    password: '',
+    nickname: '',
+    phone: '',
+    salesLevel: 1,
+    parentSalesUserId: null
+  })
   createSalesVisible.value = true
 }
 
 const submitCreateSales = async () => {
+  if (Number(createSalesForm.salesLevel || 1) > 1 && !createSalesForm.parentSalesUserId) {
+    ElMessage.warning('二级/三级销售必须选择上级销售')
+    return
+  }
   await createSalesUser(createSalesForm)
   ElMessage.success('销售账号创建成功')
   createSalesVisible.value = false

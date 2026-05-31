@@ -17,6 +17,11 @@ function getInstitutionId(req) {
   return req.user?.institutionId || 0;
 }
 
+function normalizeSalesLevel(value) {
+  const level = Number(value);
+  return [1, 2, 3].includes(level) ? level : null;
+}
+
 function getMonthRange(month) {
   if (!month) return null;
   const [y, m] = String(month).split('-').map((v) => Number(v));
@@ -75,9 +80,9 @@ async function getLockedSettlement(institutionId, monthKey) {
 
 async function getOrInitConfig(institutionId) {
   const defaults = [
-    { level: 1, tierThreshold: 30, rateTier1: 0.05, rateTier2: 0.08 },
-    { level: 2, tierThreshold: 20, rateTier1: 0.03, rateTier2: 0.05 },
-    { level: 3, tierThreshold: 10, rateTier1: 0.02, rateTier2: 0.03 }
+    { level: 1, tierThreshold: 30000, rateTier1: 0.05, rateTier2: 0.08 },
+    { level: 2, tierThreshold: 20000, rateTier1: 0.03, rateTier2: 0.05 },
+    { level: 3, tierThreshold: 10000, rateTier1: 0.02, rateTier2: 0.03 }
   ];
 
   const exists = await DistributionConfig.findAll({
@@ -95,7 +100,39 @@ function pickCommissionRate(seq, config) {
   const threshold = Number(config.tierThreshold || 0);
   const tier1 = Number(config.rateTier1 || 0);
   const tier2 = Number(config.rateTier2 || 0);
-  return seq > threshold ? tier2 : tier1;
+  return Number(seq || 0) >= threshold ? tier2 : tier1;
+}
+
+function buildSalesHierarchy(salesRows) {
+  const salesById = {};
+  const childrenByParent = {};
+
+  salesRows.forEach((sales) => {
+    const sid = Number(sales.id);
+    const parentId = sales.parentSalesUserId ? Number(sales.parentSalesUserId) : 0;
+    salesById[sid] = sales;
+    if (!childrenByParent[parentId]) childrenByParent[parentId] = [];
+    childrenByParent[parentId].push(sid);
+  });
+
+  return { salesById, childrenByParent };
+}
+
+function collectDownlineIds(startId, childrenByParent) {
+  const ids = [];
+  const stack = [Number(startId)];
+  const visited = new Set();
+
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    ids.push(current);
+    const children = childrenByParent[current] || [];
+    children.forEach((childId) => stack.push(Number(childId)));
+  }
+
+  return ids;
 }
 
 async function buildCommissionRows({ institutionId, salesUserId, salesLevel, month, keyword }) {
@@ -147,20 +184,48 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
   const configRows = await getOrInitConfig(institutionId);
   const configMap = Object.fromEntries(configRows.map((item) => [Number(item.level), item]));
 
+  const salesUsers = await User.findAll({
+    where: { role: 'sales', institutionId, status: 1 },
+    attributes: ['id', 'salesLevel', 'parentSalesUserId']
+  });
+  const { salesById, childrenByParent } = buildSalesHierarchy(salesUsers.map((s) => s.toJSON()));
+
+  const ownSalesAmountMap = {};
+  const ownOrderCountMap = {};
+  rows.forEach((item) => {
+    const sid = Number(item.student?.salesUserId || 0);
+    if (!sid) return;
+    ownSalesAmountMap[sid] = Number((Number(ownSalesAmountMap[sid] || 0) + Number(item.amount || 0)).toFixed(2));
+    ownOrderCountMap[sid] = Number(ownOrderCountMap[sid] || 0) + 1;
+  });
+
+  const teamSalesAmountMap = {};
+  const teamOrderCountMap = {};
+  Object.keys(salesById).forEach((sidText) => {
+    const sid = Number(sidText);
+    const teamIds = collectDownlineIds(sid, childrenByParent);
+    const teamSales = teamIds.reduce((sum, id) => sum + Number(ownSalesAmountMap[id] || 0), 0);
+    const teamOrders = teamIds.reduce((sum, id) => sum + Number(ownOrderCountMap[id] || 0), 0);
+    teamSalesAmountMap[sid] = Number(teamSales.toFixed(2));
+    teamOrderCountMap[sid] = teamOrders;
+  });
+
   const seqMap = {};
   const list = rows.map((item) => {
     const row = item.toJSON();
-    const level = Number(row.student?.salesLevel || 0);
     const sid = Number(row.student?.salesUserId || 0);
+    const salesInfo = sid ? salesById[sid] : null;
+    const level = Number(salesInfo?.salesLevel || row.student?.salesLevel || 0);
     const payTime = row.payTime ? new Date(row.payTime) : null;
     const monthKey = payTime
       ? `${payTime.getFullYear()}-${String(payTime.getMonth() + 1).padStart(2, '0')}`
       : 'unknown';
-    const key = `${sid}_${level}_${monthKey}`;
+    const key = `${sid}_${monthKey}`;
     seqMap[key] = (seqMap[key] || 0) + 1;
 
     const cfg = configMap[level] || { tierThreshold: 0, rateTier1: 0, rateTier2: 0 };
-    const commissionRate = pickCommissionRate(seqMap[key], cfg);
+    const teamSalesAmount = Number(teamSalesAmountMap[sid] || 0);
+    const commissionRate = pickCommissionRate(teamSalesAmount, cfg);
     const amount = Number(row.amount || 0);
     const commissionAmount = Number((amount * commissionRate).toFixed(2));
 
@@ -175,6 +240,8 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
       salesUserName: row.student?.salesUser?.nickname || row.student?.salesUser?.username || '-',
       salesLevel: level || null,
       monthKey,
+      teamSalesAmount,
+      teamOrderCount: Number(teamOrderCountMap[sid] || 0),
       monthlyOrderSeq: seqMap[key],
       commissionRate,
       commissionAmount
@@ -236,7 +303,7 @@ router.get('/sales/list', auth, requireRole(VIEW_ROLES), asyncHandler(async (req
       status: 1,
       institutionId
     },
-    attributes: ['id', 'username', 'nickname', 'phone', 'institutionId'],
+    attributes: ['id', 'username', 'nickname', 'phone', 'institutionId', 'salesLevel', 'parentSalesUserId'],
     order: [['id', 'DESC']]
   });
 
@@ -245,7 +312,9 @@ router.get('/sales/list', auth, requireRole(VIEW_ROLES), asyncHandler(async (req
     name: item.nickname || item.username,
     username: item.username,
     phone: item.phone,
-    institutionId: item.institutionId
+    institutionId: item.institutionId,
+    salesLevel: item.salesLevel,
+    parentSalesUserId: item.parentSalesUserId
   })));
 }));
 
@@ -291,21 +360,18 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     : getInstitutionId(req);
   const { month } = req.query;
 
-  const salesWhere = {
-    role: 'sales',
-    status: 1,
-    institutionId
-  };
+  const salesList = await User.findAll({
+    where: { role: 'sales', status: 1, institutionId },
+    attributes: ['id', 'username', 'nickname', 'salesLevel', 'parentSalesUserId']
+  });
+  const salesRows = salesList.map((s) => s.toJSON());
+  const { salesById, childrenByParent } = buildSalesHierarchy(salesRows);
+
+  let saleIds = salesRows.map((s) => Number(s.id));
   if (req.user.role === 'sales') {
-    salesWhere.id = req.user.id;
+    saleIds = collectDownlineIds(req.user.id, childrenByParent);
   }
 
-  const salesList = await User.findAll({
-    where: salesWhere,
-    attributes: ['id', 'username', 'nickname']
-  });
-
-  const saleIds = salesList.map((i) => i.id);
   const studentWhere = {
     institutionId,
     salesUserId: { [Op.ne]: null },
@@ -323,7 +389,7 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
     })
     : [];
 
-  const salesNameMap = Object.fromEntries(salesList.map((s) => [s.id, s.nickname || s.username]));
+  const salesNameMap = Object.fromEntries(salesRows.map((s) => [s.id, s.nickname || s.username]));
   const levelMap = {
     1: { id: 'level-1', nodeType: 'level', salesLevel: 1, label: '一级分销', children: [], orderCount: 0, commissionAmount: 0 },
     2: { id: 'level-2', nodeType: 'level', salesLevel: 2, label: '二级分销', children: [], orderCount: 0, commissionAmount: 0 },
@@ -335,21 +401,19 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
   const rows = lockedSettlement
     ? applyLocalFilters(
       Array.isArray(lockedSettlement.snapshotData?.rows) ? lockedSettlement.snapshotData.rows : [],
-      {
-        salesUserId: req.user.role === 'sales' ? req.user.id : null,
-        salesLevel: null,
-        keyword: ''
-      }
+      { salesUserId: null, salesLevel: null, keyword: '' }
     )
     : await buildCommissionRows({
       institutionId,
-      salesUserId: req.user.role === 'sales' ? req.user.id : null,
+      salesUserId: null,
       salesLevel: null,
       month,
       keyword: ''
     });
+
+  const effectiveRows = rows.filter((row) => !saleIds.length || saleIds.includes(Number(row.salesUserId || 0)));
   const salesMetricsMap = {};
-  rows.forEach((row) => {
+  effectiveRows.forEach((row) => {
     const sid = Number(row.salesUserId || 0);
     const level = Number(row.salesLevel || 0);
     if (!sid || ![1, 2, 3].includes(level)) return;
@@ -365,26 +429,50 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
   });
 
   const salesNodeMap = {};
+  salesRows.forEach((sales) => {
+    const sid = Number(sales.id);
+    if (!saleIds.includes(sid)) return;
+    const level = normalizeSalesLevel(sales.salesLevel) || 1;
+    const key = `${level}_${sid}`;
+    const metrics = salesMetricsMap[key] || { orderCount: 0, commissionAmount: 0 };
+    salesNodeMap[key] = {
+      id: `sales-${level}-${sid}`,
+      nodeType: 'sales',
+      salesLevel: level,
+      salesUserId: sid,
+      orderCount: metrics.orderCount,
+      commissionAmount: Number(metrics.commissionAmount.toFixed(2)),
+      label: `${salesNameMap[sid] || `销售${sid}`}`,
+      children: []
+    };
+  });
+
+  salesRows.forEach((sales) => {
+    const sid = Number(sales.id);
+    if (!saleIds.includes(sid)) return;
+    const level = normalizeSalesLevel(sales.salesLevel) || 1;
+    const key = `${level}_${sid}`;
+    const node = salesNodeMap[key];
+    if (!node) return;
+
+    const parentId = Number(sales.parentSalesUserId || 0);
+    const parent = parentId ? salesById[parentId] : null;
+    const parentLevel = normalizeSalesLevel(parent?.salesLevel);
+    if (parent && saleIds.includes(parentId) && parentLevel && parentLevel === level - 1) {
+      const parentKey = `${parentLevel}_${parentId}`;
+      salesNodeMap[parentKey]?.children.push(node);
+    } else {
+      levelMap[level].children.push(node);
+    }
+  });
+
   for (const stu of students) {
     const level = Number(stu.salesLevel || 0);
     const sid = Number(stu.salesUserId || 0);
     if (![1, 2, 3].includes(level) || !sid) continue;
 
     const key = `${level}_${sid}`;
-    if (!salesNodeMap[key]) {
-      const metrics = salesMetricsMap[key] || { orderCount: 0, commissionAmount: 0 };
-      salesNodeMap[key] = {
-        id: `sales-${level}-${sid}`,
-        nodeType: 'sales',
-        salesLevel: level,
-        salesUserId: sid,
-        orderCount: metrics.orderCount,
-        commissionAmount: Number(metrics.commissionAmount.toFixed(2)),
-        label: `${salesNameMap[sid] || `销售${sid}`}`,
-        children: []
-      };
-      levelMap[level].children.push(salesNodeMap[key]);
-    }
+    if (!salesNodeMap[key]) continue;
 
     const name = stu.realName || stu.nickname || '未命名学员';
     salesNodeMap[key].children.push({
@@ -411,18 +499,23 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
   success(res, {
     tree,
     stats: {
-      salesCount: salesList.length,
+      salesCount: saleIds.length,
       studentCount: students.length,
-      orderCount: rows.length,
-      commissionAmount: Number(rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0).toFixed(2))
+      orderCount: effectiveRows.length,
+      commissionAmount: Number(effectiveRows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0).toFixed(2))
     }
   });
 }));
 
 router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
-  const { username, password, nickname, phone, email } = req.body;
+  const { username, password, nickname, phone, email, salesLevel, parentSalesUserId } = req.body;
   if (!username || !password) {
     return fail(res, '账号和密码不能为空', 400, 400);
+  }
+
+  const level = normalizeSalesLevel(salesLevel);
+  if (!level) {
+    return fail(res, 'salesLevel 必须为 1/2/3', 400, 400);
   }
 
   const institutionId = req.user.role === 'superadmin'
@@ -434,6 +527,29 @@ router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
     return fail(res, '账号已存在', 409, 409);
   }
 
+  let parentId = null;
+  if (level > 1) {
+    parentId = Number(parentSalesUserId || 0);
+    if (!parentId) {
+      return fail(res, `${level}级销售必须指定上级销售`, 400, 400);
+    }
+
+    const parentSales = await User.findOne({
+      where: {
+        id: parentId,
+        role: 'sales',
+        status: 1,
+        institutionId
+      }
+    });
+    if (!parentSales) {
+      return fail(res, '上级销售不存在', 404, 404);
+    }
+    if (Number(parentSales.salesLevel || 0) !== level - 1) {
+      return fail(res, `上级销售必须是${level - 1}级`, 400, 400);
+    }
+  }
+
   const user = await User.create({
     username,
     password,
@@ -441,6 +557,8 @@ router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
     phone,
     email,
     role: 'sales',
+    salesLevel: level,
+    parentSalesUserId: parentId,
     status: 1,
     institutionId,
     institutionName: req.user.institutionName || null
@@ -451,19 +569,16 @@ router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
     name: user.nickname || user.username,
     username: user.username,
     phone: user.phone,
-    institutionId: user.institutionId
+    institutionId: user.institutionId,
+    salesLevel: user.salesLevel,
+    parentSalesUserId: user.parentSalesUserId
   }, '销售账号创建成功');
 }));
 
 router.post('/student/assign', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
   const { studentId, salesUserId, salesLevel } = req.body;
-  if (!studentId || !salesUserId || !salesLevel) {
-    return fail(res, 'studentId、salesUserId、salesLevel 必填', 400, 400);
-  }
-
-  const level = Number(salesLevel);
-  if (![1, 2, 3].includes(level)) {
-    return fail(res, 'salesLevel 仅支持 1/2/3', 400, 400);
+  if (!studentId || !salesUserId) {
+    return fail(res, 'studentId、salesUserId 必填', 400, 400);
   }
 
   const student = await Student.findByPk(studentId);
@@ -482,6 +597,14 @@ router.post('/student/assign', auth, requireRole(ADMIN_ROLES), asyncHandler(asyn
     }
   });
   if (!sales) return fail(res, '销售人员不存在', 404, 404);
+
+  const level = Number(sales.salesLevel || 0);
+  if (![1, 2, 3].includes(level)) {
+    return fail(res, '销售人员未配置有效层级', 400, 400);
+  }
+  if (salesLevel !== undefined && salesLevel !== null && Number(salesLevel) !== level) {
+    return fail(res, '学员分销层级需与销售层级一致', 400, 400);
+  }
 
   if (req.user.role !== 'superadmin' && student.institutionId !== institutionId) {
     return fail(res, '无权分配该学员', 403, 403);
@@ -698,7 +821,7 @@ router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (
     return text;
   };
 
-  const header = ['订单号', '支付时间', '课程', '学员', '销售', '层级', '金额', '月序号', '提成比例', '提成金额'];
+  const header = ['订单号', '支付时间', '课程', '学员', '销售', '层级', '订单金额', '团队销量', '月序号', '提成比例', '提成金额'];
   const lines = rows.map((row) => [
     row.orderNo,
     row.payTime || '-',
@@ -707,6 +830,7 @@ router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (
     row.salesUserName,
     row.salesLevel || '-',
     row.amount,
+    row.teamSalesAmount || 0,
     row.monthlyOrderSeq,
     row.commissionRate,
     row.commissionAmount
