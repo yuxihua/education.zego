@@ -6,7 +6,7 @@ const router = express.Router();
 const { Op } = require('sequelize');
 const axios = require('axios');
 const crypto = require('crypto');
-const { Student, Order, Course, Homework } = require('../models');
+const { Student, Order, Course, Homework, User } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, generateToken, requireRole } = require('../middleware/auth');
@@ -347,6 +347,86 @@ router.get('/my-courses', auth, asyncHandler(async (req, res) => {
     page: pageNum,
     size: pageSizeNum
   });
+}));
+
+/**
+ * 后台新增学员（支持创建时绑定销售层级）
+ */
+router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant']), asyncHandler(async (req, res) => {
+  const {
+    nickname,
+    realName,
+    phone,
+    email,
+    region,
+    source = 'admin',
+    institutionId,
+    salesUserId,
+    salesLevel
+  } = req.body;
+
+  if (!nickname && !realName && !phone) {
+    return fail(res, '昵称、姓名、手机号至少填写一个', 400, 400);
+  }
+
+  if (phone) {
+    const phoneExist = await Student.findOne({ where: { phone } });
+    if (phoneExist) {
+      return fail(res, '手机号已存在', 409, 409);
+    }
+  }
+
+  let institutionIdNum = req.user.role === 'superadmin'
+    ? Number(institutionId || 0)
+    : getOperatorInstitutionId(req);
+
+  let salesUserIdNum = salesUserId ? Number(salesUserId) : null;
+  let salesLevelNum = salesLevel ? Number(salesLevel) : null;
+
+  if (salesUserIdNum || salesLevelNum) {
+    if (!salesUserIdNum || !salesLevelNum) {
+      return fail(res, '设置分销时 salesUserId 与 salesLevel 需同时填写', 400, 400);
+    }
+
+    if (![1, 2, 3].includes(salesLevelNum)) {
+      return fail(res, 'salesLevel 仅支持 1/2/3', 400, 400);
+    }
+
+    const sales = await User.findOne({
+      where: {
+        id: salesUserIdNum,
+        role: 'sales',
+        status: 1
+      }
+    });
+
+    if (!sales) {
+      return fail(res, '销售人员不存在', 404, 404);
+    }
+
+    if (req.user.role !== 'superadmin' && sales.institutionId !== institutionIdNum) {
+      return fail(res, '销售人员不属于当前机构', 400, 400);
+    }
+
+    if (!institutionIdNum) {
+      institutionIdNum = sales.institutionId || 0;
+    }
+  }
+
+  const student = await Student.create({
+    nickname: nickname || realName || '新学员',
+    realName: realName || null,
+    phone: phone || null,
+    email: email || null,
+    region: region || null,
+    source,
+    status: 1,
+    institutionId: institutionIdNum,
+    salesUserId: salesUserIdNum,
+    salesLevel: salesLevelNum
+  });
+
+  success(res, student, '学员创建成功');
 }));
 
 router.get('/list', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {

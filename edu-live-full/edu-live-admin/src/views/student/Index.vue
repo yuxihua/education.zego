@@ -14,6 +14,7 @@
           <el-input v-model="searchForm.nickname" placeholder="请输入" clearable />
         </el-form-item>
         <el-form-item>
+          <el-button type="success" @click="openCreateDialog">新增学员</el-button>
           <el-button type="primary" @click="loadData">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
@@ -90,13 +91,50 @@
       </el-table>
       <el-empty v-if="!recordList.length" description="暂无学习记录" style="margin-top: 12px" />
     </el-dialog>
+
+    <el-dialog v-model="createDialogVisible" title="新增学员" width="640px">
+      <el-form :model="createForm" label-width="110px">
+        <el-form-item label="昵称">
+          <el-input v-model="createForm.nickname" />
+        </el-form-item>
+        <el-form-item label="真实姓名">
+          <el-input v-model="createForm.realName" />
+        </el-form-item>
+        <el-form-item label="手机号">
+          <el-input v-model="createForm.phone" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="createForm.email" />
+        </el-form-item>
+        <el-form-item label="地区">
+          <el-input v-model="createForm.region" />
+        </el-form-item>
+        <el-form-item label="归属销售">
+          <el-select v-model="createForm.salesUserId" placeholder="不设置" clearable filterable style="width: 100%">
+            <el-option v-for="item in salesOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="分销层级">
+          <el-select v-model="createForm.salesLevel" placeholder="不设置" clearable style="width: 100%">
+            <el-option label="一级" :value="1" />
+            <el-option label="二级" :value="2" />
+            <el-option label="三级" :value="3" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleCreateStudent">创建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getStudentList, getStudentDetail, getStudentLearningRecord } from '@/api/student'
+import { getStudentList, getStudentDetail, getStudentLearningRecord, createStudent } from '@/api/student'
+import { getSalesList } from '@/api/distribution'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
@@ -106,8 +144,10 @@ const searchForm = reactive({ phone: '', nickname: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
 const detailDialogVisible = ref(false)
 const recordDialogVisible = ref(false)
+const createDialogVisible = ref(false)
 const detailData = ref({})
 const recordList = ref([])
+const salesOptions = ref([])
 const recordSummary = reactive({
   paidCourseCount: 0,
   totalAmount: 0,
@@ -129,6 +169,16 @@ const statusMap = {
   cancelled: '已取消',
   expired: '已过期'
 }
+
+const createForm = reactive({
+  nickname: '',
+  realName: '',
+  phone: '',
+  email: '',
+  region: '',
+  salesUserId: null,
+  salesLevel: null
+})
 
 const loadData = async () => {
   loading.value = true
@@ -173,6 +223,45 @@ const handleRecord = async (row) => {
   } catch (err) {
     ElMessage.error('加载学习记录失败')
   }
+}
+
+const resetCreateForm = () => {
+  Object.assign(createForm, {
+    nickname: '',
+    realName: '',
+    phone: '',
+    email: '',
+    region: '',
+    salesUserId: null,
+    salesLevel: null
+  })
+}
+
+const openCreateDialog = async () => {
+  resetCreateForm()
+  try {
+    salesOptions.value = await getSalesList({ institutionId: searchForm.institutionId || undefined })
+  } catch (err) {
+    salesOptions.value = []
+  }
+  createDialogVisible.value = true
+}
+
+const handleCreateStudent = async () => {
+  if ((createForm.salesUserId && !createForm.salesLevel) || (!createForm.salesUserId && createForm.salesLevel)) {
+    ElMessage.warning('设置分销时需要同时选择归属销售和分销层级')
+    return
+  }
+
+  const payload = { ...createForm }
+  if (userStore.isPlatformAdmin && searchForm.institutionId !== null && searchForm.institutionId !== undefined) {
+    payload.institutionId = searchForm.institutionId
+  }
+
+  await createStudent(payload)
+  ElMessage.success('学员创建成功')
+  createDialogVisible.value = false
+  loadData()
 }
 
 onMounted(loadData)
