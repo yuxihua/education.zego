@@ -8,14 +8,14 @@ const { Course, Order, LiveRoom, User } = require('../models');
 const { Op } = require('sequelize');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
-const { auth, requireRole } = require('../middleware/auth');
+const { auth, requireRole, optionalAuth } = require('../middleware/auth');
 const { notifyLiveStart } = require('../utils/push');
 
 /**
  * @GET /api/course/list
  * 课程列表（公开接口，无需登录）
  */
-router.get('/list', asyncHandler(async (req, res) => {
+router.get('/list', optionalAuth, asyncHandler(async (req, res) => {
   const { 
     page = 1, 
     size,
@@ -32,7 +32,16 @@ router.get('/list', asyncHandler(async (req, res) => {
   
   if (status) where.status = status;
   if (category) where.category = category;
-  if (institutionId !== undefined && institutionId !== '') {
+  if (req.user) {
+    if (req.user.role !== 'superadmin') {
+      where.institutionId = req.user.institutionId || 0;
+    } else if (institutionId !== undefined && institutionId !== '') {
+      const institutionIdNum = Number(institutionId);
+      if (!Number.isNaN(institutionIdNum)) {
+        where.institutionId = institutionIdNum;
+      }
+    }
+  } else if (institutionId !== undefined && institutionId !== '') {
     const institutionIdNum = Number(institutionId);
     if (!Number.isNaN(institutionIdNum)) {
       where.institutionId = institutionIdNum;
