@@ -23,6 +23,30 @@ const { notifyPurchaseSuccess } = require('../utils/push');
 
 const BASE_URL = process.env.BASE_URL || '';
 
+function getCurrentStudentId(req) {
+  return req.user?.studentId || req.user?.id;
+}
+
+function isStudentIdentity(req) {
+  return !req.user?.role || req.user.role === 'student';
+}
+
+async function ensureStudentForOrder(req, res) {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    fail(res, '仅学员账号可下单', 403, 403);
+    return null;
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const student = await Student.findByPk(studentId);
+  if (!student) {
+    fail(res, '当前账号不是学员，请先走学员登录', 403, 403);
+    return null;
+  }
+
+  return { studentId, student };
+}
+
 // ========== 微信支付 ==========
 
 /**
@@ -31,9 +55,13 @@ const BASE_URL = process.env.BASE_URL || '';
  */
 router.post('/wx/create', auth, payLimiter, asyncHandler(async (req, res) => {
   const { courseId, openid } = req.body;
-  const studentId = req.user.id;
+  const identity = await ensureStudentForOrder(req, res);
+  if (!identity) return;
+  const { studentId, student } = identity;
 
-  if (!openid) {
+  const finalOpenid = openid || student.openid;
+
+  if (!finalOpenid) {
     return fail(res, '缺少 openid', 400);
   }
 
@@ -71,7 +99,7 @@ router.post('/wx/create', auth, payLimiter, asyncHandler(async (req, res) => {
     description: course.title,
     outTradeNo: orderNo,
     amount: course.price,
-    openid,
+    openid: finalOpenid,
     notifyUrl: `${BASE_URL}/api/pay/wx/notify`
   };
 
@@ -134,7 +162,9 @@ router.post('/wx/notify', express.raw({ type: 'application/json' }), asyncHandle
  */
 router.post('/alipay/create', auth, payLimiter, asyncHandler(async (req, res) => {
   const { courseId } = req.body;
-  const studentId = req.user.id;
+  const identity = await ensureStudentForOrder(req, res);
+  if (!identity) return;
+  const { studentId } = identity;
 
   // 查询课程
   const course = await Course.findByPk(courseId);
@@ -186,7 +216,9 @@ router.post('/alipay/create', auth, payLimiter, asyncHandler(async (req, res) =>
  */
 router.post('/alipay/wap/create', auth, payLimiter, asyncHandler(async (req, res) => {
   const { courseId } = req.body;
-  const studentId = req.user.id;
+  const identity = await ensureStudentForOrder(req, res);
+  if (!identity) return;
+  const { studentId } = identity;
 
   const course = await Course.findByPk(courseId);
   if (!course) {
@@ -274,6 +306,7 @@ router.get('/alipay/return', asyncHandler(async (req, res) => {
  */
 router.get('/order/query', auth, asyncHandler(async (req, res) => {
   const { orderNo } = req.query;
+  const studentId = getCurrentStudentId(req);
 
   const order = await Order.findOne({
     where: { orderNo },
@@ -288,7 +321,7 @@ router.get('/order/query', auth, asyncHandler(async (req, res) => {
   }
 
   // 检查权限（只能查自己的订单）
-  if (order.studentId !== req.user.id && req.user.role !== 'superadmin') {
+  if (order.studentId !== studentId && req.user.role !== 'superadmin') {
     return fail(res, '无权查看此订单', 403, 403);
   }
 
@@ -300,8 +333,12 @@ router.get('/order/query', auth, asyncHandler(async (req, res) => {
  * 获取订单列表
  */
 router.get('/orders', auth, asyncHandler(async (req, res) => {
-  const { page = 1, pageSize = 10, status, payType } = req.query;
-  const where = { studentId: req.user.id };
+  const { page = 1, pageSize = 10, status, payType, studentId } = req.query;
+  const where = { studentId: getCurrentStudentId(req) };
+
+  if (req.user.role === 'superadmin' && studentId) {
+    where.studentId = studentId;
+  }
   
   if (status) where.status = status;
   if (payType) where.payType = payType;

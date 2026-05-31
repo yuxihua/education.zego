@@ -7,6 +7,155 @@ const { Op } = require('sequelize');
 const { Student, Order, Course, Homework } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
+const { auth, generateToken } = require('../middleware/auth');
+const redis = require('../config/redis');
+
+function getCurrentStudentId(req) {
+  return req.user?.studentId || req.user?.id;
+}
+
+function isStudentIdentity(req) {
+  return !req.user?.role || req.user.role === 'student';
+}
+
+/**
+ * 学员登录（手机号/微信标识）
+ */
+router.post('/login', asyncHandler(async (req, res) => {
+  const { phone, nickname, openid, unionid, avatar, source = 'web' } = req.body;
+
+  if (!phone && !openid) {
+    return fail(res, '手机号或openid至少填写一个', 400, 400);
+  }
+
+  let student = null;
+
+  if (openid) {
+    student = await Student.findOne({ where: { openid } });
+  }
+
+  if (!student && phone) {
+    student = await Student.findOne({ where: { phone } });
+  }
+
+  if (!student) {
+    const randomSuffix = Date.now().toString().slice(-4);
+    student = await Student.create({
+      phone: phone || null,
+      openid: openid || null,
+      unionid: unionid || null,
+      nickname: nickname || `学员${randomSuffix}`,
+      avatar: avatar || null,
+      source,
+      status: 1
+    });
+  } else {
+    const patch = {};
+    if (phone && !student.phone) patch.phone = phone;
+    if (openid && !student.openid) patch.openid = openid;
+    if (unionid && !student.unionid) patch.unionid = unionid;
+    if (nickname) patch.nickname = nickname;
+    if (avatar) patch.avatar = avatar;
+    if (Object.keys(patch).length) {
+      await student.update(patch);
+    }
+  }
+
+  if (student.status === 0) {
+    return fail(res, '账号已被禁用', 403, 403);
+  }
+
+  const token = generateToken({
+    id: student.id,
+    studentId: student.id,
+    role: 'student',
+    nickname: student.nickname,
+    phone: student.phone
+  });
+
+  success(res, {
+    token,
+    student: {
+      id: student.id,
+      nickname: student.nickname,
+      phone: student.phone,
+      avatar: student.avatar,
+      openid: student.openid
+    }
+  }, '登录成功');
+}));
+
+/**
+ * 学员个人信息
+ */
+router.get('/profile', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const student = await Student.findByPk(studentId);
+  if (!student) {
+    return fail(res, '学员不存在', 404, 404);
+  }
+
+  const courseCount = await Order.count({ where: { studentId: student.id, status: 'paid' } });
+  success(res, {
+    ...student.toJSON(),
+    courseCount
+  });
+}));
+
+/**
+ * 学员退出登录
+ */
+router.post('/logout', auth, asyncHandler(async (req, res) => {
+  const ttl = req.user?.exp ? (req.user.exp - Math.floor(Date.now() / 1000)) : 0;
+  if (ttl > 0 && req.token) {
+    await redis.setex(`token:blacklist:${req.token}`, ttl, '1');
+  }
+  success(res, null, '退出成功');
+}));
+
+/**
+ * 我的已购课程
+ */
+router.get('/my-courses', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const { page = 1, size = 10 } = req.query;
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(size, 10) || 10;
+
+  const { count, rows } = await Order.findAndCountAll({
+    where: { studentId, status: 'paid' },
+    include: [{ model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName', 'price', 'status'] }],
+    order: [['payTime', 'DESC']],
+    offset: (pageNum - 1) * pageSizeNum,
+    limit: pageSizeNum
+  });
+
+  const list = rows.map((item) => {
+    const row = item.toJSON();
+    return {
+      orderId: row.id,
+      orderNo: row.orderNo,
+      payTime: row.payTime,
+      amount: row.amount,
+      course: row.course || null
+    };
+  });
+
+  success(res, {
+    list,
+    total: count,
+    page: pageNum,
+    size: pageSizeNum
+  });
+}));
 
 router.get('/list', asyncHandler(async (req, res) => {
   const { phone, nickname, page = 1, size = 10 } = req.query;
