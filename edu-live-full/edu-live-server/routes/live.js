@@ -39,7 +39,8 @@ router.get('/rooms', auth, asyncHandler(async (req, res) => {
     pageSize = 10, 
     status, 
     courseId,
-    keyword 
+    keyword,
+    institutionId
   } = req.query;
 
   const where = {};
@@ -57,6 +58,12 @@ router.get('/rooms', auth, asyncHandler(async (req, res) => {
   if (req.user.role !== 'superadmin') {
     courseInclude.where = { institutionId: getOperatorInstitutionId(req) };
     courseInclude.required = true;
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      courseInclude.where = { institutionId: institutionIdNum };
+      courseInclude.required = true;
+    }
   }
 
   const { count, rows } = await LiveRoom.findAndCountAll({

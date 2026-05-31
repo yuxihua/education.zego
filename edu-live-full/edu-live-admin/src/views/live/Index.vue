@@ -8,6 +8,16 @@
         </div>
       </template>
 
+      <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
       <el-table :data="tableData" v-loading="loading" border>
         <el-table-column prop="id" label="房间ID" width="100" />
         <el-table-column prop="title" label="直播标题" min-width="200" />
@@ -72,12 +82,15 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import { getLiveList, createLiveRoom, endLive } from '@/api/live'
 import { getCourseList, getTeacherList } from '@/api/course'
 
+const userStore = useUserStore()
 const router = useRouter()
 const loading = ref(false)
 const tableData = ref([])
+const searchForm = reactive({ institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
 
 const dialogVisible = ref(false)
@@ -102,10 +115,26 @@ const loadTeacherList = async () => {
 
 const loadData = async () => {
   loading.value = true
-  const res = await getLiveList({ ...pagination })
+  const params = { ...pagination, ...searchForm }
+  if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
+    delete params.institutionId
+  }
+
+  const res = await getLiveList(params)
   tableData.value = res.list
   pagination.total = res.total
   loading.value = false
+}
+
+const handleSearch = () => {
+  pagination.page = 1
+  loadData()
+}
+
+const handleReset = () => {
+  searchForm.institutionId = null
+  pagination.page = 1
+  loadData()
 }
 
 const handleCreate = () => {
@@ -140,3 +169,9 @@ const handleReplay = (row) => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.search-form {
+  margin-bottom: 12px;
+}
+</style>
