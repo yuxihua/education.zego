@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
+const { body, validationResult } = require('express-validator');
 const { User } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
@@ -33,6 +34,55 @@ function buildInstitutionWhere(query = {}) {
 
   return where;
 }
+
+/**
+ * @POST /api/platform/institution/create
+ * 平台创建机构管理员
+ */
+router.post('/institution/create', auth, requireRole(['superadmin']), [
+  body('username').trim().isLength({ min: 4, max: 20 }).withMessage('用户名4-20位字符'),
+  body('password').trim().isLength({ min: 6 }).withMessage('密码至少6位'),
+  body('institutionName').trim().notEmpty().withMessage('机构名称不能为空'),
+  body('phone').optional().isMobilePhone('zh-CN').withMessage('手机号格式错误'),
+  body('email').optional().isEmail().withMessage('邮箱格式错误')
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return fail(res, errors.array()[0].msg, 400, 400);
+  }
+
+  const { username, password, institutionName, phone, email, nickname } = req.body;
+
+  const existUser = await User.findOne({ where: { username } });
+  if (existUser) {
+    return fail(res, '用户名已存在', 409, 409);
+  }
+
+  const institutionAdmin = await User.create({
+    username,
+    password,
+    nickname: nickname || institutionName,
+    role: 'admin',
+    institutionName,
+    institutionId: 0,
+    phone,
+    email,
+    status: 1
+  });
+
+  await institutionAdmin.update({ institutionId: institutionAdmin.id });
+
+  success(res, {
+    id: institutionAdmin.id,
+    username: institutionAdmin.username,
+    nickname: institutionAdmin.nickname,
+    institutionName: institutionAdmin.institutionName,
+    institutionId: institutionAdmin.id,
+    phone: institutionAdmin.phone,
+    email: institutionAdmin.email,
+    status: institutionAdmin.status
+  }, '机构创建成功');
+}));
 
 /**
  * @GET /api/platform/institution/list

@@ -16,7 +16,7 @@ const ADMIN_ROLES = ['superadmin', 'admin', 'assistant', 'teacher'];
  * 订单列表
  */
 router.get('/list', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
-  const { page = 1, size, pageSize, status, payType, keyword } = req.query;
+  const { page = 1, size, pageSize, status, payType, keyword, institutionId } = req.query;
 
   const where = {};
   if (status) where.status = status;
@@ -24,6 +24,11 @@ router.get('/list', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res
 
   if (req.user.role !== 'superadmin') {
     where.institutionId = req.user.institutionId || 0;
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      where.institutionId = institutionIdNum;
+    }
   }
 
   const include = [
@@ -77,6 +82,7 @@ router.get('/list', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res
  * 订单统计（今日、本月）
  */
 router.get('/stats', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const { institutionId } = req.query;
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -84,6 +90,11 @@ router.get('/stats', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, re
   const baseWhere = {};
   if (req.user.role !== 'superadmin') {
     baseWhere.institutionId = req.user.institutionId || 0;
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      baseWhere.institutionId = institutionIdNum;
+    }
   }
 
   const paidWhere = { ...baseWhere, status: 'paid' };

@@ -350,11 +350,16 @@ router.get('/my-courses', auth, asyncHandler(async (req, res) => {
 }));
 
 router.get('/list', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
-  const { phone, nickname, page = 1, size = 10 } = req.query;
+  const { phone, nickname, institutionId, page = 1, size = 10 } = req.query;
 
   const where = {};
   if (req.user.role !== 'superadmin') {
     where.institutionId = getOperatorInstitutionId(req);
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      where.institutionId = institutionIdNum;
+    }
   }
   if (phone) where.phone = { [Op.like]: `%${phone}%` };
   if (nickname) where.nickname = { [Op.like]: `%${nickname}%` };

@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span>机构管理（平台后台）</span>
-          <el-button type="primary" @click="loadData">刷新</el-button>
+          <div>
+            <el-button type="primary" @click="openCreateDialog">+ 新增机构</el-button>
+            <el-button @click="loadData" style="margin-left: 8px">刷新</el-button>
+          </div>
         </div>
       </template>
 
@@ -64,6 +67,33 @@
         style="margin-top: 16px; justify-content: flex-end"
         @change="loadData"
       />
+
+      <el-dialog v-model="createDialogVisible" title="新增机构管理员" width="520px">
+        <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="100px">
+          <el-form-item label="机构名称" prop="institutionName">
+            <el-input v-model="createForm.institutionName" placeholder="请输入机构名称" />
+          </el-form-item>
+          <el-form-item label="登录账号" prop="username">
+            <el-input v-model="createForm.username" placeholder="4-20位字符" />
+          </el-form-item>
+          <el-form-item label="登录密码" prop="password">
+            <el-input v-model="createForm.password" type="password" show-password placeholder="至少6位" />
+          </el-form-item>
+          <el-form-item label="管理员姓名" prop="nickname">
+            <el-input v-model="createForm.nickname" placeholder="不填则默认机构名" />
+          </el-form-item>
+          <el-form-item label="手机号" prop="phone">
+            <el-input v-model="createForm.phone" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="邮箱" prop="email">
+            <el-input v-model="createForm.email" placeholder="可选" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="createDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="creating" @click="handleCreate">创建</el-button>
+        </template>
+      </el-dialog>
     </el-card>
   </div>
 </template>
@@ -71,7 +101,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { auditInstitution, getInstitutionList } from '@/api/platform'
+import { auditInstitution, createInstitution, getInstitutionList } from '@/api/platform'
 
 const loading = ref(false)
 const tableData = ref([])
@@ -84,6 +114,22 @@ const pagination = reactive({
   size: 10,
   total: 0
 })
+const createDialogVisible = ref(false)
+const createFormRef = ref()
+const creating = ref(false)
+const createForm = reactive({
+  institutionName: '',
+  username: '',
+  password: '',
+  nickname: '',
+  phone: '',
+  email: ''
+})
+const createRules = {
+  institutionName: [{ required: true, message: '请输入机构名称', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入登录账号', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入登录密码', trigger: 'blur' }]
+}
 
 const loadData = async () => {
   loading.value = true
@@ -125,6 +171,32 @@ const handleAudit = async (row, status) => {
   await auditInstitution({ institutionId: row.id, status })
   ElMessage.success(`${actionText}成功`)
   await loadData()
+}
+
+const openCreateDialog = () => {
+  Object.assign(createForm, {
+    institutionName: '',
+    username: '',
+    password: '',
+    nickname: '',
+    phone: '',
+    email: ''
+  })
+  createDialogVisible.value = true
+}
+
+const handleCreate = async () => {
+  await createFormRef.value.validate()
+  creating.value = true
+  try {
+    await createInstitution(createForm)
+    ElMessage.success('机构创建成功')
+    createDialogVisible.value = false
+    pagination.page = 1
+    await loadData()
+  } finally {
+    creating.value = false
+  }
 }
 
 onMounted(loadData)

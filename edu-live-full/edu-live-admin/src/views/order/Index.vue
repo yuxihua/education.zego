@@ -24,6 +24,9 @@
       </el-row>
 
       <el-form :inline="true" :model="searchForm" style="margin-bottom: 16px">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
         <el-form-item label="关键词">
           <el-input
             v-model="searchForm.keyword"
@@ -96,24 +99,35 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getOrderList, getOrderStats, refundOrder } from '@/api/order'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref([])
 const stats = reactive({ todayCount: 0, todayAmount: 0, monthCount: 0, monthAmount: 0 })
-const searchForm = reactive({ keyword: '', status: '', payType: '' })
+const searchForm = reactive({ keyword: '', status: '', payType: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await getOrderList({
+    const listParams = {
       page: pagination.page,
       size: pagination.size,
       ...searchForm
-    })
+    }
+    if (!userStore.isPlatformAdmin || listParams.institutionId === null || listParams.institutionId === undefined) {
+      delete listParams.institutionId
+    }
+
+    const res = await getOrderList(listParams)
     tableData.value = res.list || []
     pagination.total = res.total || 0
-    const s = await getOrderStats()
+    const statsParams = {}
+    if (userStore.isPlatformAdmin && searchForm.institutionId !== null && searchForm.institutionId !== undefined) {
+      statsParams.institutionId = searchForm.institutionId
+    }
+    const s = await getOrderStats(statsParams)
     Object.assign(stats, s || {})
   } finally {
     loading.value = false
@@ -129,6 +143,7 @@ const handleReset = () => {
   searchForm.keyword = ''
   searchForm.status = ''
   searchForm.payType = ''
+  searchForm.institutionId = null
   pagination.page = 1
   loadData()
 }

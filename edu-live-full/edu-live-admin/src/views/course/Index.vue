@@ -9,6 +9,9 @@
       </template>
 
       <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
         <el-form-item label="课程名称">
           <el-input v-model="searchForm.keyword" placeholder="请输入" clearable />
         </el-form-item>
@@ -20,7 +23,7 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="loadData">查询</el-button>
-          <el-button @click="searchForm = {}">重置</el-button>
+          <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
 
@@ -147,7 +150,7 @@ import { getCourseList, createCourse, updateCourse, deleteCourse, publishCourse,
 const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref([])
-const searchForm = reactive({ keyword: '', status: '' })
+const searchForm = reactive({ keyword: '', status: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
 
 const dialogVisible = ref(false)
@@ -174,10 +177,22 @@ const loadTeacherList = async () => {
 
 const loadData = async () => {
   loading.value = true
-  const res = await getCourseList({ ...searchForm, ...pagination })
+  const params = { ...searchForm, ...pagination }
+  if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
+    delete params.institutionId
+  }
+  const res = await getCourseList(params)
   tableData.value = res.list
   pagination.total = res.total
   loading.value = false
+}
+
+const handleReset = () => {
+  searchForm.keyword = ''
+  searchForm.status = ''
+  searchForm.institutionId = null
+  pagination.page = 1
+  loadData()
 }
 
 const handleAdd = () => {

@@ -4,6 +4,9 @@
       <template #header><span>学员管理</span></template>
 
       <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
         <el-form-item label="手机号">
           <el-input v-model="searchForm.phone" placeholder="请输入" clearable />
         </el-form-item>
@@ -12,6 +15,7 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="loadData">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
 
@@ -93,10 +97,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getStudentList, getStudentDetail, getStudentLearningRecord } from '@/api/student'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref([])
-const searchForm = reactive({ phone: '', nickname: '' })
+const searchForm = reactive({ phone: '', nickname: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
 const detailDialogVisible = ref(false)
 const recordDialogVisible = ref(false)
@@ -126,10 +132,22 @@ const statusMap = {
 
 const loadData = async () => {
   loading.value = true
-  const res = await getStudentList({ ...searchForm, ...pagination })
+  const params = { ...searchForm, ...pagination }
+  if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
+    delete params.institutionId
+  }
+  const res = await getStudentList(params)
   tableData.value = res.list
   pagination.total = res.total
   loading.value = false
+}
+
+const handleReset = () => {
+  searchForm.phone = ''
+  searchForm.nickname = ''
+  searchForm.institutionId = null
+  pagination.page = 1
+  loadData()
 }
 
 const handleDetail = async (row) => {
