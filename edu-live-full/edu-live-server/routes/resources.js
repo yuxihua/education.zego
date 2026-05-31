@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
 const { body, validationResult } = require('express-validator');
-const { Classroom, TeachingSchedule, User } = require('../models');
+const { Classroom, TeachingBuilding, TeachingSchedule, User } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole } = require('../middleware/auth');
@@ -81,11 +81,101 @@ function escapeCsvCell(value) {
   return text;
 }
 
-router.get('/classrooms', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+async function resolveBuildingName({ institutionId, buildingId }) {
+  const id = Number(buildingId || 0);
+  if (!id) return null;
+  const building = await TeachingBuilding.findOne({ where: { id, institutionId } });
+  if (!building) return null;
+  return building.name;
+}
+
+router.get('/buildings', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
   const institutionId = getInstitutionId(req);
   const { keyword = '', status } = req.query;
   const where = { institutionId };
   if (status !== undefined && status !== '') where.status = Number(status);
+  if (keyword) where.name = { [Op.like]: `%${keyword}%` };
+
+  const list = await TeachingBuilding.findAll({ where, order: [['id', 'DESC']] });
+  success(res, list);
+}));
+
+router.post('/buildings', auth, requireRole(ADMIN_ROLES), [
+  body('name').trim().notEmpty().withMessage('教学楼名称不能为空')
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return fail(res, errors.array()[0].msg, 400, 400);
+
+  const institutionId = getInstitutionId(req);
+  const name = String(req.body.name || '').trim();
+  const exist = await TeachingBuilding.findOne({ where: { institutionId, name } });
+  if (exist) return fail(res, '教学楼名称已存在', 409, 409);
+
+  const row = await TeachingBuilding.create({
+    institutionId,
+    name,
+    description: req.body.description || '',
+    status: req.body.status === 0 || req.body.status === '0' ? 0 : 1
+  });
+  success(res, row, '教学楼创建成功');
+}));
+
+router.put('/buildings/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const row = await TeachingBuilding.findOne({ where: { id: req.params.id, institutionId } });
+  if (!row) return fail(res, '教学楼不存在', 404, 404);
+
+  const nextName = req.body.name !== undefined ? String(req.body.name || '').trim() : row.name;
+  if (!nextName) return fail(res, '教学楼名称不能为空', 400, 400);
+  if (nextName !== row.name) {
+    const exist = await TeachingBuilding.findOne({ where: { institutionId, name: nextName, id: { [Op.ne]: row.id } } });
+    if (exist) return fail(res, '教学楼名称已存在', 409, 409);
+  }
+
+  const oldName = row.name;
+  await row.update({
+    name: nextName,
+    description: req.body.description ?? row.description,
+    status: req.body.status !== undefined ? Number(req.body.status) : row.status
+  });
+
+  // 教学楼改名时同步更新教室所在教学楼名称
+  if (oldName !== nextName) {
+    await Classroom.update(
+      { location: nextName },
+      { where: { institutionId, location: oldName } }
+    );
+  }
+
+  success(res, row, '教学楼更新成功');
+}));
+
+router.delete('/buildings/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const row = await TeachingBuilding.findOne({ where: { id: req.params.id, institutionId } });
+  if (!row) return fail(res, '教学楼不存在', 404, 404);
+
+  const classroomCount = await Classroom.count({ where: { institutionId, location: row.name } });
+  if (classroomCount > 0) {
+    return fail(res, '该教学楼下仍有教室，请先迁移或删除教室', 409, 409);
+  }
+
+  await row.destroy();
+  success(res, null, '教学楼删除成功');
+}));
+
+router.get('/classrooms', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = getInstitutionId(req);
+  const { keyword = '', status, buildingId } = req.query;
+  const where = { institutionId };
+  if (status !== undefined && status !== '') where.status = Number(status);
+
+  if (buildingId) {
+    const buildingName = await resolveBuildingName({ institutionId, buildingId });
+    if (!buildingName) return success(res, []);
+    where.location = buildingName;
+  }
+
   if (keyword) {
     where[Op.or] = [
       { name: { [Op.like]: `%${keyword}%` } },
@@ -105,17 +195,21 @@ router.get('/classrooms/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async
 }));
 
 router.post('/classrooms', auth, requireRole(ADMIN_ROLES), [
-  body('name').trim().notEmpty().withMessage('教室名称不能为空')
+  body('name').trim().notEmpty().withMessage('教室名称不能为空'),
+  body('buildingId').notEmpty().withMessage('教学楼不能为空')
 ], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return fail(res, errors.array()[0].msg, 400, 400);
 
   const institutionId = getInstitutionId(req);
-  const { name, location, capacity, description, status } = req.body;
+  const { name, capacity, description, status } = req.body;
+  const buildingName = await resolveBuildingName({ institutionId, buildingId: req.body.buildingId });
+  if (!buildingName) return fail(res, '教学楼不存在', 404, 404);
+
   const row = await Classroom.create({
     institutionId,
     name,
-    location,
+    location: buildingName,
     capacity: Number(capacity || 0),
     description,
     status: status === 0 || status === '0' ? 0 : 1
@@ -129,10 +223,16 @@ router.put('/classrooms/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async
   const row = await Classroom.findOne({ where: { id: req.params.id, institutionId } });
   if (!row) return fail(res, '教室不存在', 404, 404);
 
-  const { name, location, capacity, description, status } = req.body;
+  const { name, capacity, description, status } = req.body;
+  let buildingName = row.location;
+  if (req.body.buildingId !== undefined) {
+    buildingName = await resolveBuildingName({ institutionId, buildingId: req.body.buildingId });
+    if (!buildingName) return fail(res, '教学楼不存在', 404, 404);
+  }
+
   await row.update({
     name: name ?? row.name,
-    location: location ?? row.location,
+    location: buildingName,
     capacity: capacity !== undefined ? Number(capacity || 0) : row.capacity,
     description: description ?? row.description,
     status: status !== undefined ? Number(status) : row.status

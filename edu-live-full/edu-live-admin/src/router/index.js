@@ -110,10 +110,22 @@ export const routes = [
         meta: { title: '审核中心', icon: 'Stamp', platformOnly: true, permission: 'platform.audit.manage' }
       },
       {
-        path: 'platform/resource',
-        name: 'PlatformResource',
-        component: () => import('@/views/platform/Resource.vue'),
-        meta: { title: '教室/讲师管理', icon: 'School', permission: 'platform.resource.manage' }
+        path: 'platform/resource/classroom',
+        name: 'PlatformResourceClassroom',
+        component: () => import('@/views/platform/resource/Classroom.vue'),
+        meta: { title: '教学楼/教室', icon: 'School', permission: 'platform.resource.manage' }
+      },
+      {
+        path: 'platform/resource/teacher',
+        name: 'PlatformResourceTeacher',
+        component: () => import('@/views/platform/resource/Teacher.vue'),
+        meta: { title: '讲师管理', icon: 'UserFilled', permission: 'platform.resource.manage' }
+      },
+      {
+        path: 'platform/resource/schedule',
+        name: 'PlatformResourceSchedule',
+        component: () => import('@/views/platform/resource/Schedule.vue'),
+        meta: { title: '排课管理', icon: 'Calendar', permission: 'platform.resource.manage' }
       },
       {
         path: 'system/account',

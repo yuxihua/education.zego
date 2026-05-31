@@ -1,5 +1,10 @@
 import request from './request'
 
+export const getBuildings = (params) => request.get('/resource/buildings', { params })
+export const createBuilding = (data) => request.post('/resource/buildings', data)
+export const updateBuilding = (id, data) => request.put(`/resource/buildings/${id}`, data)
+export const deleteBuilding = (id, params) => request.delete(`/resource/buildings/${id}`, { params })
+
 export const getClassrooms = (params) => request.get('/resource/classrooms', { params })
 export const createClassroom = (data) => request.post('/resource/classrooms', data)
 export const updateClassroom = (id, data) => request.put(`/resource/classrooms/${id}`, data)

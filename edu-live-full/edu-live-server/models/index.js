@@ -11,6 +11,7 @@ const Course = require('./Course');
 const Order = require('./Order');
 const LiveRoom = require('./LiveRoom');
 const Classroom = require('./Classroom');
+const TeachingBuilding = require('./TeachingBuilding');
 const PPTFile = require('./PPTFile');
 const Homework = require('./Homework');
 const Question = require('./Question');
@@ -33,6 +34,10 @@ LiveRoom.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
 // 机构 - 教室：一对多
 User.hasMany(Classroom, { foreignKey: 'institutionId', as: 'classrooms' });
 Classroom.belongsTo(User, { foreignKey: 'institutionId', as: 'institution' });
+
+// 机构 - 教学楼：一对多
+User.hasMany(TeachingBuilding, { foreignKey: 'institutionId', as: 'teachingBuildings' });
+TeachingBuilding.belongsTo(User, { foreignKey: 'institutionId', as: 'institution' });
 
 // 教室 - 排课：一对多
 Classroom.hasMany(TeachingSchedule, { foreignKey: 'classroomId', as: 'schedules' });
@@ -106,6 +111,7 @@ module.exports = {
   Order,
   LiveRoom,
   Classroom,
+  TeachingBuilding,
   PPTFile,
   Homework,
   Question,
