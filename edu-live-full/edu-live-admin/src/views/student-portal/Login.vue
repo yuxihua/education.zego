@@ -39,17 +39,37 @@
 </template>
 
 <script setup>
-import { reactive, ref, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref, computed, onBeforeUnmount, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { studentLogin, studentTokenKey, studentCreateWxQr, studentCheckWxQr } from '@/api/studentPortal'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
+const studentInstitutionKey = 'student_institution_id'
+
+const getInstitutionIdFromRoute = () => {
+  const raw = route.query.institutionId
+  const val = Array.isArray(raw) ? raw[0] : raw
+  const num = Number(val)
+  return Number.isFinite(num) && num >= 0 ? num : null
+}
+
+const getInstitutionId = () => {
+  const fromRoute = getInstitutionIdFromRoute()
+  if (fromRoute !== null) return fromRoute
+  const fromStorage = Number(localStorage.getItem(studentInstitutionKey))
+  return Number.isFinite(fromStorage) && fromStorage >= 0 ? fromStorage : null
+}
+
+const institutionId = computed(() => getInstitutionId())
+
 const form = reactive({
   phone: '',
   nickname: '',
-  openid: ''
+  openid: '',
+  institutionId: null
 })
 
 const wxLogin = reactive({
@@ -125,7 +145,7 @@ const createWxQrLogin = async (silent = false) => {
   if (wxLogin.loading) return
   wxLogin.loading = true
   try {
-    const res = await studentCreateWxQr()
+    const res = await studentCreateWxQr(institutionId.value)
     wxLogin.state = res.state
     wxLogin.qrUrl = res.qrUrl
     wxLogin.expireIn = Number(res.expireIn || 300)
@@ -147,10 +167,18 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
-    const res = await studentLogin(form)
+    const payload = { ...form }
+    if (institutionId.value !== null) {
+      payload.institutionId = institutionId.value
+    } else {
+      delete payload.institutionId
+    }
+
+    const res = await studentLogin(payload)
     localStorage.setItem(studentTokenKey, res.token)
     ElMessage.success('登录成功')
-    router.push('/student-center')
+    const query = institutionId.value !== null ? { institutionId: String(institutionId.value) } : {}
+    router.push({ path: '/student-center', query })
   } finally {
     loading.value = false
   }
@@ -163,6 +191,13 @@ const goAdminLogin = () => {
 onBeforeUnmount(() => {
   stopWxPolling()
   stopWxCountdown()
+})
+
+onMounted(() => {
+  if (institutionId.value !== null) {
+    form.institutionId = institutionId.value
+    localStorage.setItem(studentInstitutionKey, String(institutionId.value))
+  }
 })
 </script>
 

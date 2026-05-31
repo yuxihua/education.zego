@@ -50,7 +50,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   studentTokenKey,
@@ -62,6 +62,8 @@ import {
 } from '@/api/studentPortal'
 
 const router = useRouter()
+const route = useRoute()
+const studentInstitutionKey = 'student_institution_id'
 
 const profile = ref({})
 const courseList = ref([])
@@ -72,12 +74,29 @@ const myCourseLoading = ref(false)
 
 const loadProfile = async () => {
   profile.value = await studentProfile()
+
+  if (profile.value?.institutionId !== undefined && profile.value?.institutionId !== null) {
+    localStorage.setItem(studentInstitutionKey, String(profile.value.institutionId))
+  }
 }
 
 const loadCourseList = async () => {
   courseLoading.value = true
   try {
-    const res = await studentCourseList({ page: 1, size: 50, status: 'published' })
+    const queryInstitutionId = Number(route.query.institutionId)
+    const cachedInstitutionId = Number(localStorage.getItem(studentInstitutionKey))
+    const profileInstitutionId = Number(profile.value?.institutionId)
+    const institutionId = Number.isFinite(queryInstitutionId)
+      ? queryInstitutionId
+      : (Number.isFinite(profileInstitutionId) ? profileInstitutionId : cachedInstitutionId)
+
+    const params = { page: 1, size: 50, status: 'published' }
+    if (Number.isFinite(institutionId)) {
+      params.institutionId = institutionId
+      localStorage.setItem(studentInstitutionKey, String(institutionId))
+    }
+
+    const res = await studentCourseList(params)
     courseList.value = res.list || []
   } finally {
     courseLoading.value = false

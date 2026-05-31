@@ -34,7 +34,9 @@ studentClient.interceptors.response.use(
 export const studentTokenKey = STUDENT_TOKEN_KEY
 
 export const studentLogin = (data) => studentClient.post('/student/login', data)
-export const studentCreateWxQr = () => studentClient.get('/student/wx/qr/create')
+export const studentCreateWxQr = (institutionId) => studentClient.get('/student/wx/qr/create', {
+  params: institutionId ? { institutionId } : {}
+})
 export const studentCheckWxQr = (state) => studentClient.get('/student/wx/qr/status', { params: { state } })
 export const studentProfile = () => studentClient.get('/student/profile')
 export const studentLogout = () => studentClient.post('/student/logout')

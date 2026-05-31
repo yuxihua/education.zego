@@ -9,6 +9,9 @@
       </template>
 
       <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="机构ID" v-if="isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" placeholder="全部机构" />
+        </el-form-item>
         <el-form-item label="题型">
           <el-select v-model="searchForm.type" placeholder="全部" clearable>
             <el-option label="单选题" value="single" />
@@ -92,6 +95,9 @@
         <el-form-item label="解析">
           <el-input v-model="form.analysis" type="textarea" :rows="3" placeholder="选填，答案解析" />
         </el-form-item>
+        <el-form-item label="机构ID" v-if="isPlatformAdmin">
+          <el-input-number v-model="form.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
         <el-form-item label="难度">
           <el-rate v-model="form.difficulty" :max="3" />
         </el-form-item>
@@ -108,17 +114,20 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getQuestionList, createQuestion, updateQuestion, deleteQuestion } from '@/api/question'
+import { useUserStore } from '@/stores/user'
 
 const loading = ref(false)
 const tableData = ref([])
-const searchForm = reactive({ type: '', keyword: '' })
+const userStore = useUserStore()
+const isPlatformAdmin = ref(false)
+const searchForm = reactive({ type: '', keyword: '', institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
 
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
 const form = reactive({
-  id: null, type: 'single', content: '', options: [], answer: '', analysis: '', difficulty: 1
+  id: null, type: 'single', content: '', options: [], answer: '', analysis: '', difficulty: 1, institutionId: null
 })
 const rules = {
   type: [{ required: true }],
@@ -127,7 +136,15 @@ const rules = {
 
 const loadData = async () => {
   loading.value = true
-  const res = await getQuestionList({ ...searchForm, ...pagination })
+  const params = { ...searchForm, ...pagination }
+  if (!isPlatformAdmin.value) {
+    delete params.institutionId
+  }
+  if (params.institutionId === null || params.institutionId === undefined) {
+    delete params.institutionId
+  }
+
+  const res = await getQuestionList(params)
   tableData.value = res.list
   pagination.total = res.total
   loading.value = false
@@ -135,7 +152,16 @@ const loadData = async () => {
 
 const handleAdd = () => {
   isEdit.value = false
-  Object.assign(form, { id: null, type: 'single', content: '', options: [], answer: '', analysis: '', difficulty: 1 })
+  Object.assign(form, {
+    id: null,
+    type: 'single',
+    content: '',
+    options: [],
+    answer: '',
+    analysis: '',
+    difficulty: 1,
+    institutionId: isPlatformAdmin.value ? (searchForm.institutionId ?? 0) : null
+  })
   dialogVisible.value = true
 }
 
@@ -147,10 +173,15 @@ const handleEdit = (row) => {
 
 const handleSubmit = async () => {
   await formRef.value.validate()
+  const payload = { ...form }
+  if (!isPlatformAdmin.value) {
+    delete payload.institutionId
+  }
+
   if (isEdit.value) {
-    await updateQuestion(form)
+    await updateQuestion(payload)
   } else {
-    await createQuestion(form)
+    await createQuestion(payload)
   }
   ElMessage.success('保存成功')
   dialogVisible.value = false
@@ -168,5 +199,11 @@ const handleView = (row) => {
   ElMessage.info(`预览题目 ID: ${row.id}`)
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  if (!userStore.userInfo) {
+    await userStore.fetchUserInfo().catch(() => null)
+  }
+  isPlatformAdmin.value = userStore.userInfo?.role === 'superadmin'
+  await loadData()
+})
 </script>

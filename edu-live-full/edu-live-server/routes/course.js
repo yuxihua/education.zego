@@ -22,6 +22,7 @@ router.get('/list', asyncHandler(async (req, res) => {
     pageSize = 10, 
     category, 
     status,
+    institutionId,
     keyword,
     sortBy = 'createdAt',
     sortOrder = 'DESC'
@@ -31,6 +32,12 @@ router.get('/list', asyncHandler(async (req, res) => {
   
   if (status) where.status = status;
   if (category) where.category = category;
+  if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      where.institutionId = institutionIdNum;
+    }
+  }
   if (keyword) {
     where.title = { [Op.like]: `%${keyword}%` };
   }
