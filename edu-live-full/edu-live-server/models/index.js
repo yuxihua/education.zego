@@ -16,6 +16,7 @@ const Question = require('./Question');
 const DistributionConfig = require('./DistributionConfig');
 const DistributionSettlement = require('./DistributionSettlement');
 const OperationLog = require('./OperationLog');
+const RolePermission = require('./RolePermission');
 
 // ========== 定义模型关联关系 ==========
 
@@ -69,6 +70,10 @@ Student.belongsTo(User, { foreignKey: 'salesUserId', as: 'salesUser' });
 User.hasMany(OperationLog, { foreignKey: 'userId', as: 'operationLogs' });
 OperationLog.belongsTo(User, { foreignKey: 'userId', as: 'operator' });
 
+// 角色权限：机构级角色配置
+User.hasMany(RolePermission, { foreignKey: 'institutionId', sourceKey: 'institutionId', as: 'rolePermissions' });
+RolePermission.belongsTo(User, { foreignKey: 'institutionId', targetKey: 'institutionId', as: 'institutionUsers' });
+
 // 题库：独立模块
 
 
@@ -87,5 +92,6 @@ module.exports = {
   Question,
   DistributionConfig,
   DistributionSettlement,
-  OperationLog
+  OperationLog,
+  RolePermission
 };

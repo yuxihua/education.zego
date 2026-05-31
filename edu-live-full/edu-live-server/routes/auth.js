@@ -11,6 +11,7 @@ const { generateToken, auth, requireRole } = require('../middleware/auth');
 const { strictLimiter } = require('../middleware/ratelimit');
 const { User } = require('../models');
 const redis = require('../config/redis');
+const { getUserPermissions } = require('../utils/permission');
 
 /**
  * @POST /api/auth/login
@@ -61,6 +62,8 @@ router.post('/login',
       institutionId: user.institutionId
     });
 
+    const permissions = await getUserPermissions(user);
+
     success(res, {
       token,
       user: {
@@ -71,7 +74,8 @@ router.post('/login',
         avatar: user.avatar,
         institutionId: user.institutionId,
         institutionName: user.institutionName
-      }
+      },
+      permissions
     }, '登录成功');
   })
 );
@@ -152,7 +156,11 @@ router.get('/profile', auth, asyncHandler(async (req, res) => {
     return fail(res, '用户不存在', 404, 404);
   }
 
-  success(res, user);
+  const permissions = await getUserPermissions(user);
+  success(res, {
+    ...user.toJSON(),
+    permissions
+  });
 }));
 
 /**

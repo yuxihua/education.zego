@@ -9,7 +9,8 @@ const { body, validationResult } = require('express-validator');
 const { auth, requireRole } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/error');
 const { success, fail } = require('../utils/response');
-const { User, OperationLog } = require('../models');
+const { User, OperationLog, RolePermission } = require('../models');
+const { PERMISSION_GROUPS, ROLE_DEFAULT_PERMISSIONS, ALL_PERMISSION_KEYS } = require('../config/permissions');
 
 const ACCOUNT_ROLES = ['superadmin', 'admin'];
 const ALLOWED_CREATE_ROLES = ['admin', 'teacher', 'assistant', 'sales'];
@@ -67,6 +68,59 @@ router.get('/accounts', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (re
     page: pageNum,
     size: sizeNum
   });
+}));
+
+router.get('/role-permissions', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.query.institutionId || 0)
+    : getScopeInstitutionId(req);
+
+  const roles = ['admin', 'teacher', 'assistant', 'sales'];
+  const rows = await RolePermission.findAll({
+    where: { institutionId, role: { [Op.in]: roles } }
+  });
+
+  const map = {};
+  rows.forEach((row) => {
+    map[row.role] = Array.isArray(row.permissions) ? row.permissions : [];
+  });
+
+  const rolePermissions = roles.map((role) => ({
+    role,
+    permissions: map[role] || ROLE_DEFAULT_PERMISSIONS[role] || []
+  }));
+
+  success(res, {
+    institutionId,
+    groups: PERMISSION_GROUPS,
+    allPermissionKeys: ALL_PERMISSION_KEYS,
+    rolePermissions
+  });
+}));
+
+router.put('/role-permissions/:role', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {
+  const role = req.params.role;
+  if (!['admin', 'teacher', 'assistant', 'sales'].includes(role)) {
+    return fail(res, '仅支持 admin/teacher/assistant/sales 配置', 400, 400);
+  }
+
+  const institutionId = req.user.role === 'superadmin'
+    ? Number(req.body.institutionId || 0)
+    : getScopeInstitutionId(req);
+
+  const permissions = Array.isArray(req.body.permissions) ? req.body.permissions : [];
+  const validPermissions = permissions.filter((p) => ALL_PERMISSION_KEYS.includes(p));
+
+  await RolePermission.upsert({
+    institutionId,
+    role,
+    permissions: validPermissions
+  });
+
+  success(res, {
+    role,
+    permissions: validPermissions
+  }, '角色权限保存成功');
 }));
 
 router.post('/accounts', auth, requireRole(ACCOUNT_ROLES), [

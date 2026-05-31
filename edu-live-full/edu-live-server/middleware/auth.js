@@ -5,6 +5,7 @@
 const jwt = require('jsonwebtoken');
 const { fail } = require('../utils/response');
 const redis = require('../config/redis');
+const { getUserPermissions } = require('../utils/permission');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'edu_live_default_secret';
 const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
@@ -109,6 +110,30 @@ function requireRole(roles = []) {
 }
 
 /**
+ * 权限点检查
+ * @param {string} permissionKey
+ */
+function requirePermission(permissionKey) {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return fail(res, '请先登录', 401, 401);
+    }
+
+    if (!permissionKey) return next();
+
+    try {
+      const permissions = await getUserPermissions(req.user);
+      if (!permissions.includes(permissionKey)) {
+        return fail(res, '权限不足', 403, 403);
+      }
+      next();
+    } catch (err) {
+      return fail(res, '权限校验失败', 500, 500);
+    }
+  };
+}
+
+/**
  * 机构权限检查
  * 确保用户只能访问自己机构的数据
  */
@@ -131,6 +156,7 @@ module.exports = {
   auth,
   optionalAuth,
   requireRole,
+  requirePermission,
   requireInstitution,
   generateToken,
   verifyToken

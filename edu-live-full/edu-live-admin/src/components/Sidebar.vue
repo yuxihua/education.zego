@@ -31,6 +31,7 @@ const menuList = computed(() => {
     if (r.meta?.hidden) return false
     if (r.meta?.platformOnly && !userStore.isPlatformAdmin) return false
     if (r.meta?.roles?.length && !r.meta.roles.includes(userStore.userInfo?.role)) return false
+    if (r.meta?.permission && !userStore.permissions?.includes(r.meta.permission)) return false
     return true
   })
 })
