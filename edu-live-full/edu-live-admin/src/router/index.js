@@ -178,6 +178,21 @@ const router = createRouter({
   routes
 })
 
+const getFirstAllowedPath = (permissions = []) => {
+  const root = routes.find((item) => item.path === '/' && Array.isArray(item.children))
+  if (!root) return '/'
+
+  const first = root.children.find((item) => {
+    if (!item || !item.path) return false
+    if (item.meta?.hidden) return false
+    if (!item.meta?.permission) return true
+    return permissions.includes(item.meta.permission)
+  })
+
+  if (!first) return '/login'
+  return first.path.startsWith('/') ? first.path : `/${first.path}`
+}
+
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
   const studentToken = localStorage.getItem('student_token')
@@ -189,15 +204,32 @@ router.beforeEach(async (to, from, next) => {
 
   if (!to.meta.public && !userStore.token) {
     next('/login')
-  } else {
-    if (!to.meta.public && !to.meta.studentAuth && to.meta.permission) {
-      if (!userStore.permissions?.includes(to.meta.permission)) {
-        next('/dashboard')
+    return
+  }
+
+  if (!to.meta.public && !to.meta.studentAuth && userStore.token && !userStore.userInfo) {
+    try {
+      await userStore.fetchUserInfo()
+    } catch (err) {
+      await userStore.logout()
+      next('/login')
+      return
+    }
+  }
+
+  if (!to.meta.public && !to.meta.studentAuth && to.meta.permission) {
+    if (!userStore.permissions?.includes(to.meta.permission)) {
+      const fallback = getFirstAllowedPath(userStore.permissions || [])
+      if (to.path === fallback) {
+        next('/login')
         return
       }
+      next(fallback)
+      return
     }
-    next()
   }
+
+  next()
 })
 
 export default router
