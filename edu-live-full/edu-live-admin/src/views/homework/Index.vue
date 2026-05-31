@@ -9,8 +9,15 @@
       </template>
 
       <el-form :inline="true" :model="searchForm" class="search-form">
-        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
-          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        <el-form-item label="机构" v-if="userStore.isPlatformAdmin">
+          <el-select v-model="searchForm.institutionId" placeholder="全部机构" clearable filterable style="width: 240px">
+            <el-option
+              v-for="item in institutionOptions"
+              :key="item.id"
+              :label="`${item.institutionName || item.nickname || item.username}（ID:${item.id}）`"
+              :value="item.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
@@ -42,10 +49,10 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="publishVisible" title="布置作业" width="560px">
+    <el-dialog v-model="publishVisible" :title="isEditHomework ? '编辑作业' : '布置作业'" width="560px">
       <el-form ref="publishFormRef" :model="publishForm" :rules="publishRules" label-width="100px">
         <el-form-item label="关联课程" prop="courseId">
-          <el-select v-model="publishForm.courseId" placeholder="请选择课程" style="width: 100%">
+          <el-select v-model="publishForm.courseId" :disabled="isEditHomework" placeholder="请选择课程" style="width: 100%">
             <el-option v-for="c in courseList" :key="c.id" :label="c.title" :value="c.id" />
           </el-select>
         </el-form-item>
@@ -113,8 +120,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getHomeworkList, createHomework, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
+import { getHomeworkList, createHomework, updateHomework, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
 import { getCourseList } from '@/api/course'
+import { getInstitutionList } from '@/api/platform'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
@@ -125,8 +133,11 @@ const searchForm = reactive({ institutionId: null })
 const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
+const institutionOptions = ref([])
 
 const publishVisible = ref(false)
+const isEditHomework = ref(false)
+const editingHomeworkId = ref(null)
 const publishFormRef = ref()
 const publishing = ref(false)
 const publishForm = reactive({ courseId: null, title: '', content: '', deadline: '' })
@@ -163,8 +174,14 @@ const loadData = async () => {
   loading.value = false
 }
 
+const loadInstitutionOptions = async () => {
+  if (!userStore.isPlatformAdmin) return
+  const res = await getInstitutionList({ page: 1, size: 1000 })
+  institutionOptions.value = res.list || []
+}
+
 const loadCourseOptions = async () => {
-  const params = { page: 1, size: 1000, status: 'published' }
+  const params = { page: 1, size: 1000 }
   if (userStore.isPlatformAdmin && searchForm.institutionId !== null && searchForm.institutionId !== undefined) {
     params.institutionId = searchForm.institutionId
   }
@@ -182,6 +199,13 @@ const handleReset = () => {
 }
 
 const handlePublish = () => {
+  if (userStore.isPlatformAdmin && (searchForm.institutionId === null || searchForm.institutionId === undefined)) {
+    ElMessage.warning('请先选择机构后再布置作业')
+    return
+  }
+
+  isEditHomework.value = false
+  editingHomeworkId.value = null
   Object.assign(publishForm, { courseId: null, title: '', content: '', deadline: '' })
   publishVisible.value = true
   loadCourseOptions()
@@ -217,8 +241,13 @@ const submitPublish = async () => {
   await publishFormRef.value.validate()
   publishing.value = true
   try {
-    await createHomework(publishForm)
-    ElMessage.success('作业布置成功')
+    if (isEditHomework.value && editingHomeworkId.value) {
+      await updateHomework(editingHomeworkId.value, publishForm)
+      ElMessage.success('作业更新成功')
+    } else {
+      await createHomework(publishForm)
+      ElMessage.success('作业布置成功')
+    }
     publishVisible.value = false
     await loadData()
   } finally {
@@ -226,14 +255,36 @@ const submitPublish = async () => {
   }
 }
 
-const handleEdit = () => {
-  ElMessage.info('编辑作业功能将复用布置弹窗，下一步完善')
+const handleEdit = async (row) => {
+  if (userStore.isPlatformAdmin && (searchForm.institutionId === null || searchForm.institutionId === undefined)) {
+    ElMessage.warning('请先选择机构后再编辑作业')
+    return
+  }
+
+  isEditHomework.value = true
+  editingHomeworkId.value = row.id
+  await loadCourseOptions()
+  Object.assign(publishForm, {
+    courseId: row.courseId,
+    title: row.title,
+    content: row.content || '',
+    deadline: row.deadline || ''
+  })
+  publishVisible.value = true
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  await Promise.all([loadData(), loadInstitutionOptions()])
+})
 </script>
 
 <style scoped>
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .search-form {
   margin-bottom: 12px;
 }
