@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { Student, Order, Course, Homework } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
-const { auth, generateToken } = require('../middleware/auth');
+const { auth, generateToken, requireRole } = require('../middleware/auth');
 const redis = require('../config/redis');
 
 const WX_WEB_APP_ID = process.env.WX_WEB_APP_ID || '';
@@ -25,10 +25,15 @@ function isStudentIdentity(req) {
   return !req.user?.role || req.user.role === 'student';
 }
 
+function getOperatorInstitutionId(req) {
+  return req.user?.institutionId || 0;
+}
+
 /**
  * 生成微信扫码登录二维码
  */
 router.get('/wx/qr/create', asyncHandler(async (req, res) => {
+  const { institutionId } = req.query;
   if (!WX_WEB_APP_ID || !WX_WEB_APP_SECRET || !STUDENT_WX_CALLBACK_URL) {
     return fail(res, '微信扫码登录未配置，请联系管理员', 500, 500);
   }
@@ -36,7 +41,11 @@ router.get('/wx/qr/create', asyncHandler(async (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   const cacheKey = `student:wx:login:${state}`;
 
-  await redis.setex(cacheKey, 300, JSON.stringify({ status: 'pending', createdAt: Date.now() }));
+  await redis.setex(cacheKey, 300, JSON.stringify({
+    status: 'pending',
+    createdAt: Date.now(),
+    institutionId: institutionId ? Number(institutionId) : 0
+  }));
 
   const wxAuthUrl = `https://open.weixin.qq.com/connect/qrconnect?appid=${encodeURIComponent(WX_WEB_APP_ID)}&redirect_uri=${encodeURIComponent(STUDENT_WX_CALLBACK_URL)}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(wxAuthUrl)}`;
@@ -88,9 +97,16 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
   }
 
   const cacheKey = `student:wx:login:${state}`;
-  const exists = await redis.get(cacheKey);
-  if (!exists) {
+  const rawSession = await redis.get(cacheKey);
+  if (!rawSession) {
     return res.status(400).send('二维码已过期，请重新获取');
+  }
+
+  let sessionData = {};
+  try {
+    sessionData = JSON.parse(rawSession);
+  } catch (err) {
+    sessionData = {};
   }
 
   if (!code) {
@@ -142,16 +158,21 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
         unionid: userInfo.unionid || null,
         nickname: userInfo.nickname || null,
         avatar: userInfo.headimgurl || null,
+        institutionId: Number(sessionData.institutionId || 0),
         source: 'wechat-web',
         status: 1
       });
     } else {
-      await student.update({
+      const patch = {
         openid,
         unionid: userInfo.unionid || student.unionid,
         nickname: userInfo.nickname || student.nickname,
         avatar: userInfo.headimgurl || student.avatar
-      });
+      };
+      if (!student.institutionId && sessionData.institutionId) {
+        patch.institutionId = Number(sessionData.institutionId);
+      }
+      await student.update(patch);
     }
 
     const token = generateToken({
@@ -186,7 +207,8 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
  * 学员登录（手机号/微信标识）
  */
 router.post('/login', asyncHandler(async (req, res) => {
-  const { phone, nickname, openid, unionid, avatar, source = 'web' } = req.body;
+  const { phone, nickname, openid, unionid, avatar, source = 'web', institutionId } = req.body;
+  const institutionIdNum = institutionId ? Number(institutionId) : 0;
 
   if (!phone && !openid) {
     return fail(res, '手机号或openid至少填写一个', 400, 400);
@@ -210,16 +232,22 @@ router.post('/login', asyncHandler(async (req, res) => {
       unionid: unionid || null,
       nickname: nickname || `学员${randomSuffix}`,
       avatar: avatar || null,
+      institutionId: institutionIdNum,
       source,
       status: 1
     });
   } else {
+    if (institutionIdNum && student.institutionId && student.institutionId !== institutionIdNum) {
+      return fail(res, '该账号不属于当前机构', 403, 403);
+    }
+
     const patch = {};
     if (phone && !student.phone) patch.phone = phone;
     if (openid && !student.openid) patch.openid = openid;
     if (unionid && !student.unionid) patch.unionid = unionid;
     if (nickname) patch.nickname = nickname;
     if (avatar) patch.avatar = avatar;
+    if (!student.institutionId && institutionIdNum) patch.institutionId = institutionIdNum;
     if (Object.keys(patch).length) {
       await student.update(patch);
     }
@@ -321,10 +349,13 @@ router.get('/my-courses', auth, asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/list', asyncHandler(async (req, res) => {
+router.get('/list', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { phone, nickname, page = 1, size = 10 } = req.query;
 
   const where = {};
+  if (req.user.role !== 'superadmin') {
+    where.institutionId = getOperatorInstitutionId(req);
+  }
   if (phone) where.phone = { [Op.like]: `%${phone}%` };
   if (nickname) where.nickname = { [Op.like]: `%${nickname}%` };
 
@@ -354,12 +385,16 @@ router.get('/list', asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/detail', asyncHandler(async (req, res) => {
+router.get('/detail', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.query;
   const student = await Student.findByPk(id);
 
   if (!student) {
     return fail(res, '学员不存在', 404, 404);
+  }
+
+  if (req.user.role !== 'superadmin' && student.institutionId !== getOperatorInstitutionId(req)) {
+    return fail(res, '无权查看该学员', 403, 403);
   }
 
   const courseCount = await Order.count({ where: { studentId: student.id, status: 'paid' } });
@@ -372,12 +407,16 @@ router.get('/detail', asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/learning-record', asyncHandler(async (req, res) => {
+router.get('/learning-record', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.query;
   const student = await Student.findByPk(id);
 
   if (!student) {
     return fail(res, '学员不存在', 404, 404);
+  }
+
+  if (req.user.role !== 'superadmin' && student.institutionId !== getOperatorInstitutionId(req)) {
+    return fail(res, '无权查看该学员学习记录', 403, 403);
   }
 
   const orders = await Order.findAll({

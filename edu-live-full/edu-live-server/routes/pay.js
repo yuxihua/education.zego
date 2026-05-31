@@ -47,6 +47,22 @@ async function ensureStudentForOrder(req, res) {
   return { studentId, student };
 }
 
+async function ensureStudentInstitutionMatchCourse(student, course, res) {
+  if (!course) return false;
+
+  if (!student.institutionId) {
+    await student.update({ institutionId: course.institutionId || 0 });
+    return true;
+  }
+
+  if (course.institutionId && student.institutionId !== course.institutionId) {
+    fail(res, '课程与学员机构不匹配，无法下单', 403, 403);
+    return false;
+  }
+
+  return true;
+}
+
 // ========== 微信支付 ==========
 
 /**
@@ -69,6 +85,10 @@ router.post('/wx/create', auth, payLimiter, asyncHandler(async (req, res) => {
   const course = await Course.findByPk(courseId);
   if (!course) {
     return fail(res, '课程不存在', 404, 404);
+  }
+
+  if (!await ensureStudentInstitutionMatchCourse(student, course, res)) {
+    return;
   }
 
   // 检查是否已购买
@@ -164,12 +184,16 @@ router.post('/alipay/create', auth, payLimiter, asyncHandler(async (req, res) =>
   const { courseId } = req.body;
   const identity = await ensureStudentForOrder(req, res);
   if (!identity) return;
-  const { studentId } = identity;
+  const { studentId, student } = identity;
 
   // 查询课程
   const course = await Course.findByPk(courseId);
   if (!course) {
     return fail(res, '课程不存在', 404, 404);
+  }
+
+  if (!await ensureStudentInstitutionMatchCourse(student, course, res)) {
+    return;
   }
 
   // 检查是否已购买
@@ -218,11 +242,15 @@ router.post('/alipay/wap/create', auth, payLimiter, asyncHandler(async (req, res
   const { courseId } = req.body;
   const identity = await ensureStudentForOrder(req, res);
   if (!identity) return;
-  const { studentId } = identity;
+  const { studentId, student } = identity;
 
   const course = await Course.findByPk(courseId);
   if (!course) {
     return fail(res, '课程不存在', 404, 404);
+  }
+
+  if (!await ensureStudentInstitutionMatchCourse(student, course, res)) {
+    return;
   }
 
   const orderNo = generateOrderNo('A');
