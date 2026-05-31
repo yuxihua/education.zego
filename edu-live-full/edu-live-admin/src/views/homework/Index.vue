@@ -47,6 +47,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.size"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        style="margin-top: 16px; justify-content: flex-end"
+        @size-change="handlePageChange"
+        @current-change="handlePageChange"
+      />
     </el-card>
 
     <el-dialog v-model="publishVisible" :title="isEditHomework ? '编辑作业' : '布置作业'" width="560px">
@@ -79,6 +90,11 @@
     </el-dialog>
 
     <el-dialog v-model="submissionVisible" title="作业提交列表" width="900px">
+      <el-row :gutter="12" style="margin-bottom: 12px">
+        <el-col :span="8"><el-tag type="info">总提交：{{ submissionSummary.total }}</el-tag></el-col>
+        <el-col :span="8"><el-tag type="success">已批改：{{ submissionSummary.graded }}</el-tag></el-col>
+        <el-col :span="8"><el-tag type="warning">待批改：{{ submissionSummary.pending }}</el-tag></el-col>
+      </el-row>
       <el-table :data="submissionList" border size="small">
         <el-table-column prop="studentName" label="学员" width="120" />
         <el-table-column prop="submitTime" label="提交时间" width="160" />
@@ -129,10 +145,12 @@ const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref([])
 const searchForm = reactive({ institutionId: null })
+const pagination = reactive({ page: 1, size: 20, total: 0 })
 
 const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
+const submissionSummary = reactive({ total: 0, graded: 0, pending: 0 })
 const institutionOptions = ref([])
 
 const publishVisible = ref(false)
@@ -154,7 +172,7 @@ const gradeForm = reactive({ score: 0, comment: '' })
 
 const loadData = async () => {
   loading.value = true
-  const params = { page: 1, size: 20, ...searchForm }
+  const params = { page: pagination.page, size: pagination.size, ...searchForm }
   if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
     delete params.institutionId
   }
@@ -171,6 +189,7 @@ const loadData = async () => {
       status: row.deadline && new Date(row.deadline) < new Date() ? 'ended' : 'ongoing'
     }
   })
+  pagination.total = Number(res.pagination?.total || tableData.value.length || 0)
   loading.value = false
 }
 
@@ -190,11 +209,17 @@ const loadCourseOptions = async () => {
 }
 
 const handleSearch = () => {
+  pagination.page = 1
   loadData()
 }
 
 const handleReset = () => {
   searchForm.institutionId = null
+  pagination.page = 1
+  loadData()
+}
+
+const handlePageChange = () => {
   loadData()
 }
 
@@ -214,7 +239,10 @@ const handlePublish = () => {
 const handleSubmissions = async (row) => {
   currentHomeworkId.value = row.id
   const res = await getHomeworkSubmissions({ homeworkId: row.id })
-  submissionList.value = res.list
+  submissionList.value = res.list || []
+  submissionSummary.total = submissionList.value.length
+  submissionSummary.graded = submissionList.value.filter(item => item.status === 'graded').length
+  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
   submissionVisible.value = true
 }
 
@@ -234,7 +262,10 @@ const submitGrade = async () => {
   ElMessage.success('批改成功')
   gradeVisible.value = false
   const res = await getHomeworkSubmissions({ homeworkId: currentHomeworkId.value })
-  submissionList.value = res.list
+  submissionList.value = res.list || []
+  submissionSummary.total = submissionList.value.length
+  submissionSummary.graded = submissionList.value.filter(item => item.status === 'graded').length
+  submissionSummary.pending = submissionSummary.total - submissionSummary.graded
 }
 
 const submitPublish = async () => {
