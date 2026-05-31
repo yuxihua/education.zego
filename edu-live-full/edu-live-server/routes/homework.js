@@ -28,12 +28,22 @@ function canAccessByCourseInstitution(req, courseInstitutionId) {
   return courseInstitutionId === getOperatorInstitutionId(req);
 }
 
-function buildSubmissionQuery(source, keyword, status) {
+function buildSubmissionQuery(source, keyword, status, submitTimeStart, submitTimeEnd) {
   const baseWhere = {
     courseId: source.courseId,
     title: source.title,
     studentId: { [Op.gt]: 0 }
   };
+
+  if (submitTimeStart || submitTimeEnd) {
+    baseWhere.submitTime = {};
+    if (submitTimeStart) {
+      baseWhere.submitTime[Op.gte] = new Date(submitTimeStart);
+    }
+    if (submitTimeEnd) {
+      baseWhere.submitTime[Op.lte] = new Date(submitTimeEnd);
+    }
+  }
 
   if (keyword) {
     const text = String(keyword).trim();
@@ -183,7 +193,7 @@ router.post('/create', auth, requireRole(['admin', 'superadmin', 'teacher']), as
  * 兼容旧前端：按作业查看提交
  */
 router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
-  const { homeworkId, keyword, status, page = 1, size = 10 } = req.query;
+  const { homeworkId, keyword, status, submitTimeStart, submitTimeEnd, page = 1, size = 10 } = req.query;
   if (!homeworkId) {
     return fail(res, '缺少 homeworkId', 400, 400);
   }
@@ -201,7 +211,7 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
   const pageNum = parseInt(page, 10) || 1;
   const pageSizeNum = parseInt(size, 10) || 10;
 
-  const { baseWhere, where, include } = buildSubmissionQuery(source, keyword, status);
+  const { baseWhere, where, include } = buildSubmissionQuery(source, keyword, status, submitTimeStart, submitTimeEnd);
 
   const { count, rows } = await Homework.findAndCountAll({
     where,
@@ -258,7 +268,7 @@ router.get('/submissions', auth, requireRole(['admin', 'superadmin', 'teacher'])
  * 导出作业提交 CSV（按筛选条件导出全量）
  */
 router.get('/submissions/export', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
-  const { homeworkId, keyword, status } = req.query;
+  const { homeworkId, keyword, status, submitTimeStart, submitTimeEnd } = req.query;
   if (!homeworkId) {
     return fail(res, '缺少 homeworkId', 400, 400);
   }
@@ -273,7 +283,7 @@ router.get('/submissions/export', auth, requireRole(['admin', 'superadmin', 'tea
     return fail(res, '无权导出该机构作业提交', 403, 403);
   }
 
-  const { where, include } = buildSubmissionQuery(source, keyword, status);
+  const { where, include } = buildSubmissionQuery(source, keyword, status, submitTimeStart, submitTimeEnd);
 
   const rows = await Homework.findAll({
     where,

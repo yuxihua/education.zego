@@ -106,6 +106,17 @@
             <el-option label="已批改" value="graded" />
           </el-select>
         </el-form-item>
+        <el-form-item label="提交时间">
+          <el-date-picker
+            v-model="submissionSearch.submitTimeRange"
+            type="datetimerange"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            style="width: 360px"
+          />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSubmissionFilter">查询</el-button>
           <el-button @click="handleSubmissionFilterReset">重置</el-button>
@@ -185,7 +196,7 @@ const pagination = reactive({ page: 1, size: 20, total: 0 })
 const submissionVisible = ref(false)
 const submissionList = ref([])
 const currentHomeworkId = ref(null)
-const submissionSearch = reactive({ keyword: '', status: '' })
+const submissionSearch = reactive({ keyword: '', status: '', submitTimeRange: [] })
 const submissionPagination = reactive({ page: 1, size: 10, total: 0 })
 const submissionSummary = reactive({ total: 0, graded: 0, pending: 0 })
 
@@ -256,6 +267,8 @@ const loadSubmissions = async () => {
     homeworkId: currentHomeworkId.value,
     keyword: submissionSearch.keyword,
     status: submissionSearch.status,
+    submitTimeStart: submissionSearch.submitTimeRange?.[0] || '',
+    submitTimeEnd: submissionSearch.submitTimeRange?.[1] || '',
     page: submissionPagination.page,
     size: submissionPagination.size
   })
@@ -335,6 +348,7 @@ const handleSubmissions = async (row) => {
   currentHomeworkId.value = row.id
   submissionSearch.keyword = ''
   submissionSearch.status = ''
+  submissionSearch.submitTimeRange = []
   submissionPagination.page = 1
   await loadSubmissions()
   submissionVisible.value = true
@@ -348,6 +362,7 @@ const handleSubmissionFilter = () => {
 const handleSubmissionFilterReset = () => {
   submissionSearch.keyword = ''
   submissionSearch.status = ''
+  submissionSearch.submitTimeRange = []
   submissionPagination.page = 1
   loadSubmissions()
 }
@@ -386,6 +401,12 @@ const exportSubmissionsCsv = async () => {
   }
   if (submissionSearch.status) {
     params.set('status', submissionSearch.status)
+  }
+  if (submissionSearch.submitTimeRange?.[0]) {
+    params.set('submitTimeStart', submissionSearch.submitTimeRange[0])
+  }
+  if (submissionSearch.submitTimeRange?.[1]) {
+    params.set('submitTimeEnd', submissionSearch.submitTimeRange[1])
   }
 
   const token = localStorage.getItem('token') || ''
