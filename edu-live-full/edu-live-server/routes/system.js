@@ -13,6 +13,7 @@ const { User, OperationLog } = require('../models');
 
 const ACCOUNT_ROLES = ['superadmin', 'admin'];
 const ALLOWED_CREATE_ROLES = ['admin', 'teacher', 'assistant', 'sales'];
+const ALLOWED_UPDATE_ROLES = ['admin', 'teacher', 'assistant', 'sales'];
 
 const router = express.Router();
 
@@ -107,6 +108,43 @@ router.post('/accounts', auth, requireRole(ACCOUNT_ROLES), [
     nickname: user.nickname,
     institutionId: user.institutionId
   }, '账号创建成功');
+}));
+
+router.put('/accounts/:id', auth, requireRole(ACCOUNT_ROLES), [
+  body('role').optional().isIn(ALLOWED_UPDATE_ROLES).withMessage('角色不支持'),
+  body('nickname').optional().trim().isLength({ min: 1 }).withMessage('昵称不能为空')
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return fail(res, errors.array()[0].msg, 400, 400);
+  }
+
+  const id = Number(req.params.id);
+  const user = await User.findByPk(id);
+  if (!user) return fail(res, '账号不存在', 404, 404);
+
+  if (!canManageTargetUser(req.user, user)) {
+    return fail(res, '无权限操作该账号', 403, 403);
+  }
+
+  const patch = {};
+  const { nickname, role, phone, email, institutionId } = req.body;
+
+  if (nickname !== undefined) patch.nickname = nickname;
+  if (role !== undefined) patch.role = role;
+  if (phone !== undefined) patch.phone = phone;
+  if (email !== undefined) patch.email = email;
+
+  if (req.user.role === 'superadmin' && institutionId !== undefined && institutionId !== null && institutionId !== '') {
+    patch.institutionId = Number(institutionId);
+  }
+
+  if (!Object.keys(patch).length) {
+    return fail(res, '没有可更新的字段', 400, 400);
+  }
+
+  await user.update(patch);
+  success(res, null, '账号信息更新成功');
 }));
 
 router.put('/accounts/:id/status', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {

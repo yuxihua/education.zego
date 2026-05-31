@@ -52,6 +52,7 @@
         <el-table-column prop="lastLoginAt" label="最后登录" width="180" />
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link type="warning" @click="openResetPasswordDialog(row)">重置密码</el-button>
             <el-button
               v-if="row.status === 1"
@@ -115,6 +116,38 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="editDialogVisible" title="编辑系统账号" width="560px">
+      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="100px">
+        <el-form-item label="账号">
+          <el-input v-model="editForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="昵称" prop="nickname">
+          <el-input v-model="editForm.nickname" />
+        </el-form-item>
+        <el-form-item label="角色" prop="role">
+          <el-select v-model="editForm.role" style="width: 100%">
+            <el-option label="admin" value="admin" />
+            <el-option label="teacher" value="teacher" />
+            <el-option label="assistant" value="assistant" />
+            <el-option label="sales" value="sales" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="手机号">
+          <el-input v-model="editForm.phone" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="editForm.email" />
+        </el-form-item>
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="editForm.institutionId" :min="0" controls-position="right" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editing" @click="handleEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="passwordDialogVisible" title="重置密码" width="480px">
       <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules" label-width="110px">
         <el-form-item label="目标账号">
@@ -140,6 +173,7 @@ import {
   createSystemAccount,
   getSystemAccounts,
   resetSystemAccountPassword,
+  updateSystemAccount,
   updateSystemAccountStatus
 } from '@/api/system'
 
@@ -170,6 +204,23 @@ const createForm = reactive({
 const createRules = {
   username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
+  role: [{ required: true, message: '请选择角色', trigger: 'change' }]
+}
+
+const editDialogVisible = ref(false)
+const editFormRef = ref()
+const editing = ref(false)
+const editForm = reactive({
+  id: null,
+  username: '',
+  nickname: '',
+  role: 'assistant',
+  phone: '',
+  email: '',
+  institutionId: null
+})
+const editRules = {
   nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
   role: [{ required: true, message: '请选择角色', trigger: 'change' }]
 }
@@ -255,6 +306,42 @@ const handleStatus = async (row, status) => {
 const openResetPasswordDialog = (row) => {
   Object.assign(passwordForm, { id: row.id, username: row.username, newPassword: '' })
   passwordDialogVisible.value = true
+}
+
+const openEditDialog = (row) => {
+  Object.assign(editForm, {
+    id: row.id,
+    username: row.username,
+    nickname: row.nickname || '',
+    role: row.role,
+    phone: row.phone || '',
+    email: row.email || '',
+    institutionId: row.institutionId ?? null
+  })
+  editDialogVisible.value = true
+}
+
+const handleEdit = async () => {
+  await editFormRef.value.validate()
+  editing.value = true
+  try {
+    const payload = {
+      nickname: editForm.nickname,
+      role: editForm.role,
+      phone: editForm.phone,
+      email: editForm.email
+    }
+    if (userStore.isPlatformAdmin) {
+      payload.institutionId = editForm.institutionId
+    }
+
+    await updateSystemAccount(editForm.id, payload)
+    ElMessage.success('账号信息已更新')
+    editDialogVisible.value = false
+    await loadData()
+  } finally {
+    editing.value = false
+  }
 }
 
 const handleResetPassword = async () => {
