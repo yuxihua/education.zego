@@ -14,7 +14,7 @@
       <template #header>
         <div class="card-header">
           <span>排课管理</span>
-          <div class="header-actions">
+          <div class="schedule-header-actions">
             <el-radio-group v-model="scheduleViewMode" size="small" @change="applyScheduleViewRange">
               <el-radio-button label="week">周视图</el-radio-button>
               <el-radio-button label="month">月视图</el-radio-button>
@@ -22,6 +22,7 @@
             <template v-if="scheduleViewMode === 'week'">
               <el-button size="small" @click="moveWeek(-1)">上一周</el-button>
               <el-button size="small" @click="moveWeek(1)">下一周</el-button>
+              <el-button size="small" :disabled="!lastScheduleMove" @click="undoLastMove">撤销上次拖拽</el-button>
             </template>
             <el-button size="small" @click="handleCopyPrevToCurrent">上周复制到本周</el-button>
             <el-button size="small" @click="handleCopyCurrentToNext">本周复制到下周</el-button>
@@ -33,7 +34,7 @@
 
       <el-form :inline="true" class="search-form">
         <el-form-item label="教室">
-          <el-select v-model="scheduleSearch.classroomId" clearable placeholder="全部" style="width: 140px">
+          <el-select v-model="scheduleSearch.classroomId" clearable placeholder="全部" style="width: 160px">
             <el-option v-for="room in classrooms" :key="room.id" :label="`${room.location || '-'} / ${room.name}`" :value="room.id" />
           </el-select>
         </el-form-item>
@@ -49,6 +50,87 @@
           <el-button @click="applyScheduleViewRange">按{{ scheduleViewMode === 'week' ? '本周' : '本月' }}刷新</el-button>
         </el-form-item>
       </el-form>
+
+      <div v-if="scheduleViewMode === 'week'" class="week-board">
+        <div class="week-board-header">
+          <div class="week-board-header-left">
+            <span class="week-board-title">周课表</span>
+            <span class="week-board-range">{{ weekRangeText }}</span>
+          </div>
+          <div class="week-board-header-right">
+            <el-select v-model="scheduleColorMode" size="small" style="width: 130px">
+              <el-option label="无着色" value="none" />
+              <el-option label="按讲师" value="teacher" />
+              <el-option label="按教室" value="classroom" />
+            </el-select>
+          </div>
+        </div>
+        <div class="week-legend" v-if="weekLegendItems.length">
+          <div class="week-legend-item" v-for="item in weekLegendItems" :key="item.key">
+            <span class="week-legend-dot" :style="{ backgroundColor: item.theme.bg, borderColor: item.theme.border }"></span>
+            <span class="week-legend-text">{{ item.label }}</span>
+          </div>
+        </div>
+        <div class="week-drag-tips">拖拽课程到指定日期栏的“上午/下午/晚间”分区，可同时调整日期和时间段。</div>
+        <div class="quick-undo-bar" v-if="quickUndoVisible">
+          <span class="quick-undo-text">已完成拖拽改期，可在 {{ quickUndoSeconds }}s 内快速撤销。</span>
+          <el-button link type="warning" @click="undoLastMove">立即撤销</el-button>
+          <el-button link @click="dismissQuickUndo">关闭</el-button>
+        </div>
+        <div class="week-grid">
+          <div class="week-day" v-for="day in weekGridDays" :key="day.key">
+            <div class="week-day-head">
+              <div class="week-day-name">{{ day.label }}</div>
+              <div class="week-day-date">{{ day.dateText }}</div>
+            </div>
+            <div class="week-day-body">
+              <div
+                :class="[
+                  'week-lane',
+                  {
+                    'is-drop-target': dragHoverLaneKey === getLaneKey(day, lane),
+                    'is-recommended-target': laneRecommendMap[getLaneKey(day, lane)] && !laneConflictMap[getLaneKey(day, lane)],
+                    'is-conflict-target': laneConflictMap[getLaneKey(day, lane)]
+                  }
+                ]"
+                v-for="lane in timeLanes"
+                :key="`${day.key}_${lane.key}`"
+                @dragenter.prevent="handleLaneDragEnter(day, lane)"
+                @dragover.prevent="handleLaneDragOver(day, lane)"
+                @dragleave="handleLaneDragLeave(day, lane)"
+                @drop="handleLaneDrop(day, lane)"
+              >
+                <div class="week-lane-title-row">
+                  <div class="week-lane-title">{{ lane.label }}</div>
+                  <el-tooltip
+                    v-if="getLaneConflict(day, lane)"
+                    placement="top"
+                    effect="light"
+                    :content="formatLaneConflictText(getLaneConflict(day, lane))"
+                  >
+                    <span class="week-lane-conflict-tag">冲突</span>
+                  </el-tooltip>
+                </div>
+                <div
+                  class="week-slot"
+                  v-for="item in getLaneItems(day, lane)"
+                  :key="item.id"
+                  draggable="true"
+                  :style="getSlotStyle(item)"
+                  @dragstart="handleSlotDragStart(item, day)"
+                  @dragend="handleSlotDragEnd"
+                  @click="openScheduleDialog(item)"
+                >
+                  <div class="week-slot-time">{{ slotTimeText(item) }}</div>
+                  <div class="week-slot-course">{{ item.courseName }}</div>
+                  <div class="week-slot-meta">{{ item.classroom?.location || '-' }} / {{ item.classroom?.name || '-' }} · {{ item.teacher?.nickname || item.teacher?.username || '-' }}</div>
+                </div>
+                <div class="week-slot-empty" v-if="!getLaneItems(day, lane).length">暂无排课</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <el-table :data="schedules" size="small" v-loading="scheduleLoading" border>
         <el-table-column prop="courseName" label="课程" min-width="140" />
@@ -113,11 +195,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getInstitutionList } from '@/api/platform'
 import {
+  checkScheduleConflict,
   copyWeekSchedules,
   createSchedule,
   deleteSchedule,
@@ -137,12 +220,42 @@ const teachers = ref([])
 const schedules = ref([])
 const scheduleLoading = ref(false)
 const scheduleViewMode = ref('week')
+const scheduleColorMode = ref('teacher')
 const scheduleSearch = reactive({ classroomId: null, teacherId: null, startDate: '', endDate: '' })
 
 const scheduleDialogVisible = ref(false)
 const scheduleForm = reactive({ id: null, classroomId: null, teacherId: null, courseName: '', startTime: '', endTime: '', remarks: '', status: 1 })
 const copyResultVisible = ref(false)
 const copyResult = reactive({ copiedCount: 0, skippedCount: 0, skipped: [] })
+const draggingSlot = ref(null)
+const dragHoverLaneKey = ref('')
+const laneConflictMap = reactive({})
+const laneRecommendMap = reactive({})
+const currentRecommendDayKey = ref('')
+const lanePrecheckTimer = ref(null)
+const quickUndoSeconds = ref(0)
+const quickUndoTimer = ref(null)
+const lastScheduleMove = ref(null)
+const quickUndoVisible = computed(() => !!lastScheduleMove.value && quickUndoSeconds.value > 0)
+
+const SLOT_THEMES = [
+  { bg: '#ecf5ff', border: '#91caff', text: '#1d39c4' },
+  { bg: '#f6ffed', border: '#b7eb8f', text: '#237804' },
+  { bg: '#fff7e6', border: '#ffd591', text: '#ad6800' },
+  { bg: '#fff0f6', border: '#ffadd2', text: '#c41d7f' },
+  { bg: '#f9f0ff', border: '#d3adf7', text: '#531dab' },
+  { bg: '#e6fffb', border: '#87e8de', text: '#006d75' },
+  { bg: '#fff1f0', border: '#ffa39e', text: '#a8071a' },
+  { bg: '#fcffe6', border: '#d3f261', text: '#5b8c00' }
+]
+
+const TIME_LANES = [
+  { key: 'morning', label: '上午', startHour: 9, startMinute: 0, endHour: 12, endMinute: 0 },
+  { key: 'afternoon', label: '下午', startHour: 13, startMinute: 30, endHour: 17, endMinute: 30 },
+  { key: 'evening', label: '晚间', startHour: 19, startMinute: 0, endHour: 22, endMinute: 0 }
+]
+
+const timeLanes = computed(() => TIME_LANES)
 
 const buildCommonParams = () => {
   const params = {}
@@ -155,6 +268,276 @@ const buildCommonParams = () => {
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
   return `${fmt(start)} ~ ${fmt(end)}`
+}
+
+const weekRangeText = computed(() => {
+  if (!scheduleSearch.startDate || !scheduleSearch.endDate) return '-'
+  return `${String(scheduleSearch.startDate).slice(0, 10)} ~ ${String(scheduleSearch.endDate).slice(0, 10)}`
+})
+
+const weekGridDays = computed(() => {
+  if (scheduleViewMode.value !== 'week' || !scheduleSearch.startDate) return []
+  const start = new Date(scheduleSearch.startDate)
+  if (Number.isNaN(start.getTime())) return []
+
+  const names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+  const days = Array.from({ length: 7 }).map((_, idx) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + idx)
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    const key = `${y}-${m}-${d}`
+    return {
+      key,
+      label: names[idx],
+      dateText: `${m}-${d}`,
+      items: []
+    }
+  })
+
+  for (const item of schedules.value || []) {
+    const dt = new Date(item.startTime)
+    if (Number.isNaN(dt.getTime())) continue
+    const y = dt.getFullYear()
+    const m = String(dt.getMonth() + 1).padStart(2, '0')
+    const d = String(dt.getDate()).padStart(2, '0')
+    const key = `${y}-${m}-${d}`
+    const day = days.find((x) => x.key === key)
+    if (!day) continue
+    day.items.push(item)
+  }
+
+  days.forEach((day) => {
+    day.items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+  })
+  return days
+})
+
+function buildThemeMap(keys) {
+  const map = {}
+  keys.forEach((key, idx) => {
+    map[key] = SLOT_THEMES[idx % SLOT_THEMES.length]
+  })
+  return map
+}
+
+const teacherThemeMap = computed(() => {
+  const keys = [...new Set((schedules.value || []).map((item) => `t_${item.teacherId || 0}`).filter((x) => x !== 't_0'))]
+  return buildThemeMap(keys)
+})
+
+const classroomThemeMap = computed(() => {
+  const keys = [...new Set((schedules.value || []).map((item) => `c_${item.classroomId || 0}`).filter((x) => x !== 'c_0'))]
+  return buildThemeMap(keys)
+})
+
+const weekLegendItems = computed(() => {
+  if (scheduleColorMode.value === 'none') return []
+  const map = scheduleColorMode.value === 'teacher' ? teacherThemeMap.value : classroomThemeMap.value
+  const items = []
+  const visited = new Set()
+  for (const item of schedules.value || []) {
+    const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
+    if (key.endsWith('_0') || visited.has(key) || !map[key]) continue
+    visited.add(key)
+    items.push({
+      key,
+      label: scheduleColorMode.value === 'teacher'
+        ? (item.teacher?.nickname || item.teacher?.username || '未知讲师')
+        : (`${item.classroom?.location || '-'} / ${item.classroom?.name || '未知教室'}`),
+      theme: map[key]
+    })
+  }
+  return items
+})
+
+const slotTimeText = (item) => {
+  const s = String(item?.startTime || '').slice(11, 16)
+  const e = String(item?.endTime || '').slice(11, 16)
+  if (!s || !e) return '-'
+  return `${s}-${e}`
+}
+
+const getLaneItems = (day, lane) => {
+  return (day?.items || []).filter((item) => {
+    const dt = new Date(item.startTime)
+    if (Number.isNaN(dt.getTime())) return false
+    const minute = dt.getHours() * 60 + dt.getMinutes()
+    const laneStart = lane.startHour * 60 + lane.startMinute
+    const laneEnd = lane.endHour * 60 + lane.endMinute
+    return minute >= laneStart && minute < laneEnd
+  })
+}
+
+const getLaneKey = (day, lane) => `${day?.key || ''}_${lane?.key || ''}`
+
+const getLaneConflict = (day, lane) => {
+  const value = laneConflictMap[getLaneKey(day, lane)]
+  if (!value || value === true) return null
+  return value
+}
+
+const formatLaneConflictText = (conflict) => {
+  if (!conflict) return '该时段存在冲突'
+  const course = conflict.courseName || '-'
+  const classroom = conflict.classroomName || '-'
+  const teacher = conflict.teacherName || '-'
+  const time = conflict.timeRangeText || '-'
+  return `冲突课程：${course}；教室：${classroom}；讲师：${teacher}；时间：${time}`
+}
+
+const clearLaneConflictMap = () => {
+  Object.keys(laneConflictMap).forEach((k) => {
+    delete laneConflictMap[k]
+  })
+}
+
+const clearLaneRecommendMap = () => {
+  Object.keys(laneRecommendMap).forEach((k) => {
+    delete laneRecommendMap[k]
+  })
+  currentRecommendDayKey.value = ''
+}
+
+const clearLanePreviewMaps = () => {
+  clearLaneConflictMap()
+  clearLaneRecommendMap()
+}
+
+const clearLanePrecheckTimer = () => {
+  if (lanePrecheckTimer.value) {
+    clearTimeout(lanePrecheckTimer.value)
+    lanePrecheckTimer.value = null
+  }
+}
+
+const buildDropPayload = (drag, targetDay, targetLane) => {
+  const srcDay = new Date(`${drag.dayKey}T00:00:00`)
+  const dstDay = new Date(`${targetDay.key}T00:00:00`)
+  if (Number.isNaN(srcDay.getTime()) || Number.isNaN(dstDay.getTime())) {
+    return null
+  }
+
+  const start = new Date(String(drag.startTime).replace(' ', 'T'))
+  const end = new Date(String(drag.endTime).replace(' ', 'T'))
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null
+  }
+
+  const durationMs = end.getTime() - start.getTime()
+  const nextStart = new Date(dstDay)
+  nextStart.setHours(targetLane.startHour, targetLane.startMinute, 0, 0)
+  const nextEnd = new Date(nextStart.getTime() + durationMs)
+
+  return {
+    nextStart,
+    nextEnd,
+    sameTime: nextStart.getTime() === start.getTime() && nextEnd.getTime() === end.getTime()
+  }
+}
+
+const toApiDateTime = (date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`
+}
+
+const precheckLaneConflict = (day, lane) => {
+  const drag = draggingSlot.value
+  if (!drag || !day?.key || !lane) return
+
+  clearLanePrecheckTimer()
+  lanePrecheckTimer.value = setTimeout(async () => {
+    if (currentRecommendDayKey.value !== day.key) {
+      clearLanePreviewMaps()
+      currentRecommendDayKey.value = day.key
+    }
+
+    const checks = await Promise.all((timeLanes.value || []).map(async (laneItem) => {
+      const laneKey = getLaneKey(day, laneItem)
+      const next = buildDropPayload(drag, day, laneItem)
+      if (!next || next.sameTime) {
+        return { laneKey, conflict: null, recommended: false }
+      }
+
+      const payload = {
+        scheduleId: drag.id,
+        classroomId: drag.classroomId,
+        teacherId: drag.teacherId,
+        startTime: toApiDateTime(next.nextStart),
+        endTime: toApiDateTime(next.nextEnd)
+      }
+      if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+        payload.institutionId = currentInstitutionId.value
+      }
+
+      try {
+        const res = await checkScheduleConflict(payload)
+        if (res?.hasConflict) {
+          return {
+            laneKey,
+            conflict: res.conflict || {
+              courseName: '未知课程',
+              classroomName: '-',
+              teacherName: '-',
+              timeRangeText: '-'
+            },
+            recommended: false
+          }
+        }
+        return { laneKey, conflict: null, recommended: true }
+      } catch (err) {
+        return { laneKey, conflict: null, recommended: false }
+      }
+    }))
+
+    checks.forEach((item) => {
+      laneConflictMap[item.laneKey] = item.conflict
+      laneRecommendMap[item.laneKey] = item.recommended
+    })
+  }, 180)
+}
+
+const startQuickUndoCountdown = () => {
+  if (quickUndoTimer.value) {
+    clearInterval(quickUndoTimer.value)
+    quickUndoTimer.value = null
+  }
+  quickUndoSeconds.value = 8
+  quickUndoTimer.value = setInterval(() => {
+    quickUndoSeconds.value -= 1
+    if (quickUndoSeconds.value <= 0) {
+      quickUndoSeconds.value = 0
+      clearInterval(quickUndoTimer.value)
+      quickUndoTimer.value = null
+    }
+  }, 1000)
+}
+
+const dismissQuickUndo = () => {
+  if (quickUndoTimer.value) {
+    clearInterval(quickUndoTimer.value)
+    quickUndoTimer.value = null
+  }
+  quickUndoSeconds.value = 0
+}
+
+const getSlotStyle = (item) => {
+  if (scheduleColorMode.value === 'none') return {}
+  const key = scheduleColorMode.value === 'teacher' ? `t_${item.teacherId || 0}` : `c_${item.classroomId || 0}`
+  const map = scheduleColorMode.value === 'teacher' ? teacherThemeMap.value : classroomThemeMap.value
+  const theme = map[key]
+  if (!theme) return {}
+  return {
+    backgroundColor: theme.bg,
+    borderColor: theme.border,
+    color: theme.text
+  }
 }
 
 const toDateString = (date) => {
@@ -231,6 +614,145 @@ const moveWeek = async (step) => {
   scheduleSearch.startDate = toDateString(start)
   scheduleSearch.endDate = toDateString(end)
   await loadSchedules()
+}
+
+const handleSlotDragStart = (item, day) => {
+  clearLanePreviewMaps()
+  draggingSlot.value = {
+    id: item.id,
+    dayKey: day.key,
+    classroomId: item.classroomId,
+    teacherId: item.teacherId,
+    startTime: item.startTime,
+    endTime: item.endTime
+  }
+}
+
+const handleSlotDragEnd = () => {
+  draggingSlot.value = null
+  dragHoverLaneKey.value = ''
+  clearLanePreviewMaps()
+}
+
+const handleLaneDragEnter = (day, lane) => {
+  if (!draggingSlot.value) return
+  dragHoverLaneKey.value = getLaneKey(day, lane)
+  precheckLaneConflict(day, lane)
+}
+
+const handleLaneDragOver = (day, lane) => {
+  if (!draggingSlot.value) return
+  dragHoverLaneKey.value = getLaneKey(day, lane)
+  precheckLaneConflict(day, lane)
+}
+
+const handleLaneDragLeave = (day, lane) => {
+  const current = getLaneKey(day, lane)
+  if (dragHoverLaneKey.value === current) {
+    dragHoverLaneKey.value = ''
+  }
+}
+
+const handleLaneDrop = async (targetDay, targetLane) => {
+  const drag = draggingSlot.value
+  if (!drag || !targetDay?.key || !targetLane) return
+  dragHoverLaneKey.value = ''
+  clearLanePrecheckTimer()
+
+  const next = buildDropPayload(drag, targetDay, targetLane)
+  if (!next) {
+    draggingSlot.value = null
+    dragHoverLaneKey.value = ''
+    clearLanePreviewMaps()
+    return
+  }
+
+  if (next.sameTime) {
+    draggingSlot.value = null
+    dragHoverLaneKey.value = ''
+    clearLanePreviewMaps()
+    return
+  }
+
+  const payload = {
+    startTime: toApiDateTime(next.nextStart),
+    endTime: toApiDateTime(next.nextEnd)
+  }
+  if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+    payload.institutionId = currentInstitutionId.value
+  }
+
+  try {
+    const precheckPayload = {
+      scheduleId: drag.id,
+      classroomId: drag.classroomId,
+      teacherId: drag.teacherId,
+      startTime: payload.startTime,
+      endTime: payload.endTime
+    }
+    if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+      precheckPayload.institutionId = currentInstitutionId.value
+    }
+
+    const precheck = await checkScheduleConflict(precheckPayload)
+    if (precheck?.hasConflict && precheck?.conflict) {
+      const conflict = precheck.conflict
+      ElMessageBox.alert(
+        `冲突排课：${conflict.courseName || '-'}\n教室：${conflict.classroomName || '-'}\n讲师：${conflict.teacherName || '-'}\n时间：${conflict.timeRangeText || '-'}`,
+        '拖拽冲突预警',
+        { type: 'warning' }
+      )
+      return
+    }
+
+    await updateSchedule(drag.id, payload)
+    lastScheduleMove.value = {
+      id: drag.id,
+      oldStartTime: drag.startTime,
+      oldEndTime: drag.endTime,
+      newStartTime: payload.startTime,
+      newEndTime: payload.endTime
+    }
+    ElMessage.success('已调整到新时段')
+    startQuickUndoCountdown()
+    await loadSchedules()
+  } catch (err) {
+    const conflict = err?.data
+    if (err?.code === 409 && conflict) {
+      ElMessageBox.alert(
+        `冲突排课：${conflict.courseName || '-'}\n教室：${conflict.classroomName || '-'}\n讲师：${conflict.teacherName || '-'}\n时间：${conflict.timeRangeText || '-'}`,
+        '拖拽改期失败',
+        { type: 'warning' }
+      )
+    } else {
+      ElMessage.error('拖拽改期失败')
+    }
+  } finally {
+    draggingSlot.value = null
+    dragHoverLaneKey.value = ''
+    clearLanePreviewMaps()
+  }
+}
+
+const undoLastMove = async () => {
+  const move = lastScheduleMove.value
+  if (!move) return
+  const payload = {
+    startTime: move.oldStartTime,
+    endTime: move.oldEndTime
+  }
+  if (userStore.isPlatformAdmin && currentInstitutionId.value) {
+    payload.institutionId = currentInstitutionId.value
+  }
+  try {
+    await updateSchedule(move.id, payload)
+    ElMessage.success('已撤销上次拖拽')
+    lastScheduleMove.value = null
+    dismissQuickUndo()
+    await loadSchedules()
+  } catch (err) {
+    ElMessage.error('撤销失败')
+  }
 }
 
 const openScheduleDialog = (row = null) => {
@@ -343,6 +865,12 @@ onMounted(async () => {
   await loadBaseData()
   await applyScheduleViewRange()
 })
+
+onBeforeUnmount(() => {
+  clearLanePrecheckTimer()
+  clearLaneRecommendMap()
+  dismissQuickUndo()
+})
 </script>
 
 <style scoped>
@@ -352,7 +880,7 @@ onMounted(async () => {
   align-items: center;
 }
 
-.header-actions {
+.schedule-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -360,5 +888,228 @@ onMounted(async () => {
 
 .search-form {
   margin-bottom: 12px;
+}
+
+.week-board {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.week-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.week-board-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.week-board-header-right {
+  display: flex;
+  align-items: center;
+}
+
+.week-board-title {
+  font-weight: 600;
+}
+
+.week-board-range {
+  color: #909399;
+  font-size: 12px;
+}
+
+.week-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.week-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  padding: 2px 8px;
+}
+
+.week-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #dcdfe6;
+}
+
+.week-legend-text {
+  font-size: 12px;
+  color: #606266;
+}
+
+.week-drag-tips {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #909399;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.quick-undo-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #fff7e6;
+  border-bottom: 1px dashed #ffd591;
+}
+
+.quick-undo-text {
+  font-size: 12px;
+  color: #ad6800;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.week-day {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.week-day-head {
+  padding: 8px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.week-day-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.week-day-date {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.week-day-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.week-lane {
+  border: 1px dashed #e4e7ed;
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.week-lane.is-drop-target {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.week-lane.is-recommended-target {
+  border-color: #52c41a;
+  background: #f6ffed;
+}
+
+.week-lane.is-conflict-target {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+}
+
+.week-lane-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+  margin-bottom: 6px;
+}
+
+.week-lane-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.week-lane-conflict-tag {
+  font-size: 11px;
+  line-height: 1;
+  color: #cf1322;
+  border: 1px solid #ffccc7;
+  border-radius: 10px;
+  background: #fff1f0;
+  padding: 3px 6px;
+  cursor: help;
+}
+
+.week-slot {
+  border: 1px solid #d9ecff;
+  background: #ecf5ff;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.week-slot:hover {
+  border-color: #79bbff;
+}
+
+.week-slot:active {
+  opacity: 0.8;
+}
+
+.week-slot-time {
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 600;
+}
+
+.week-slot-course {
+  font-size: 13px;
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.week-slot-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.week-slot-empty {
+  color: #c0c4cc;
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+@media (max-width: 1400px) {
+  .week-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .week-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
