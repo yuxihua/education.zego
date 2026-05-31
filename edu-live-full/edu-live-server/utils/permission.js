@@ -1,6 +1,24 @@
 const { RolePermission } = require('../models');
 const { ROLE_DEFAULT_PERMISSIONS } = require('../config/permissions');
 
+const LEGACY_PERMISSION_EXPANDERS = {
+  'distribution.manage': [
+    'distribution.orders.view',
+    'distribution.config.manage',
+    'distribution.hierarchy.view',
+    'distribution.assignment.manage'
+  ]
+};
+
+function expandLegacyPermissions(permissions = []) {
+  const set = new Set(Array.isArray(permissions) ? permissions : []);
+  for (const key of [...set]) {
+    const expanded = LEGACY_PERMISSION_EXPANDERS[key] || [];
+    expanded.forEach((item) => set.add(item));
+  }
+  return [...set];
+}
+
 async function getUserPermissions(user) {
   if (!user || !user.role) return [];
 
@@ -8,7 +26,7 @@ async function getUserPermissions(user) {
   const institutionId = Number(user.institutionId || 0);
 
   if (role === 'superadmin') {
-    return ROLE_DEFAULT_PERMISSIONS.superadmin || [];
+    return expandLegacyPermissions(ROLE_DEFAULT_PERMISSIONS.superadmin || []);
   }
 
   const row = await RolePermission.findOne({
@@ -19,10 +37,10 @@ async function getUserPermissions(user) {
   });
 
   if (!row) {
-    return ROLE_DEFAULT_PERMISSIONS[role] || [];
+    return expandLegacyPermissions(ROLE_DEFAULT_PERMISSIONS[role] || []);
   }
 
-  return Array.isArray(row.permissions) ? row.permissions : [];
+  return expandLegacyPermissions(Array.isArray(row.permissions) ? row.permissions : []);
 }
 
 module.exports = {

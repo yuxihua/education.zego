@@ -5,7 +5,7 @@
 const express = require('express');
 const { Op } = require('sequelize');
 const router = express.Router();
-const { auth, requireRole } = require('../middleware/auth');
+const { auth, requireRole, requirePermission } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/error');
 const { success, fail } = require('../utils/response');
 const { User, Student, Order, Course, DistributionConfig, DistributionSettlement } = require('../models');
@@ -251,7 +251,7 @@ async function buildCommissionRows({ institutionId, salesUserId, salesLevel, mon
   return list;
 }
 
-router.get('/config', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.get('/config', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.config.manage'), asyncHandler(async (req, res) => {
   const institutionId = req.user.role === 'superadmin'
     ? Number(req.query.institutionId || 0)
     : getInstitutionId(req);
@@ -260,7 +260,7 @@ router.get('/config', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, r
   success(res, list);
 }));
 
-router.post('/config', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.post('/config', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.config.manage'), asyncHandler(async (req, res) => {
   const institutionId = req.user.role === 'superadmin'
     ? Number(req.body.institutionId || 0)
     : getInstitutionId(req);
@@ -318,7 +318,7 @@ router.get('/sales/list', auth, requireRole(VIEW_ROLES), asyncHandler(async (req
   })));
 }));
 
-router.get('/students/search', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.get('/students/search', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.assignment.manage'), asyncHandler(async (req, res) => {
   const { keyword = '', limit = 50 } = req.query;
 
   const institutionId = req.user.role === 'superadmin'
@@ -354,7 +354,7 @@ router.get('/students/search', auth, requireRole(ADMIN_ROLES), asyncHandler(asyn
   }));
 }));
 
-router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+router.get('/tree', auth, requireRole(VIEW_ROLES), requirePermission('distribution.hierarchy.view'), asyncHandler(async (req, res) => {
   const institutionId = req.user.role === 'superadmin'
     ? Number(req.query.institutionId || 0)
     : getInstitutionId(req);
@@ -507,7 +507,7 @@ router.get('/tree', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res)
   });
 }));
 
-router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.post('/sales/create', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.assignment.manage'), asyncHandler(async (req, res) => {
   const { username, password, nickname, phone, email, salesLevel, parentSalesUserId } = req.body;
   if (!username || !password) {
     return fail(res, '账号和密码不能为空', 400, 400);
@@ -575,7 +575,7 @@ router.post('/sales/create', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
   }, '销售账号创建成功');
 }));
 
-router.post('/student/assign', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.post('/student/assign', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.assignment.manage'), asyncHandler(async (req, res) => {
   const { studentId, salesUserId, salesLevel } = req.body;
   if (!studentId || !salesUserId) {
     return fail(res, 'studentId、salesUserId 必填', 400, 400);
@@ -627,7 +627,7 @@ router.post('/student/assign', auth, requireRole(ADMIN_ROLES), asyncHandler(asyn
   }, '学员分销关系设置成功');
 }));
 
-router.get('/settlement/status', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+router.get('/settlement/status', auth, requireRole(VIEW_ROLES), requirePermission('distribution.orders.view'), asyncHandler(async (req, res) => {
   const monthKey = normalizeMonth(req.query.month);
   if (!monthKey) {
     return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
@@ -650,7 +650,7 @@ router.get('/settlement/status', auth, requireRole(VIEW_ROLES), asyncHandler(asy
   });
 }));
 
-router.post('/settlement/lock', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.post('/settlement/lock', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.orders.view'), asyncHandler(async (req, res) => {
   const monthKey = normalizeMonth(req.body.month);
   if (!monthKey) {
     return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
@@ -702,7 +702,7 @@ router.post('/settlement/lock', auth, requireRole(ADMIN_ROLES), asyncHandler(asy
   }, '月度分销结算已锁定');
 }));
 
-router.post('/settlement/unlock', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
+router.post('/settlement/unlock', auth, requireRole(ADMIN_ROLES), requirePermission('distribution.orders.view'), asyncHandler(async (req, res) => {
   const monthKey = normalizeMonth(req.body.month);
   if (!monthKey) {
     return fail(res, '请传入 month，格式 YYYY-MM', 400, 400);
@@ -721,7 +721,7 @@ router.post('/settlement/unlock', auth, requireRole(ADMIN_ROLES), asyncHandler(a
   success(res, { month: monthKey, locked: false }, '月度分销结算已解锁');
 }));
 
-router.get('/orders', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+router.get('/orders', auth, requireRole(VIEW_ROLES), requirePermission('distribution.orders.view'), asyncHandler(async (req, res) => {
   const { page = 1, size = 20, month, salesUserId, salesLevel, keyword } = req.query;
 
   const institutionId = req.user.role === 'superadmin'
@@ -779,7 +779,7 @@ router.get('/orders', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, re
   });
 }));
 
-router.get('/orders/export', auth, requireRole(VIEW_ROLES), asyncHandler(async (req, res) => {
+router.get('/orders/export', auth, requireRole(VIEW_ROLES), requirePermission('distribution.orders.view'), asyncHandler(async (req, res) => {
   const { month, salesUserId, salesLevel, keyword } = req.query;
 
   const institutionId = req.user.role === 'superadmin'

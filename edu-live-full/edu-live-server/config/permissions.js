@@ -46,7 +46,12 @@ const PERMISSION_GROUPS = [
   {
     key: 'distribution',
     name: '分销管理',
-    items: [{ key: 'distribution.manage', name: '分销管理' }]
+    items: [
+      { key: 'distribution.orders.view', name: '分销订单结算' },
+      { key: 'distribution.config.manage', name: '分销提成配置' },
+      { key: 'distribution.hierarchy.view', name: '分销层级关系' },
+      { key: 'distribution.assignment.manage', name: '分销归属管理' }
+    ]
   },
   {
     key: 'platform',
@@ -81,7 +86,10 @@ const ROLE_DEFAULT_PERMISSIONS = {
     'student.manage',
     'order.manage',
     'checkin.manage',
-    'distribution.manage',
+    'distribution.orders.view',
+    'distribution.config.manage',
+    'distribution.hierarchy.view',
+    'distribution.assignment.manage',
     'platform.resource.manage',
     'system.account.manage',
     'system.log.view',
@@ -89,7 +97,7 @@ const ROLE_DEFAULT_PERMISSIONS = {
   ],
   teacher: ['dashboard.view', 'course.manage', 'live.manage', 'question.manage', 'homework.manage'],
   assistant: ['dashboard.view', 'student.manage', 'homework.manage', 'checkin.manage'],
-  sales: ['dashboard.view', 'distribution.manage', 'order.manage']
+  sales: ['dashboard.view', 'distribution.orders.view', 'distribution.hierarchy.view', 'order.manage']
 };
 
 module.exports = {

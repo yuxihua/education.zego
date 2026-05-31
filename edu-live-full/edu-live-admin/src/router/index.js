@@ -87,9 +87,32 @@ export const routes = [
       },
       {
         path: 'distribution',
-        name: 'Distribution',
-        component: () => import('@/views/distribution/Index.vue'),
-        meta: { title: '分销管理', icon: 'Connection', roles: ['superadmin', 'admin', 'sales'], permission: 'distribution.manage' }
+        redirect: '/distribution/orders',
+        meta: { hidden: true }
+      },
+      {
+        path: 'distribution/orders',
+        name: 'DistributionOrders',
+        component: () => import('@/views/distribution/Orders.vue'),
+        meta: { title: '分销订单结算', icon: 'Money', roles: ['superadmin', 'admin', 'sales'], permission: 'distribution.orders.view' }
+      },
+      {
+        path: 'distribution/config',
+        name: 'DistributionConfig',
+        component: () => import('@/views/distribution/Config.vue'),
+        meta: { title: '分销提成配置', icon: 'Setting', roles: ['superadmin', 'admin'], permission: 'distribution.config.manage' }
+      },
+      {
+        path: 'distribution/hierarchy',
+        name: 'DistributionHierarchy',
+        component: () => import('@/views/distribution/Hierarchy.vue'),
+        meta: { title: '分销层级关系', icon: 'Connection', roles: ['superadmin', 'admin', 'sales'], permission: 'distribution.hierarchy.view' }
+      },
+      {
+        path: 'distribution/assignment',
+        name: 'DistributionAssignment',
+        component: () => import('@/views/distribution/Assignment.vue'),
+        meta: { title: '分销归属管理', icon: 'UserFilled', roles: ['superadmin', 'admin'], permission: 'distribution.assignment.manage' }
       },
       {
         path: 'checkin',
