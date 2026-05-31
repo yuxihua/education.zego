@@ -8,6 +8,16 @@
         </div>
       </template>
 
+      <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin">
+          <el-input-number v-model="searchForm.institutionId" :min="0" controls-position="right" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
       <el-table :data="tableData" v-loading="loading" border>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="作业标题" min-width="200" />
@@ -75,9 +85,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHomeworkList, getHomeworkSubmissions, gradeHomework } from '@/api/homework'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref([])
+const searchForm = reactive({ institutionId: null })
 
 const submissionVisible = ref(false)
 const submissionList = ref([])
@@ -89,9 +102,23 @@ const gradeForm = reactive({ score: 0, comment: '' })
 
 const loadData = async () => {
   loading.value = true
-  const res = await getHomeworkList({ page: 1, size: 20 })
+  const params = { page: 1, size: 20, ...searchForm }
+  if (!userStore.isPlatformAdmin || params.institutionId === null || params.institutionId === undefined) {
+    delete params.institutionId
+  }
+
+  const res = await getHomeworkList(params)
   tableData.value = res.list
   loading.value = false
+}
+
+const handleSearch = () => {
+  loadData()
+}
+
+const handleReset = () => {
+  searchForm.institutionId = null
+  loadData()
 }
 
 const handlePublish = () => {
@@ -126,3 +153,9 @@ const submitGrade = async () => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.search-form {
+  margin-bottom: 12px;
+}
+</style>

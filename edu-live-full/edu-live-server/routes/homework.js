@@ -32,7 +32,7 @@ function canAccessByCourseInstitution(req, courseInstitutionId) {
  * 作业列表（按课程）
  */
 router.get('/list', auth, asyncHandler(async (req, res) => {
-  const { courseId, studentId, status, page = 1, pageSize = 10 } = req.query;
+  const { courseId, studentId, status, institutionId, page = 1, size, pageSize = 10 } = req.query;
 
   const where = {};
   if (courseId) where.courseId = courseId;
@@ -48,7 +48,16 @@ router.get('/list', auth, asyncHandler(async (req, res) => {
   if (req.user.role !== 'superadmin') {
     includeCourse.where = { institutionId: getOperatorInstitutionId(req) };
     includeCourse.required = true;
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      includeCourse.where = { institutionId: institutionIdNum };
+      includeCourse.required = true;
+    }
   }
+
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(size || pageSize, 10) || 10;
 
   const { count, rows } = await Homework.findAndCountAll({
     where,
@@ -57,16 +66,16 @@ router.get('/list', auth, asyncHandler(async (req, res) => {
       { model: Student, as: 'student', attributes: ['id', 'nickname', 'openid'] }
     ],
     order: [['createdAt', 'DESC']],
-    offset: (page - 1) * pageSize,
-    limit: parseInt(pageSize)
+    offset: (pageNum - 1) * pageSizeNum,
+    limit: pageSizeNum
   });
 
   success(res, {
     list: rows,
     pagination: {
       total: count,
-      page: parseInt(page),
-      pageSize: parseInt(pageSize)
+      page: pageNum,
+      pageSize: pageSizeNum
     }
   });
 }));
