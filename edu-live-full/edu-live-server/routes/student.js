@@ -4,11 +4,18 @@
 const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
+const axios = require('axios');
+const crypto = require('crypto');
 const { Student, Order, Course, Homework } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, generateToken } = require('../middleware/auth');
 const redis = require('../config/redis');
+
+const WX_WEB_APP_ID = process.env.WX_WEB_APP_ID || '';
+const WX_WEB_APP_SECRET = process.env.WX_WEB_APP_SECRET || '';
+const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
+const STUDENT_WX_CALLBACK_URL = process.env.STUDENT_WX_CALLBACK_URL || `${BASE_URL}/api/student/wx/callback`;
 
 function getCurrentStudentId(req) {
   return req.user?.studentId || req.user?.id;
@@ -17,6 +24,163 @@ function getCurrentStudentId(req) {
 function isStudentIdentity(req) {
   return !req.user?.role || req.user.role === 'student';
 }
+
+/**
+ * 生成微信扫码登录二维码
+ */
+router.get('/wx/qr/create', asyncHandler(async (req, res) => {
+  if (!WX_WEB_APP_ID || !WX_WEB_APP_SECRET || !STUDENT_WX_CALLBACK_URL) {
+    return fail(res, '微信扫码登录未配置，请联系管理员', 500, 500);
+  }
+
+  const state = crypto.randomBytes(16).toString('hex');
+  const cacheKey = `student:wx:login:${state}`;
+
+  await redis.setex(cacheKey, 300, JSON.stringify({ status: 'pending', createdAt: Date.now() }));
+
+  const wxAuthUrl = `https://open.weixin.qq.com/connect/qrconnect?appid=${encodeURIComponent(WX_WEB_APP_ID)}&redirect_uri=${encodeURIComponent(STUDENT_WX_CALLBACK_URL)}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(wxAuthUrl)}`;
+
+  success(res, {
+    state,
+    qrUrl,
+    expireIn: 300
+  });
+}));
+
+/**
+ * 轮询微信扫码登录状态
+ */
+router.get('/wx/qr/status', asyncHandler(async (req, res) => {
+  const { state } = req.query;
+  if (!state) {
+    return fail(res, '缺少 state 参数', 400, 400);
+  }
+
+  const cacheKey = `student:wx:login:${state}`;
+  const raw = await redis.get(cacheKey);
+  if (!raw) {
+    return success(res, { status: 'expired' });
+  }
+
+  let payload = {};
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    return success(res, { status: 'pending' });
+  }
+
+  if (payload.status === 'success') {
+    await redis.del(cacheKey);
+  }
+
+  success(res, payload);
+}));
+
+/**
+ * 微信扫码登录回调
+ */
+router.get('/wx/callback', asyncHandler(async (req, res) => {
+  const { code, state } = req.query;
+
+  if (!state) {
+    return res.status(400).send('缺少 state 参数');
+  }
+
+  const cacheKey = `student:wx:login:${state}`;
+  const exists = await redis.get(cacheKey);
+  if (!exists) {
+    return res.status(400).send('二维码已过期，请重新获取');
+  }
+
+  if (!code) {
+    await redis.setex(cacheKey, 300, JSON.stringify({ status: 'failed', message: '微信授权失败，缺少 code' }));
+    return res.status(400).send('微信授权失败，请返回重试');
+  }
+
+  try {
+    const tokenResp = await axios.get('https://api.weixin.qq.com/sns/oauth2/access_token', {
+      params: {
+        appid: WX_WEB_APP_ID,
+        secret: WX_WEB_APP_SECRET,
+        code,
+        grant_type: 'authorization_code'
+      }
+    });
+
+    const tokenData = tokenResp.data || {};
+    if (tokenData.errcode) {
+      await redis.setex(cacheKey, 300, JSON.stringify({ status: 'failed', message: tokenData.errmsg || '微信换取token失败' }));
+      return res.status(500).send('微信登录失败，请返回重试');
+    }
+
+    const openid = tokenData.openid;
+    const accessToken = tokenData.access_token;
+
+    const userResp = await axios.get('https://api.weixin.qq.com/sns/userinfo', {
+      params: {
+        access_token: accessToken,
+        openid,
+        lang: 'zh_CN'
+      }
+    });
+
+    const userInfo = userResp.data || {};
+    if (userInfo.errcode) {
+      await redis.setex(cacheKey, 300, JSON.stringify({ status: 'failed', message: userInfo.errmsg || '获取微信用户信息失败' }));
+      return res.status(500).send('微信登录失败，请返回重试');
+    }
+
+    let student = await Student.findOne({ where: { openid } });
+    if (!student && userInfo.unionid) {
+      student = await Student.findOne({ where: { unionid: userInfo.unionid } });
+    }
+
+    if (!student) {
+      student = await Student.create({
+        openid,
+        unionid: userInfo.unionid || null,
+        nickname: userInfo.nickname || null,
+        avatar: userInfo.headimgurl || null,
+        source: 'wechat-web',
+        status: 1
+      });
+    } else {
+      await student.update({
+        openid,
+        unionid: userInfo.unionid || student.unionid,
+        nickname: userInfo.nickname || student.nickname,
+        avatar: userInfo.headimgurl || student.avatar
+      });
+    }
+
+    const token = generateToken({
+      id: student.id,
+      studentId: student.id,
+      role: 'student',
+      nickname: student.nickname,
+      phone: student.phone
+    });
+
+    await redis.setex(cacheKey, 300, JSON.stringify({
+      status: 'success',
+      token,
+      student: {
+        id: student.id,
+        nickname: student.nickname,
+        phone: student.phone,
+        avatar: student.avatar,
+        openid: student.openid
+      }
+    }));
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send('<!doctype html><html><body style="font-family: sans-serif; padding: 24px;"><h3>登录成功</h3><p>请返回电脑端继续操作。</p></body></html>');
+  } catch (err) {
+    await redis.setex(cacheKey, 300, JSON.stringify({ status: 'failed', message: '微信登录异常，请重试' }));
+    res.status(500).send('微信登录异常，请返回重试');
+  }
+}));
 
 /**
  * 学员登录（手机号/微信标识）
