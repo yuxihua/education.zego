@@ -142,6 +142,9 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
     if (!teacher) {
       return fail(res, '讲师不存在', 404, 404);
     }
+    if (course.institutionId && teacher.institutionId !== course.institutionId) {
+      return fail(res, '讲师与课程不属于同一机构', 400, 400);
+    }
     anchorId = teacher.id;
     anchorName = teacher.nickname || teacher.username;
   }

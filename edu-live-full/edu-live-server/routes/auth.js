@@ -238,10 +238,16 @@ router.post('/refresh', auth, asyncHandler(async (req, res) => {
  * 获取讲师列表
  */
 router.get('/teachers', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
+  const { institutionId } = req.query;
   const where = { role: 'teacher', status: 1 };
 
   if (req.user.role !== 'superadmin') {
     where.institutionId = req.user.institutionId || req.user.id;
+  } else if (institutionId !== undefined && institutionId !== '') {
+    const institutionIdNum = Number(institutionId);
+    if (!Number.isNaN(institutionIdNum)) {
+      where.institutionId = institutionIdNum;
+    }
   }
 
   const list = await User.findAll({

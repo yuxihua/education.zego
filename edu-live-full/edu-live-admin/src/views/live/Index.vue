@@ -53,6 +53,14 @@
 
     <el-dialog v-model="dialogVisible" title="创建直播间" width="500px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
+        <el-form-item label="机构ID" v-if="userStore.isPlatformAdmin" required>
+          <el-input-number
+            v-model="createInstitutionId"
+            :min="0"
+            controls-position="right"
+            @change="handleCreateInstitutionChange"
+          />
+        </el-form-item>
         <el-form-item label="直播标题" prop="title">
           <el-input v-model="form.title" />
         </el-form-item>
@@ -92,6 +100,7 @@ const loading = ref(false)
 const tableData = ref([])
 const searchForm = reactive({ institutionId: null })
 const pagination = reactive({ page: 1, size: 10, total: 0 })
+const createInstitutionId = ref(null)
 
 const dialogVisible = ref(false)
 const formRef = ref()
@@ -104,13 +113,35 @@ const rules = {
 const courseList = ref([])
 const teacherList = ref([])
 
+const getCreateInstitutionParams = () => {
+  if (!userStore.isPlatformAdmin) return {}
+  if (createInstitutionId.value === null || createInstitutionId.value === undefined) return null
+  return { institutionId: createInstitutionId.value }
+}
+
 const loadCourseList = async () => {
-  const res = await getCourseList({ page: 1, size: 1000 })
+  const institutionParams = getCreateInstitutionParams()
+  if (userStore.isPlatformAdmin && !institutionParams) {
+    courseList.value = []
+    return
+  }
+
+  const res = await getCourseList({ page: 1, size: 1000, ...(institutionParams || {}) })
   courseList.value = res.list || []
 }
 
 const loadTeacherList = async () => {
-  teacherList.value = await getTeacherList()
+  const institutionParams = getCreateInstitutionParams()
+  if (userStore.isPlatformAdmin && !institutionParams) {
+    teacherList.value = []
+    return
+  }
+
+  teacherList.value = await getTeacherList(institutionParams || {})
+}
+
+const loadCreateOptions = async () => {
+  await Promise.all([loadCourseList(), loadTeacherList()])
 }
 
 const loadData = async () => {
@@ -139,12 +170,23 @@ const handleReset = () => {
 
 const handleCreate = () => {
   Object.assign(form, { title: '', courseId: null, teacherId: null, startTime: '' })
+  createInstitutionId.value = userStore.isPlatformAdmin ? searchForm.institutionId : null
   dialogVisible.value = true
-  loadCourseList()
-  loadTeacherList()
+  loadCreateOptions()
+}
+
+const handleCreateInstitutionChange = () => {
+  form.courseId = null
+  form.teacherId = null
+  loadCreateOptions()
 }
 
 const handleSubmit = async () => {
+  if (userStore.isPlatformAdmin && (createInstitutionId.value === null || createInstitutionId.value === undefined)) {
+    ElMessage.warning('请先选择机构ID，再创建直播间')
+    return
+  }
+
   await formRef.value.validate()
   await createLiveRoom(form)
   ElMessage.success('直播间创建成功')
