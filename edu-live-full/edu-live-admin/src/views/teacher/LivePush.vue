@@ -66,7 +66,7 @@
             </el-button-group>
             <el-color-picker v-model="wbColor" size="small" @change="setWbColor" />
             <el-button size="small" @click="clearWb">清空</el-button>
-            <el-button size="small" type="primary" @click="uploadPPT">上传 PPT</el-button>
+            <el-button size="small" type="primary" :disabled="!isLiving" @click="uploadPPT">上传 PPT</el-button>
             <el-button size="small" @click="prevPage" :disabled="currentPage <= 1">上一页</el-button>
             <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
             <el-button size="small" @click="nextPage" :disabled="currentPage >= totalPage">下一页</el-button>
@@ -202,9 +202,24 @@ const zegoAuthInfo = ref(null)
 // 结束直播弹窗
 const endDialogVisible = ref(false)
 
+const parseErrorMessage = (err, fallback = '未知错误') => {
+  if (!err) return fallback
+  if (typeof err === 'string') return err
+  if (err.message) return err.message
+  if (err.msg) return err.msg
+  if (err.error && typeof err.error === 'string') return err.error
+  try {
+    return JSON.stringify(err)
+  } catch (e) {
+    return fallback
+  }
+}
+
 // ==================== 初始化 ZEGO ====================
 const initZego = async () => {
-  zg.value = new ZegoExpressEngine(ZEGO_CONFIG.appID, ZEGO_CONFIG.server)
+  zg.value = ZEGO_CONFIG.server
+    ? new ZegoExpressEngine(ZEGO_CONFIG.appID, ZEGO_CONFIG.server)
+    : new ZegoExpressEngine(ZEGO_CONFIG.appID)
   
   // 监听房间用户变化
   zg.value.on('roomUserUpdate', (roomID, updateType, userList) => {
@@ -281,7 +296,7 @@ const getZegoAuth = async () => {
 
   const authInfo = data.data || {}
   ZEGO_CONFIG.appID = Number(authInfo.appId || 0)
-  ZEGO_CONFIG.server = authInfo.server || ''
+  ZEGO_CONFIG.server = authInfo.server || null
   zegoAuthInfo.value = authInfo
   return authInfo
 }
@@ -319,13 +334,16 @@ const handleStartLive = async () => {
 
     const streamID = 'teacher_' + roomId
     await zg.value.startPublishingStream(streamID, localStream.value)
-
-    await initWhiteboard(zegoRoomID.value, token, userID)
-
     isLiving.value = true
     ElMessage.success('直播已开始')
+
+    try {
+      await initWhiteboard(zegoRoomID.value, token, userID)
+    } catch (wbErr) {
+      ElMessage.warning('直播已开始，但白板初始化失败：' + parseErrorMessage(wbErr))
+    }
   } catch (err) {
-    ElMessage.error('开始直播失败: ' + err.message)
+    ElMessage.error('开始直播失败: ' + parseErrorMessage(err))
   }
 }
 
@@ -456,18 +474,35 @@ const clearWb = () => {
 }
 
 const uploadPPT = async () => {
+  if (!isLiving.value) {
+    ElMessage.warning('请先开始直播后再上传 PPT')
+    return
+  }
+  if (!zegoSuperBoard.value) {
+    ElMessage.warning('白板尚未初始化，请稍后重试')
+    return
+  }
+
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.ppt,.pptx,.pdf'
   input.onchange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
+
+    const lowerName = String(file.name || '').toLowerCase()
+    const isPdf = lowerName.endsWith('.pdf')
+    const isPpt = lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')
+    if (!isPdf && !isPpt) {
+      ElMessage.warning('仅支持 .ppt / .pptx / .pdf 文件')
+      return
+    }
     
     ElMessage.info('PPT 上传中...')
     try {
       const result = await zegoSuperBoard.value.uploadFile(file, {
         fileName: file.name,
-        fileType: file.name.endsWith('.pdf') ? 512 : 256
+        fileType: isPdf ? 512 : 256
       })
       
       const wbResult = await zegoSuperBoard.value.createFileView({
@@ -480,7 +515,8 @@ const uploadPPT = async () => {
       currentPage.value = 1
       ElMessage.success('PPT 加载成功')
     } catch (err) {
-      ElMessage.error('PPT 上传失败')
+      ElMessage.error('PPT 上传失败: ' + (err?.message || '请检查白板转码配置'))
+      console.error('[LivePush] PPT 上传失败:', err)
     }
   }
   input.click()
