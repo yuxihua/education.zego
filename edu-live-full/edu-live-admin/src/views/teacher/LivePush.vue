@@ -641,22 +641,6 @@ const uploadPPT = async () => {
     ElMessage.warning('请先开始直播后再上传 PPT')
     return
   }
-  if (!zegoSuperBoard.value) {
-    try {
-      await ensureWhiteboardReadyForUpload()
-    } catch (err) {
-      ElMessage.warning('白板尚未初始化：' + parseErrorMessage(err))
-      return
-    }
-  }
-  if ((!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
-    try {
-      await ensureWhiteboardReadyForUpload()
-    } catch (err) {
-      ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
-      return
-    }
-  }
 
   const input = document.createElement('input')
   input.type = 'file'
@@ -671,6 +655,15 @@ const uploadPPT = async () => {
     if (!isPdf && !isPpt) {
       ElMessage.warning('仅支持 .ppt / .pptx / .pdf 文件')
       return
+    }
+
+    if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
+      try {
+        await ensureWhiteboardReadyForUpload()
+      } catch (err) {
+        ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
+        return
+      }
     }
     
     ElMessage.info('PPT 上传中...')
@@ -732,6 +725,7 @@ const uploadPPT = async () => {
       console.error('[LivePush] PPT 上传失败:', err)
     }
   }
+  // 必须保持同步触发，避免浏览器因异步流程拦截文件选择弹窗
   input.click()
 }
 
