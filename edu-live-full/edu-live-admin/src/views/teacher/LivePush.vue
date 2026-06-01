@@ -368,6 +368,43 @@ const handleStartLive = async () => {
   }
 }
 
+const refreshCurrentSuperBoardView = () => {
+  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+  const activeSubView = boardView?.getCurrentSuperBoardSubView?.()
+  if (!activeSubView) return false
+
+  currentSuperBoardView.value = activeSubView
+  totalPage.value = activeSubView.getPageCount?.() || 1
+  currentPage.value = activeSubView.getCurrentPage?.() || 1
+  return true
+}
+
+const switchToCreatedSubView = async (result) => {
+  // 兼容不同 SDK 返回结构：可能直接带 fileView/whiteboardView，也可能仅返回 uniqueID。
+  const directView = result?.fileView || result?.whiteboardView || null
+  if (directView) {
+    currentSuperBoardView.value = directView
+    totalPage.value = directView.getPageCount?.() || 1
+    currentPage.value = directView.getCurrentPage?.() || 1
+    return
+  }
+
+  const uniqueID = result?.uniqueID || result?.model?.uniqueID || null
+  if (!uniqueID) {
+    refreshCurrentSuperBoardView()
+    return
+  }
+
+  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+  if (!boardView?.switchSuperBoardSubView) {
+    refreshCurrentSuperBoardView()
+    return
+  }
+
+  await boardView.switchSuperBoardSubView(uniqueID)
+  refreshCurrentSuperBoardView()
+}
+
 const handleEndLive = () => {
   endDialogVisible.value = true
 }
@@ -474,12 +511,7 @@ const initWhiteboard = async (roomID, token, userID) => {
     name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
   })
 
-  currentSuperBoardView.value = result.whiteboardView
-  totalPage.value = result.whiteboardView.getPageCount()
-  
-  currentSuperBoardView.value.on('scrollChange', (data) => {
-    currentPage.value = data.currentPage
-  })
+  await switchToCreatedSubView(result)
 }
 
 const setWbTool = (tool) => {
@@ -552,10 +584,8 @@ const uploadPPT = async () => {
       const wbResult = await zegoSuperBoard.value.createFileView({
         fileID
       })
-      
-      currentSuperBoardView.value = wbResult.fileView
-      totalPage.value = wbResult.fileView.getPageCount()
-      currentPage.value = 1
+
+      await switchToCreatedSubView(wbResult)
       ElMessage.success('PPT 加载成功')
     } catch (err) {
       ElMessage.error('PPT 上传失败: ' + (err?.message || '请检查白板转码配置'))
