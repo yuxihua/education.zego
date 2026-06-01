@@ -591,6 +591,35 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   throw lastError || new Error('白板初始化失败')
 }
 
+const ensureWhiteboardReadyForUpload = async () => {
+  if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
+    return true
+  }
+
+  const authInfo = zegoAuthInfo.value || (await getZegoAuth())
+  const token = authInfo?.token
+  const userID = authInfo?.userId
+  const userName = authInfo?.userName
+
+  if (!token || !userID) {
+    throw new Error('白板鉴权信息缺失，请重新开始直播')
+  }
+
+  whiteboardReady.value = false
+  currentSuperBoardView.value = null
+  await initWhiteboard(zegoRoomID.value, token, userID, userName)
+
+  if (!currentSuperBoardView.value) {
+    refreshCurrentSuperBoardView()
+  }
+
+  if (!whiteboardReady.value) {
+    throw new Error('白板初始化未完成')
+  }
+
+  return true
+}
+
 const setWbTool = (tool) => {
   if (!currentSuperBoardView.value) return
   const toolMap = { selector: 0, pen: 1, text: 2, eraser: 4 }
@@ -613,12 +642,20 @@ const uploadPPT = async () => {
     return
   }
   if (!zegoSuperBoard.value) {
-    ElMessage.warning('白板尚未初始化，请稍后重试')
-    return
+    try {
+      await ensureWhiteboardReadyForUpload()
+    } catch (err) {
+      ElMessage.warning('白板尚未初始化：' + parseErrorMessage(err))
+      return
+    }
   }
-  if (!whiteboardReady.value || !currentSuperBoardView.value) {
-    ElMessage.warning('白板尚未就绪，请先确认开播后白板初始化成功')
-    return
+  if ((!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
+    try {
+      await ensureWhiteboardReadyForUpload()
+    } catch (err) {
+      ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
+      return
+    }
   }
 
   const input = document.createElement('input')
