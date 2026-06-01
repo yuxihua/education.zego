@@ -33,8 +33,9 @@
         <el-table-column prop="studyDuration" label="学习时长" width="120" />
         <el-table-column prop="lastStudyTime" label="最近学习" width="160" />
         <el-table-column prop="createTime" label="注册时间" width="160" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link type="primary" @click="handleDetail(row)">详情</el-button>
             <el-button link type="primary" @click="handleRecord(row)">学习记录</el-button>
           </template>
@@ -130,13 +131,58 @@
         <el-button type="primary" @click="handleCreateStudent">创建</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="editDialogVisible" title="修改学员" width="640px">
+      <el-form :model="editForm" label-width="110px">
+        <el-form-item label="昵称">
+          <el-input v-model="editForm.nickname" />
+        </el-form-item>
+        <el-form-item label="真实姓名">
+          <el-input v-model="editForm.realName" />
+        </el-form-item>
+        <el-form-item label="手机号">
+          <el-input v-model="editForm.phone" />
+        </el-form-item>
+        <el-form-item label="重置密码">
+          <el-input v-model="editForm.password" type="password" show-password placeholder="不修改请留空，至少6位" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="editForm.email" />
+        </el-form-item>
+        <el-form-item label="地区">
+          <el-input v-model="editForm.region" />
+        </el-form-item>
+        <el-form-item label="归属销售">
+          <el-select v-model="editForm.salesUserId" placeholder="不设置" clearable filterable style="width: 100%">
+            <el-option v-for="item in salesOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="分销层级">
+          <el-select v-model="editForm.salesLevel" placeholder="不设置" clearable style="width: 100%">
+            <el-option label="一级" :value="1" />
+            <el-option label="二级" :value="2" />
+            <el-option label="三级" :value="3" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="账号状态">
+          <el-radio-group v-model="editForm.status">
+            <el-radio :label="1">正常</el-radio>
+            <el-radio :label="0">禁用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleUpdateStudent">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getStudentList, getStudentDetail, getStudentLearningRecord, createStudent } from '@/api/student'
+import { getStudentList, getStudentDetail, getStudentLearningRecord, createStudent, updateStudent } from '@/api/student'
 import { getSalesList } from '@/api/distribution'
 import { useUserStore } from '@/stores/user'
 
@@ -148,6 +194,7 @@ const pagination = reactive({ page: 1, size: 10, total: 0 })
 const detailDialogVisible = ref(false)
 const recordDialogVisible = ref(false)
 const createDialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const detailData = ref({})
 const recordList = ref([])
 const salesOptions = ref([])
@@ -182,6 +229,19 @@ const createForm = reactive({
   region: '',
   salesUserId: null,
   salesLevel: null
+})
+
+const editForm = reactive({
+  id: null,
+  nickname: '',
+  realName: '',
+  phone: '',
+  password: '',
+  email: '',
+  region: '',
+  salesUserId: null,
+  salesLevel: null,
+  status: 1
 })
 
 const loadData = async () => {
@@ -276,6 +336,82 @@ const handleCreateStudent = async () => {
   await createStudent(payload)
   ElMessage.success('学员创建成功')
   createDialogVisible.value = false
+  loadData()
+}
+
+const resetEditForm = () => {
+  Object.assign(editForm, {
+    id: null,
+    nickname: '',
+    realName: '',
+    phone: '',
+    password: '',
+    email: '',
+    region: '',
+    salesUserId: null,
+    salesLevel: null,
+    status: 1
+  })
+}
+
+const openEditDialog = async (row) => {
+  resetEditForm()
+  try {
+    const detail = await getStudentDetail(row.id)
+    Object.assign(editForm, {
+      id: detail.id,
+      nickname: detail.nickname || '',
+      realName: detail.realName || '',
+      phone: detail.phone || '',
+      password: '',
+      email: detail.email || '',
+      region: detail.region || '',
+      salesUserId: detail.salesUserId || null,
+      salesLevel: detail.salesLevel || null,
+      status: Number(detail.status === undefined ? 1 : detail.status)
+    })
+    salesOptions.value = await getSalesList({ institutionId: detail.institutionId || searchForm.institutionId || undefined })
+    editDialogVisible.value = true
+  } catch (err) {
+    ElMessage.error('加载学员信息失败')
+  }
+}
+
+const handleUpdateStudent = async () => {
+  if (!editForm.id) {
+    ElMessage.warning('缺少学员ID，无法保存')
+    return
+  }
+
+  if (editForm.password && String(editForm.password).trim().length < 6) {
+    ElMessage.warning('重置密码至少6位')
+    return
+  }
+
+  if ((editForm.salesUserId && !editForm.salesLevel) || (!editForm.salesUserId && editForm.salesLevel)) {
+    ElMessage.warning('设置分销时需要同时选择归属销售和分销层级')
+    return
+  }
+
+  const payload = {
+    id: editForm.id,
+    nickname: editForm.nickname,
+    realName: editForm.realName,
+    phone: editForm.phone,
+    email: editForm.email,
+    region: editForm.region,
+    salesUserId: editForm.salesUserId,
+    salesLevel: editForm.salesLevel,
+    status: editForm.status
+  }
+
+  if (editForm.password && String(editForm.password).trim()) {
+    payload.password = String(editForm.password).trim()
+  }
+
+  await updateStudent(payload)
+  ElMessage.success('学员信息已更新')
+  editDialogVisible.value = false
   loadData()
 }
 

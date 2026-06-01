@@ -43,7 +43,10 @@
           <el-select v-model="searchForm.status" placeholder="全部" clearable style="width: 140px">
             <el-option label="待支付" value="pending" />
             <el-option label="已支付" value="paid" />
+            <el-option label="退款中" value="refunding" />
             <el-option label="已退款" value="refunded" />
+            <el-option label="已取消" value="cancelled" />
+            <el-option label="已过期" value="expired" />
           </el-select>
         </el-form-item>
         <el-form-item label="支付方式">
@@ -67,18 +70,20 @@
           <template #default="{ row }"><strong style="color: #f56c6c">¥{{ row.amount }}</strong></template>
         </el-table-column>
         <el-table-column prop="payType" label="支付方式" width="120">
-          <template #default="{ row }">{{ { wxpay: '微信支付', alipay: '支付宝', free: '免费' }[row.payType] || row.payType }}</template>
+          <template #default="{ row }">{{ payTypeMap[row.payType] || row.payType }}</template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'paid' ? 'success' : row.status === 'refunded' ? 'danger' : 'warning'">
-              {{ { paid: '已支付', pending: '待支付', refunded: '已退款' }[row.status] }}
+            <el-tag :type="statusTagTypeMap[row.status] || 'info'">
+              {{ statusTextMap[row.status] || row.status }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="createTime" label="下单时间" width="160" />
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="canManageOrder" link type="primary" @click="openEditDialog(row)">编辑</el-button>
+            <el-button v-if="canManageOrder" link type="primary" @click="openPayTypeDialog(row)">支付方式</el-button>
             <el-button v-if="row.status === 'paid'" link type="danger" @click="handleRefund(row)">退款</el-button>
           </template>
         </el-table-column>
@@ -146,13 +151,58 @@
         <el-button type="primary" :loading="createLoading" @click="handleCreateOrder">创建订单</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="editDialogVisible" title="修改订单" width="560px">
+      <el-form :model="editForm" label-width="100px">
+        <el-form-item label="订单号">
+          <el-input :model-value="editForm.orderNo" disabled />
+        </el-form-item>
+        <el-form-item label="订单金额">
+          <el-input-number v-model="editForm.amount" :min="0" :precision="2" :step="10" controls-position="right" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="订单状态">
+          <el-select v-model="editForm.status" style="width: 100%">
+            <el-option label="待支付" value="pending" />
+            <el-option label="已支付" value="paid" />
+            <el-option label="已取消" value="cancelled" />
+            <el-option label="已过期" value="expired" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="editForm.remark" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editLoading" @click="handleUpdateOrder">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="payTypeDialogVisible" title="设置支付方式" width="460px">
+      <el-form :model="payTypeForm" label-width="100px">
+        <el-form-item label="订单号">
+          <el-input :model-value="payTypeForm.orderNo" disabled />
+        </el-form-item>
+        <el-form-item label="支付方式">
+          <el-select v-model="payTypeForm.payType" style="width: 100%">
+            <el-option label="免费" value="free" />
+            <el-option label="微信支付" value="wxpay" />
+            <el-option label="支付宝" value="alipay" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="payTypeDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="payTypeLoading" @click="handleSetPayType">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getOrderList, getOrderStats, refundOrder, createOrder } from '@/api/order'
+import { getOrderList, getOrderStats, refundOrder, createOrder, updateOrder, setOrderPayType } from '@/api/order'
 import { useUserStore } from '@/stores/user'
 import { getCourseList } from '@/api/course'
 import { getStudentList } from '@/api/student'
@@ -165,8 +215,13 @@ const searchForm = reactive({ keyword: '', status: '', payType: '', institutionI
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 const createDialogVisible = ref(false)
 const createLoading = ref(false)
+const editDialogVisible = ref(false)
+const editLoading = ref(false)
+const payTypeDialogVisible = ref(false)
+const payTypeLoading = ref(false)
 const courseOptions = ref([])
 const studentOptions = ref([])
+const canManageOrder = computed(() => ['superadmin', 'admin', 'assistant'].includes(userStore.userInfo?.role))
 const createForm = reactive({
   institutionId: null,
   studentId: null,
@@ -176,6 +231,44 @@ const createForm = reactive({
   status: 'paid',
   remark: ''
 })
+
+const editForm = reactive({
+  id: null,
+  orderNo: '',
+  amount: 0,
+  status: 'pending',
+  remark: ''
+})
+
+const payTypeForm = reactive({
+  orderId: null,
+  orderNo: '',
+  payType: 'free'
+})
+
+const payTypeMap = {
+  wxpay: '微信支付',
+  alipay: '支付宝',
+  free: '免费'
+}
+
+const statusTextMap = {
+  pending: '待支付',
+  paid: '已支付',
+  refunding: '退款中',
+  refunded: '已退款',
+  cancelled: '已取消',
+  expired: '已过期'
+}
+
+const statusTagTypeMap = {
+  pending: 'warning',
+  paid: 'success',
+  refunding: 'warning',
+  refunded: 'danger',
+  cancelled: 'info',
+  expired: 'info'
+}
 
 const resetCreateForm = () => {
   Object.assign(createForm, {
@@ -305,6 +398,68 @@ const handleRefund = async (row) => {
   await refundOrder({ orderId: row.id })
   ElMessage.success('退款成功')
   loadData()
+}
+
+const openEditDialog = (row) => {
+  Object.assign(editForm, {
+    id: row.id,
+    orderNo: row.orderNo,
+    amount: Number(row.amount || 0),
+    status: row.status || 'pending',
+    remark: row.remark || ''
+  })
+  editDialogVisible.value = true
+}
+
+const handleUpdateOrder = async () => {
+  if (!editForm.id) {
+    ElMessage.warning('缺少订单ID')
+    return
+  }
+
+  editLoading.value = true
+  try {
+    await updateOrder({
+      id: editForm.id,
+      amount: editForm.amount,
+      status: editForm.status,
+      remark: editForm.remark
+    })
+    ElMessage.success('订单修改成功')
+    editDialogVisible.value = false
+    await loadData()
+  } finally {
+    editLoading.value = false
+  }
+}
+
+const openPayTypeDialog = (row) => {
+  Object.assign(payTypeForm, {
+    orderId: row.id,
+    orderNo: row.orderNo,
+    payType: row.payType || 'free'
+  })
+  payTypeDialogVisible.value = true
+}
+
+const handleSetPayType = async () => {
+  if (!payTypeForm.orderId) {
+    ElMessage.warning('缺少订单ID')
+    return
+  }
+
+  payTypeLoading.value = true
+  try {
+    await setOrderPayType({
+      orderId: payTypeForm.orderId,
+      payType: payTypeForm.payType
+    })
+    ElMessage.success('支付方式已更新')
+    payTypeDialogVisible.value = false
+    await loadData()
+  } finally {
+    payTypeLoading.value = false
+  }
 }
 
 const handleExport = () => {

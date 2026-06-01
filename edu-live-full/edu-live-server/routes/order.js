@@ -12,6 +12,7 @@ const { generateOrderNo } = require('../utils/pay');
 
 const ADMIN_ROLES = ['superadmin', 'admin', 'assistant', 'teacher'];
 const ORDER_CREATE_ROLES = ['superadmin', 'admin', 'assistant'];
+const ORDER_UPDATE_ROLES = ['superadmin', 'admin', 'assistant'];
 
 /**
  * @POST /api/order/create
@@ -100,6 +101,104 @@ router.post('/create', auth, requireRole(ORDER_CREATE_ROLES), asyncHandler(async
   }
 
   success(res, order, '订单创建成功');
+}));
+
+/**
+ * @POST /api/order/update
+ * 后台修改订单（金额/状态/备注）
+ */
+router.post('/update', auth, requireRole(ORDER_UPDATE_ROLES), asyncHandler(async (req, res) => {
+  const { id, amount, status, remark } = req.body;
+  if (!id) {
+    return fail(res, '缺少订单ID', 400, 400);
+  }
+
+  const where = { id };
+  if (req.user.role !== 'superadmin') {
+    where.institutionId = req.user.institutionId || 0;
+  }
+
+  const order = await Order.findOne({ where });
+  if (!order) {
+    return fail(res, '订单不存在', 404, 404);
+  }
+
+  const updateData = {};
+
+  if (amount !== undefined) {
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum < 0) {
+      return fail(res, '金额必须为大于等于0的数字', 400, 400);
+    }
+    updateData.amount = amountNum;
+  }
+
+  if (remark !== undefined) {
+    updateData.remark = remark || null;
+  }
+
+  if (status !== undefined) {
+    if (!['pending', 'paid', 'cancelled', 'expired'].includes(status)) {
+      return fail(res, 'status 仅支持 pending/paid/cancelled/expired', 400, 400);
+    }
+    updateData.status = status;
+  }
+
+  const oldStatus = order.status;
+  const nextStatus = updateData.status || order.status;
+
+  if (oldStatus !== 'paid' && nextStatus === 'paid') {
+    updateData.payTime = order.payTime || new Date();
+  }
+
+  if (oldStatus === 'paid' && nextStatus !== 'paid') {
+    updateData.payTime = null;
+  }
+
+  await order.update(updateData);
+
+  if (oldStatus !== nextStatus) {
+    const course = await Course.findByPk(order.courseId);
+    if (course) {
+      const currentCount = Number(course.studentCount || 0);
+      if (oldStatus !== 'paid' && nextStatus === 'paid') {
+        await course.update({ studentCount: currentCount + 1 });
+      }
+      if (oldStatus === 'paid' && nextStatus !== 'paid') {
+        await course.update({ studentCount: currentCount > 0 ? currentCount - 1 : 0 });
+      }
+    }
+  }
+
+  success(res, order, '订单修改成功');
+}));
+
+/**
+ * @POST /api/order/set-pay-type
+ * 后台设置订单支付方式
+ */
+router.post('/set-pay-type', auth, requireRole(ORDER_UPDATE_ROLES), asyncHandler(async (req, res) => {
+  const { orderId, payType } = req.body;
+  if (!orderId) {
+    return fail(res, '缺少 orderId', 400, 400);
+  }
+
+  if (!['wxpay', 'alipay', 'free'].includes(payType)) {
+    return fail(res, 'payType 仅支持 wxpay/alipay/free', 400, 400);
+  }
+
+  const where = { id: orderId };
+  if (req.user.role !== 'superadmin') {
+    where.institutionId = req.user.institutionId || 0;
+  }
+
+  const order = await Order.findOne({ where });
+  if (!order) {
+    return fail(res, '订单不存在', 404, 404);
+  }
+
+  await order.update({ payType });
+  success(res, order, '支付方式设置成功');
 }));
 
 /**

@@ -449,6 +449,121 @@ router.post('/create', auth, requireRole(['superadmin', 'admin', 'assistant']), 
   success(res, student, '学员创建成功');
 }));
 
+/**
+ * 后台修改学员信息
+ */
+router.post('/update', auth, requireRole(['superadmin', 'admin', 'assistant']), asyncHandler(async (req, res) => {
+  const {
+    id,
+    nickname,
+    realName,
+    phone,
+    password,
+    email,
+    region,
+    avatar,
+    remark,
+    status,
+    salesUserId,
+    salesLevel
+  } = req.body;
+
+  if (!id) {
+    return fail(res, '缺少学员ID', 400, 400);
+  }
+
+  const student = await Student.findByPk(id);
+  if (!student) {
+    return fail(res, '学员不存在', 404, 404);
+  }
+
+  if (req.user.role !== 'superadmin' && student.institutionId !== getOperatorInstitutionId(req)) {
+    return fail(res, '无权修改该学员', 403, 403);
+  }
+
+  const updateData = {};
+
+  if (nickname !== undefined) updateData.nickname = nickname || null;
+  if (realName !== undefined) updateData.realName = realName || null;
+  if (email !== undefined) updateData.email = email || null;
+  if (region !== undefined) updateData.region = region || null;
+  if (avatar !== undefined) updateData.avatar = avatar || null;
+  if (remark !== undefined) updateData.remark = remark || null;
+
+  if (status !== undefined) {
+    const statusNum = Number(status);
+    if (![0, 1].includes(statusNum)) {
+      return fail(res, '状态仅支持 0/1', 400, 400);
+    }
+    updateData.status = statusNum;
+  }
+
+  if (phone !== undefined) {
+    const nextPhone = String(phone || '').trim();
+    if (nextPhone) {
+      const phoneExist = await Student.findOne({
+        where: {
+          phone: nextPhone,
+          id: { [Op.ne]: student.id }
+        }
+      });
+      if (phoneExist) {
+        return fail(res, '手机号已存在', 409, 409);
+      }
+      updateData.phone = nextPhone;
+    } else {
+      updateData.phone = null;
+    }
+  }
+
+  if (password !== undefined && password !== null && String(password).trim() !== '') {
+    if (String(password).trim().length < 6) {
+      return fail(res, '学员登录密码至少6位', 400, 400);
+    }
+    updateData.password = String(password).trim();
+  }
+
+  const salesUserIdProvided = salesUserId !== undefined && salesUserId !== null && salesUserId !== '';
+  const salesLevelProvided = salesLevel !== undefined && salesLevel !== null && salesLevel !== '';
+
+  if (salesUserIdProvided || salesLevelProvided) {
+    if (!salesUserIdProvided || !salesLevelProvided) {
+      return fail(res, '设置分销时 salesUserId 与 salesLevel 需同时填写', 400, 400);
+    }
+
+    const salesUserIdNum = Number(salesUserId);
+    const salesLevelNum = Number(salesLevel);
+    if (![1, 2, 3].includes(salesLevelNum)) {
+      return fail(res, 'salesLevel 仅支持 1/2/3', 400, 400);
+    }
+
+    const sales = await User.findOne({
+      where: {
+        id: salesUserIdNum,
+        role: 'sales',
+        status: 1
+      }
+    });
+
+    if (!sales) {
+      return fail(res, '销售人员不存在', 404, 404);
+    }
+
+    if (req.user.role !== 'superadmin' && sales.institutionId !== student.institutionId) {
+      return fail(res, '销售人员不属于当前机构', 400, 400);
+    }
+
+    updateData.salesUserId = salesUserIdNum;
+    updateData.salesLevel = salesLevelNum;
+  } else if (salesUserId !== undefined || salesLevel !== undefined) {
+    updateData.salesUserId = null;
+    updateData.salesLevel = null;
+  }
+
+  await student.update(updateData);
+  success(res, student, '学员更新成功');
+}));
+
 router.get('/list', auth, requireRole(['superadmin', 'admin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { phone, nickname, institutionId, page = 1, size = 10 } = req.query;
 
