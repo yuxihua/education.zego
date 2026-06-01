@@ -154,7 +154,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
-import { ZegoSuperBoardManager, ZegoSuperBoardRenderType } from 'zego-superboard-web'
+import { ZegoSuperBoardManager } from 'zego-superboard-web'
 import { getLiveRoomDetail, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
 const route = useRoute()
@@ -525,13 +525,29 @@ const uploadPPT = async () => {
     
     ElMessage.info('PPT 上传中...')
     try {
-      const renderType = isPdf ? ZegoSuperBoardRenderType.IMG : ZegoSuperBoardRenderType.DynamicPPTH5
-      const fileID = await zegoSuperBoard.value.uploadFile(
-        file,
-        renderType,
-        () => {},
-        { renderImgType: 1 }
-      )
+      // SDK 在不同打包形态下可能拿不到枚举对象，这里使用固定数值更稳定：
+      // IMG = 2, DynamicPPTH5 = 6, VectorAndIMG = 3
+      const primaryRenderType = isPdf ? 2 : 6
+      const fallbackRenderType = 3
+      let fileID = ''
+
+      try {
+        fileID = await zegoSuperBoard.value.uploadFile(
+          file,
+          primaryRenderType,
+          () => {},
+          { renderImgType: 1 }
+        )
+      } catch (primaryErr) {
+        if (isPdf) throw primaryErr
+        // 动态PPT不可用时自动回退到通用模式，保证可展示
+        fileID = await zegoSuperBoard.value.uploadFile(
+          file,
+          fallbackRenderType,
+          () => {},
+          { renderImgType: 1 }
+        )
+      }
       
       const wbResult = await zegoSuperBoard.value.createFileView({
         fileID
