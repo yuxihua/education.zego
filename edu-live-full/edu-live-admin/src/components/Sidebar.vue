@@ -7,8 +7,8 @@
     active-text-color="#409EFF"
     :collapse-transition="false"
   >
-    <template v-for="item in menuList" :key="item.path">
-      <el-menu-item :index="item.path" v-if="!item.meta?.hidden">
+    <template v-for="item in menuList" :key="item.fullPath">
+      <el-menu-item :index="item.fullPath" v-if="!item.meta?.hidden">
         <el-icon><component :is="item.meta?.icon" /></el-icon>
         <template #title>{{ item.meta?.title }}</template>
       </el-menu-item>
@@ -27,13 +27,18 @@ const userStore = useUserStore()
 
 const menuList = computed(() => {
   const adminRoutes = routes.find(r => r.path === '/')?.children || []
-  return adminRoutes.filter(r => {
+  const visibleRoutes = adminRoutes.filter(r => {
     if (r.meta?.hidden) return false
     if (r.meta?.platformOnly && !userStore.isPlatformAdmin) return false
     if (r.meta?.roles?.length && !r.meta.roles.includes(userStore.userInfo?.role)) return false
     if (r.meta?.permission && !userStore.permissions?.includes(r.meta.permission)) return false
     return true
   })
+
+  return visibleRoutes.map((r) => ({
+    ...r,
+    fullPath: r.path?.startsWith('/') ? r.path : `/${r.path}`
+  }))
 })
 </script>
 

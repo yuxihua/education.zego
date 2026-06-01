@@ -30,7 +30,7 @@
       <el-main class="main-content">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="route.fullPath" />
           </transition>
         </router-view>
       </el-main>
@@ -39,11 +39,12 @@
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import Sidebar from '@/components/Sidebar.vue'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
 const handleCommand = (cmd) => {
