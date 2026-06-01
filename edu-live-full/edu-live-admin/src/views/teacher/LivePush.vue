@@ -645,29 +645,38 @@ const uploadPPT = async () => {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.ppt,.pptx,.pdf'
+  input.style.display = 'none'
+  input.value = ''
+  document.body.appendChild(input)
   input.onchange = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const lowerName = String(file.name || '').toLowerCase()
-    const isPdf = lowerName.endsWith('.pdf')
-    const isPpt = lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')
-    if (!isPdf && !isPpt) {
-      ElMessage.warning('仅支持 .ppt / .pptx / .pdf 文件')
-      return
-    }
-
-    if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
-      try {
-        await ensureWhiteboardReadyForUpload()
-      } catch (err) {
-        ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
+    try {
+      const file = e?.target?.files?.[0]
+      if (!file) {
+        ElMessage.info('未选择文件')
         return
       }
-    }
-    
-    ElMessage.info('PPT 上传中...')
-    try {
+
+      ElMessage.info(`已选择文件：${file.name}`)
+
+      const lowerName = String(file.name || '').toLowerCase()
+      const isPdf = lowerName.endsWith('.pdf')
+      const isPpt = lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')
+      if (!isPdf && !isPpt) {
+        ElMessage.warning('仅支持 .ppt / .pptx / .pdf 文件')
+        return
+      }
+
+      if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
+        ElMessage.info('正在准备白板环境...')
+        try {
+          await ensureWhiteboardReadyForUpload()
+        } catch (err) {
+          ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
+          return
+        }
+      }
+      
+      ElMessage.info('PPT 上传中...')
       // SDK 在不同打包形态下可能拿不到枚举对象，这里使用固定数值更稳定：
       // IMG = 2, DynamicPPTH5 = 6, VectorAndIMG = 3
       const primaryRenderType = isPdf ? 2 : 6
@@ -721,10 +730,23 @@ const uploadPPT = async () => {
       }
       ElMessage.success('PPT 加载成功')
     } catch (err) {
-      ElMessage.error('PPT 上传失败: ' + (err?.message || '请检查白板转码配置'))
-      console.error('[LivePush] PPT 上传失败:', err)
+      ElMessage.error('PPT 上传失败: ' + parseErrorMessage(err, '请检查白板转码配置'))
+      console.error('[LivePush] PPT 上传流程异常:', err)
+    } finally {
+      input.value = ''
+      input.remove()
     }
   }
+  input.addEventListener('cancel', () => {
+    input.value = ''
+    input.remove()
+  })
+  setTimeout(() => {
+    if (document.body.contains(input)) {
+      input.value = ''
+      input.remove()
+    }
+  }, 60000)
   // 必须保持同步触发，避免浏览器因异步流程拦截文件选择弹窗
   input.click()
 }
