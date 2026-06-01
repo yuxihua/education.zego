@@ -170,6 +170,23 @@ const isMicOn = ref(true)
 const isCameraOn = ref(true)
 let chatPollTimer = null
 
+const renderLocalStream = async (container, stream) => {
+  if (!container || !stream) return
+  container.innerHTML = ''
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = true
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'cover'
+  container.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
+}
+
 const ZEGO_CONFIG = {
   appID: 0,
   server: '',
@@ -489,7 +506,7 @@ const startCohost = async () => {
     })
 
     await nextTick()
-    localStream.value.playVideo(localVideoRef.value)
+    await renderLocalStream(localVideoRef.value, localStream.value)
     const studentStreamID = `${authInfo.userId}_${roomInfo.value.id}`
     await zg.value.startPublishingStream(studentStreamID, localStream.value)
 
@@ -531,13 +548,17 @@ const leaveCohost = async () => {
 
 const toggleMic = () => {
   if (!localStream.value || !zg.value) return
-  zg.value.mutePublishStreamAudio(localStream.value, isMicOn.value)
+  localStream.value.getAudioTracks().forEach(track => {
+    track.enabled = !isMicOn.value
+  })
   isMicOn.value = !isMicOn.value
 }
 
 const toggleCamera = () => {
   if (!localStream.value || !zg.value) return
-  zg.value.mutePublishStreamVideo(localStream.value, isCameraOn.value)
+  localStream.value.getVideoTracks().forEach(track => {
+    track.enabled = !isCameraOn.value
+  })
   isCameraOn.value = !isCameraOn.value
 }
 

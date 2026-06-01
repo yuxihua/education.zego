@@ -166,6 +166,7 @@ const ZEGO_CONFIG = {
   server: '',
   tokenUrl: '/api/zego/token' // 自研后端获取 token 的接口
 }
+const zegoSessionId = `teacher_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 
 // ==================== 状态 ====================
 const zg = ref(null)
@@ -213,6 +214,23 @@ const parseErrorMessage = (err, fallback = '未知错误') => {
   } catch (e) {
     return fallback
   }
+}
+
+const renderLocalStream = async (container, stream) => {
+  if (!container || !stream) return
+  container.innerHTML = ''
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = true
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'cover'
+  container.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
 }
 
 // ==================== 初始化 ZEGO ====================
@@ -286,7 +304,11 @@ const initZego = async () => {
 // 获取 Token
 const getZegoAuth = async () => {
   const token = localStorage.getItem('token')
-  const res = await fetch(`${ZEGO_CONFIG.tokenUrl}?roomID=${encodeURIComponent(zegoRoomID.value)}`, {
+  const query = new URLSearchParams({
+    roomID: String(zegoRoomID.value || ''),
+    sessionId: zegoSessionId
+  })
+  const res = await fetch(`${ZEGO_CONFIG.tokenUrl}?${query.toString()}`, {
     headers: token ? { Authorization: 'Bearer ' + token } : {}
   })
   const data = await res.json()
@@ -329,8 +351,7 @@ const handleStartLive = async () => {
       camera: { video: true, audio: true, videoQuality: 2, width: 1280, height: 720 }
     })
     
-    localStream.value.playVideo(localVideoRef.value)
-    localStream.value.muteAudio(false)
+    await renderLocalStream(localVideoRef.value, localStream.value)
 
     const streamID = 'teacher_' + roomId
     await zg.value.startPublishingStream(streamID, localStream.value)
@@ -392,13 +413,17 @@ const confirmEndLive = async () => {
 // ==================== 设备控制 ====================
 const toggleCamera = () => {
   if (!localStream.value) return
-  zg.value.mutePublishStreamVideo(localStream.value, isCameraOn.value)
+  localStream.value.getVideoTracks().forEach(track => {
+    track.enabled = !isCameraOn.value
+  })
   isCameraOn.value = !isCameraOn.value
 }
 
 const toggleMic = () => {
   if (!localStream.value) return
-  zg.value.mutePublishStreamAudio(localStream.value, isMicOn.value)
+  localStream.value.getAudioTracks().forEach(track => {
+    track.enabled = !isMicOn.value
+  })
   isMicOn.value = !isMicOn.value
 }
 

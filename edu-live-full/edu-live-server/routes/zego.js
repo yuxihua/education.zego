@@ -216,7 +216,7 @@ router.get('/replay/:roomId', asyncHandler(async (req, res) => {
  * 获取 ZEGO RTC token
  */
 router.get('/token', auth, asyncHandler(async (req, res) => {
-  const { roomID, publish } = req.query;
+  const { roomID, publish, sessionId } = req.query;
 
   if (!roomID) {
     return fail(res, '缺少 roomID', 400, 400);
@@ -243,7 +243,12 @@ router.get('/token', auth, asyncHandler(async (req, res) => {
       canPublish = approved === '1';
     }
   } else {
-    userId = `${req.user.role || 'user'}_${req.user.id}`;
+    const baseUserId = `${req.user.role || 'user'}_${req.user.id}`;
+    const safeSessionId = String(sessionId || '')
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 24);
+    const autoSessionId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    userId = `${baseUserId}_${safeSessionId || autoSessionId}`.slice(0, 64);
     canPublish = req.user.role === 'superadmin' || Number(room.anchorId) === Number(req.user.id);
   }
 
