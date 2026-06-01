@@ -74,7 +74,7 @@
               {{ isWhiteboardFull ? '退出全屏' : '全屏' }}
             </el-button>
           </div>
-          <div class="whiteboard" ref="whiteboardRef"></div>
+          <div class="whiteboard" :id="whiteboardDomId" ref="whiteboardRef"></div>
         </div>
       </div>
 
@@ -188,6 +188,8 @@ const isWhiteboardFull = ref(false)
 const wbColor = ref('#000000')
 const currentPage = ref(1)
 const totalPage = ref(1)
+const whiteboardReady = ref(false)
+const whiteboardDomId = `teacher-whiteboard-${roomId}`
 
 // 连麦
 const handUpList = ref([])
@@ -361,8 +363,11 @@ const handleStartLive = async () => {
     ElMessage.success('直播已开始')
 
     try {
+      whiteboardReady.value = false
+      currentSuperBoardView.value = null
       await initWhiteboard(zegoRoomID.value, token, userID, userName)
     } catch (wbErr) {
+      whiteboardReady.value = false
       ElMessage.warning('直播已开始，但白板初始化失败：' + parseErrorMessage(wbErr))
     }
   } catch (err) {
@@ -459,6 +464,9 @@ const confirmEndLive = async () => {
       }
     } catch (e) {}
 
+    whiteboardReady.value = false
+    currentSuperBoardView.value = null
+
     if (stopError) {
       throw stopError
     }
@@ -521,15 +529,21 @@ const switchCamera = async () => {
 
 // ==================== 白板 ====================
 const initWhiteboard = async (roomID, token, userID, userName) => {
+  await nextTick()
+
+  if (!whiteboardRef.value || !whiteboardRef.value.offsetWidth || !whiteboardRef.value.offsetHeight) {
+    throw new Error('白板容器未就绪，请稍后重试')
+  }
+
   zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
   
   await zegoSuperBoard.value.init(zg.value, {
-    parentDom: whiteboardRef.value,
+    parentDomID: whiteboardDomId,
     appID: ZEGO_CONFIG.appID,
     token: token,
-    roomID: roomID,
     userID: userID,
-    userName: userName || roomInfo.value.teacherName || userID
+    userName: userName || roomInfo.value.teacherName || userID,
+    isTestEnv: false
   })
 
   const result = await zegoSuperBoard.value.createWhiteboardView({
@@ -537,6 +551,7 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   })
 
   await switchToCreatedSubView(result)
+  whiteboardReady.value = true
 }
 
 const setWbTool = (tool) => {
@@ -562,6 +577,10 @@ const uploadPPT = async () => {
   }
   if (!zegoSuperBoard.value) {
     ElMessage.warning('白板尚未初始化，请稍后重试')
+    return
+  }
+  if (!whiteboardReady.value || !currentSuperBoardView.value) {
+    ElMessage.warning('白板尚未就绪，请先确认开播后白板初始化成功')
     return
   }
 
