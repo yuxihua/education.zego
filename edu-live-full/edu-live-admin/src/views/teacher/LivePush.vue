@@ -233,6 +233,8 @@ const renderLocalStream = async (container, stream) => {
   } catch (e) {}
 }
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 // ==================== 初始化 ZEGO ====================
 const initZego = async () => {
   zg.value = ZEGO_CONFIG.server
@@ -359,7 +361,7 @@ const handleStartLive = async () => {
     ElMessage.success('直播已开始')
 
     try {
-      await initWhiteboard(zegoRoomID.value, token, userID)
+      await initWhiteboard(zegoRoomID.value, token, userID, userName)
     } catch (wbErr) {
       ElMessage.warning('直播已开始，但白板初始化失败：' + parseErrorMessage(wbErr))
     }
@@ -495,7 +497,7 @@ const switchCamera = async () => {
 }
 
 // ==================== 白板 ====================
-const initWhiteboard = async (roomID, token, userID) => {
+const initWhiteboard = async (roomID, token, userID, userName) => {
   zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
   
   await zegoSuperBoard.value.init(zg.value, {
@@ -504,7 +506,7 @@ const initWhiteboard = async (roomID, token, userID) => {
     token: token,
     roomID: roomID,
     userID: userID,
-    userName: roomInfo.value.teacherName
+    userName: userName || roomInfo.value.teacherName || userID
   })
 
   const result = await zegoSuperBoard.value.createWhiteboardView({
@@ -580,12 +582,34 @@ const uploadPPT = async () => {
           { renderImgType: 1 }
         )
       }
-      
-      const wbResult = await zegoSuperBoard.value.createFileView({
-        fileID
-      })
 
-      await switchToCreatedSubView(wbResult)
+      let wbResult = null
+      try {
+        wbResult = await zegoSuperBoard.value.createFileView({ fileID })
+      } catch (createErr) {
+        console.warn('[LivePush] createFileView failed, fallback to query list:', createErr)
+      }
+
+      if (wbResult) {
+        await switchToCreatedSubView(wbResult)
+      } else {
+        let switched = false
+        for (let retry = 0; retry < 8; retry += 1) {
+          const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
+          const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === file.name)
+          if (targetSubView?.uniqueID) {
+            await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID)
+            refreshCurrentSuperBoardView()
+            switched = true
+            break
+          }
+          await delay(500)
+        }
+
+        if (!switched) {
+          refreshCurrentSuperBoardView()
+        }
+      }
       ElMessage.success('PPT 加载成功')
     } catch (err) {
       ElMessage.error('PPT 上传失败: ' + (err?.message || '请检查白板转码配置'))
