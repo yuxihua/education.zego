@@ -154,7 +154,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
-import { ZegoSuperBoardManager } from 'zego-superboard-web'
+import { ZegoSuperBoardManager, ZegoSuperBoardRenderType } from 'zego-superboard-web'
 import { getLiveRoomDetail, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
 const route = useRoute()
@@ -525,14 +525,16 @@ const uploadPPT = async () => {
     
     ElMessage.info('PPT 上传中...')
     try {
-      const result = await zegoSuperBoard.value.uploadFile(file, {
-        fileName: file.name,
-        fileType: isPdf ? 512 : 256
-      })
+      const renderType = isPdf ? ZegoSuperBoardRenderType.IMG : ZegoSuperBoardRenderType.DynamicPPTH5
+      const fileID = await zegoSuperBoard.value.uploadFile(
+        file,
+        renderType,
+        () => {},
+        { renderImgType: 1 }
+      )
       
       const wbResult = await zegoSuperBoard.value.createFileView({
-        fileID: result.fileID,
-        name: file.name
+        fileID
       })
       
       currentSuperBoardView.value = wbResult.fileView
