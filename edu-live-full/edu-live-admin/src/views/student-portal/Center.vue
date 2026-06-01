@@ -41,6 +41,11 @@
               <template #default="{ row }">¥{{ row.amount }}</template>
             </el-table-column>
             <el-table-column prop="payTime" label="支付时间" width="160" />
+            <el-table-column label="操作" width="120">
+              <template #default="{ row }">
+                <el-button type="primary" link @click="enterLive(row)">进入直播</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-col>
@@ -115,6 +120,15 @@ const loadMyCourses = async () => {
 
 const refreshAll = async () => {
   await Promise.all([loadProfile(), loadCourseList(), loadMyCourses()])
+}
+
+const enterLive = (courseRow) => {
+  const courseId = courseRow?.course?.id
+  if (!courseId) {
+    ElMessage.warning('未找到课程信息，暂时无法进入直播')
+    return
+  }
+  router.push(`/student-live/${courseId}`)
 }
 
 const buyByAlipay = async (course) => {

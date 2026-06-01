@@ -21,6 +21,12 @@ export const routes = [
     meta: { public: true, studentAuth: true }
   },
   {
+    path: '/student-live/:courseId',
+    name: 'StudentLiveRoom',
+    component: () => import('@/views/student-portal/LiveRoom.vue'),
+    meta: { public: true, studentAuth: true }
+  },
+  {
     path: '/pay/result',
     name: 'StudentPayResult',
     component: () => import('@/views/student-portal/PayResult.vue'),

@@ -41,6 +41,10 @@ export const studentCheckWxQr = (state) => studentClient.get('/student/wx/qr/sta
 export const studentProfile = () => studentClient.get('/student/profile')
 export const studentLogout = () => studentClient.post('/student/logout')
 export const studentMyCourses = (params) => studentClient.get('/student/my-courses', { params })
+export const studentLiveRoomByCourse = (courseId) => studentClient.get(`/live/student/course/${courseId}/room`)
+export const studentLiveRoomDetail = (roomId) => studentClient.get(`/live/student/room/${roomId}`)
+export const studentLiveChatHistory = (roomId, params) => studentClient.get(`/live/room/${roomId}/chat/history`, { params })
+export const studentLiveSendChat = (roomId, data) => studentClient.post(`/live/room/${roomId}/chat/send`, data)
 
 export const studentCourseList = (params) => studentClient.get('/course/list', { params })
 

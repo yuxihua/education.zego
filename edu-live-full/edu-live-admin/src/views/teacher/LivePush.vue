@@ -155,15 +155,15 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
 import { ZegoSuperBoardManager } from 'zego-superboard-web'
-import { getLiveRoomDetail, endLive } from '@/api/live'
+import { getLiveRoomDetail, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
 const route = useRoute()
 const roomId = route.params.id
 
 // ==================== ZEGO 配置 ====================
 const ZEGO_CONFIG = {
-  appID: 0, // 你的 ZEGO appID
-  server: '', // 你的 ZEGO server 地址
+  appID: 0,
+  server: '',
   tokenUrl: '/api/zego/token' // 自研后端获取 token 的接口
 }
 
@@ -197,6 +197,7 @@ const messages = ref([])
 const chatText = ref('')
 const chatScrollRef = ref(null)
 const localVideoRef = ref(null)
+const zegoAuthInfo = ref(null)
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -268,18 +269,44 @@ const initZego = async () => {
 }
 
 // 获取 Token
-const getToken = async (userID) => {
-  const res = await fetch(`${ZEGO_CONFIG.tokenUrl}?userID=${userID}&roomID=${zegoRoomID.value}`)
+const getZegoAuth = async () => {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${ZEGO_CONFIG.tokenUrl}?roomID=${encodeURIComponent(zegoRoomID.value)}`, {
+    headers: token ? { Authorization: 'Bearer ' + token } : {}
+  })
   const data = await res.json()
-  return data.token
+  if (!res.ok || ![0, 200].includes(data.code)) {
+    throw new Error(data.message || data.msg || '获取 ZEGO Token 失败')
+  }
+
+  const authInfo = data.data || {}
+  ZEGO_CONFIG.appID = Number(authInfo.appId || 0)
+  ZEGO_CONFIG.server = authInfo.server || ''
+  zegoAuthInfo.value = authInfo
+  return authInfo
+}
+
+const ensureZegoReady = async () => {
+  const authInfo = await getZegoAuth()
+  if (!ZEGO_CONFIG.appID) {
+    throw new Error('ZEGO_APP_ID 未配置')
+  }
+  if (!zg.value) {
+    await initZego()
+  }
+  return authInfo
 }
 
 // ==================== 直播控制 ====================
 const handleStartLive = async () => {
   try {
-    const userID = 'teacher_' + roomInfo.value.teacherId
-    const userName = roomInfo.value.teacherName
-    const token = await getToken(userID)
+    const authInfo = await ensureZegoReady()
+    if (!authInfo.canPublish) {
+      throw new Error('当前账号不是本直播间讲师，无推流权限')
+    }
+    const userID = authInfo.userId
+    const userName = authInfo.userName
+    const token = authInfo.token
     
     await zg.value.loginRoom(zegoRoomID.value, token, { userID, userName })
 
@@ -471,6 +498,7 @@ const nextPage = () => {
 
 // ==================== 连麦管理 ====================
 const acceptCoHost = async (student) => {
+  await approveCohostApi(roomId, { userId: student.userID })
   await zg.value.sendBroadcastMessage(
     zegoRoomID.value,
     JSON.stringify({ type: 'cohost_accept', targetUserID: student.userID })
@@ -480,6 +508,7 @@ const acceptCoHost = async (student) => {
 }
 
 const rejectCoHost = async (student) => {
+  await rejectCohostApi(roomId, { userId: student.userID })
   await zg.value.sendBroadcastMessage(
     zegoRoomID.value,
     JSON.stringify({ type: 'cohost_reject', targetUserID: student.userID })
@@ -488,6 +517,7 @@ const rejectCoHost = async (student) => {
 }
 
 const kickCoHost = async (stream) => {
+  await kickCohostApi(roomId, { userId: stream.userID })
   await zg.value.sendBroadcastMessage(
     zegoRoomID.value,
     JSON.stringify({ type: 'cohost_kick', targetUserID: stream.userID })
@@ -528,7 +558,6 @@ onMounted(async () => {
   const res = await getLiveRoomDetail(roomId)
   roomInfo.value = res
   zegoRoomID.value = res.zegoRoomId || 'room_' + roomId
-  await initZego()
 })
 
 onBeforeUnmount(() => {

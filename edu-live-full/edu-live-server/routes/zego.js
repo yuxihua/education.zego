@@ -11,6 +11,9 @@ const { asyncHandler } = require('../middleware/error');
 const { auth } = require('../middleware/auth');
 const OSS = require('ali-oss');
 const config = require('../config/zego');
+const { generateToken04 } = require('../utils/zegoToken');
+const redis = require('../config/redis');
+const { writeOperationLog } = require('../utils/operationLogWriter');
 
 // OSS 客户端（用于录制文件转存）
 const ossClient = new OSS({
@@ -205,6 +208,78 @@ router.get('/replay/:roomId', asyncHandler(async (req, res) => {
     duration: room.replayDuration,
     size: room.replaySize,
     status: room.status
+  });
+}));
+
+/**
+ * @GET /api/zego/token
+ * 获取 ZEGO RTC token
+ */
+router.get('/token', auth, asyncHandler(async (req, res) => {
+  const { roomID, publish } = req.query;
+
+  if (!roomID) {
+    return fail(res, '缺少 roomID', 400, 400);
+  }
+
+  if (!config.appId || !config.serverSecret) {
+    return fail(res, 'ZEGO 未配置，请检查 ZEGO_APP_ID 和 ZEGO_SERVER_SECRET', 500, 500);
+  }
+
+  const room = await LiveRoom.findOne({ where: { zegoRoomId: roomID } });
+  if (!room) {
+    return fail(res, '直播间不存在', 404, 404);
+  }
+
+  let userId = '';
+  let userName = req.user.nickname || req.user.username || '用户';
+  let canPublish = false;
+
+  if (req.user.role === 'student' || req.user.studentId) {
+    userId = `student_${req.user.studentId || req.user.id}`;
+    userName = req.user.nickname || '学员';
+    if (String(publish || '') === '1') {
+      const approved = await redis.get(`live:cohost:${room.id}:${userId}`);
+      canPublish = approved === '1';
+    }
+  } else {
+    userId = `${req.user.role || 'user'}_${req.user.id}`;
+    canPublish = req.user.role === 'superadmin' || Number(room.anchorId) === Number(req.user.id);
+  }
+
+  const payload = JSON.stringify({
+    room_id: String(roomID),
+    privilege: {
+      1: 1,
+      2: canPublish ? 1 : 0
+    },
+    stream_id_list: null
+  });
+
+  const token = generateToken04(
+    Number(config.appId),
+    userId,
+    config.serverSecret,
+    2 * 60 * 60,
+    payload
+  );
+
+  await writeOperationLog(req, {
+    action: '获取ZEGO Token',
+    path: '/api/zego/token',
+    payload: { roomID, publish: String(publish || '0'), canPublish, userId },
+    message: 'ZEGO token 已签发'
+  });
+
+  success(res, {
+    appId: Number(config.appId),
+    server: '',
+    token,
+    roomId: roomID,
+    userId,
+    userName,
+    canPublish,
+    expireIn: 2 * 60 * 60
   });
 }));
 

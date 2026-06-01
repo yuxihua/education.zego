@@ -32,9 +32,10 @@
           </template>
         </el-table-column>
         <el-table-column prop="onlineCount" label="在线人数" width="100" />
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="goDetail(row)">详情</el-button>
+            <el-button v-if="row.status !== 'ended'" link type="success" @click="handleTeacherEnter(row)">老师进入直播</el-button>
             <el-button v-if="row.status === 'living'" link type="danger" @click="handleEnd(row)">结束直播</el-button>
             <el-button link type="primary" @click="handleReplay(row)">回放管理</el-button>
           </template>
@@ -196,6 +197,10 @@ const handleSubmit = async () => {
 
 const goDetail = (row) => {
   router.push(`/live/room/${row.id}`)
+}
+
+const handleTeacherEnter = (row) => {
+  router.push(`/teacher/live-push/${row.id}`)
 }
 
 const handleEnd = async (row) => {
