@@ -414,38 +414,61 @@ const handleEndLive = () => {
 const confirmEndLive = async () => {
   try {
     const streamID = 'teacher_' + roomId
-    zg.value.stopPublishingStream(streamID)
-    
-    if (localStream.value) {
-      zg.value.destroyStream(localStream.value)
-      localStream.value = null
+    try {
+      zg.value.stopPublishingStream(streamID)
+    } catch (e) {}
+
+    try {
+      if (localStream.value) {
+        zg.value.destroyStream(localStream.value)
+        localStream.value = null
+      }
+    } catch (e) {}
+
+    try {
+      if (screenStream.value) {
+        zg.value.stopPublishingStream(streamID + '_screen')
+        zg.value.destroyStream(screenStream.value)
+        screenStream.value = null
+      }
+    } catch (e) {}
+
+    try {
+      coHostStreams.value.forEach(s => {
+        try {
+          zg.value.stopPlayingStream(s.streamID)
+        } catch (e) {}
+      })
+      coHostStreams.value = []
+    } catch (e) {}
+
+    let stopError = null
+    try {
+      await endLive(roomId)
+    } catch (err) {
+      stopError = err
     }
-    
-    if (screenStream.value) {
-      zg.value.stopPublishingStream(streamID + '_screen')
-      zg.value.destroyStream(screenStream.value)
-      screenStream.value = null
+
+    try {
+      await zg.value.logoutRoom(zegoRoomID.value)
+    } catch (e) {}
+
+    try {
+      if (zegoSuperBoard.value) {
+        zegoSuperBoard.value.destroy()
+      }
+    } catch (e) {}
+
+    if (stopError) {
+      throw stopError
     }
 
-    coHostStreams.value.forEach(s => {
-      zg.value.stopPlayingStream(s.streamID)
-    })
-    coHostStreams.value = []
-
-    await zg.value.logoutRoom(zegoRoomID.value)
-
-    if (zegoSuperBoard.value) {
-      zegoSuperBoard.value.destroy()
-    }
-
-    await endLive(roomId)
-    
     isLiving.value = false
     endDialogVisible.value = false
     onlineCount.value = 0
     ElMessage.success('直播已结束，回放生成中...')
   } catch (err) {
-    ElMessage.error('结束直播失败')
+    ElMessage.error('结束直播失败：' + parseErrorMessage(err))
   }
 }
 
