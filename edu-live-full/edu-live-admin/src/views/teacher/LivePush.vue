@@ -236,6 +236,11 @@ const renderLocalStream = async (container, stream) => {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const isWhiteboardUserNotExistError = (err) => {
+  const code = Number(err?.code || err?.errorCode || 0)
+  const msg = String(err?.message || err?.msg || err || '')
+  return code === 3110002 || msg.includes('用户不存在') || msg.toLowerCase().includes('user not exist')
+}
 
 // ==================== 初始化 ZEGO ====================
 const initZego = async () => {
@@ -368,7 +373,8 @@ const handleStartLive = async () => {
       await initWhiteboard(zegoRoomID.value, token, userID, userName)
     } catch (wbErr) {
       whiteboardReady.value = false
-      ElMessage.warning('直播已开始，但白板初始化失败：' + parseErrorMessage(wbErr))
+      const wbCode = wbErr?.code || wbErr?.errorCode
+      ElMessage.warning('直播已开始，但白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
     }
   } catch (err) {
     ElMessage.error('开始直播失败: ' + parseErrorMessage(err))
@@ -536,22 +542,53 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   }
 
   zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
+  zegoSuperBoard.value.off?.('error')
+  zegoSuperBoard.value.on?.('error', (error) => {
+    console.error('[LivePush] SuperBoard error:', error)
+  })
   
   await zegoSuperBoard.value.init(zg.value, {
     parentDomID: whiteboardDomId,
     appID: ZEGO_CONFIG.appID,
     token: token,
+    roomID: roomID,
     userID: userID,
     userName: userName || roomInfo.value.teacherName || userID,
     isTestEnv: false
   })
 
-  const result = await zegoSuperBoard.value.createWhiteboardView({
-    name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
-  })
+  let lastError = null
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
+      if (Array.isArray(subViewList) && subViewList.length > 0) {
+        const target = subViewList[subViewList.length - 1]
+        if (target?.uniqueID) {
+          await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(target.uniqueID)
+          refreshCurrentSuperBoardView()
+          whiteboardReady.value = true
+          return
+        }
+      }
 
-  await switchToCreatedSubView(result)
-  whiteboardReady.value = true
+      const result = await zegoSuperBoard.value.createWhiteboardView({
+        name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
+      })
+
+      await switchToCreatedSubView(result)
+      whiteboardReady.value = true
+      return
+    } catch (err) {
+      lastError = err
+      if (isWhiteboardUserNotExistError(err) && attempt < 5) {
+        await delay(500)
+        continue
+      }
+      break
+    }
+  }
+
+  throw lastError || new Error('白板初始化失败')
 }
 
 const setWbTool = (tool) => {
