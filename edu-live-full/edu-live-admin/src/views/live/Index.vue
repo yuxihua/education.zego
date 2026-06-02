@@ -200,7 +200,8 @@ const goDetail = (row) => {
 }
 
 const handleTeacherEnter = (row) => {
-  router.push(`/teacher/live-push/${row.id}`)
+  const mode = userStore.userInfo?.role === 'assistant' ? 'audience' : 'teacher'
+  router.push(`/teacher/live-push/${row.id}?mode=${mode}`)
 }
 
 const handleEnd = async (row) => {

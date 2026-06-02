@@ -397,6 +397,7 @@
 import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
 import * as ZegoSuperBoardWeb from 'zego-superboard-web'
 import { ZegoSuperBoardManager } from 'zego-superboard-web'
@@ -404,6 +405,8 @@ import { getLiveRoomDetail, startLive, endLive, approveCohost as approveCohostAp
 
 const route = useRoute()
 const roomId = route.params.id
+const userStore = useUserStore()
+const audienceMode = String(route.query.mode || '') === 'audience'
 
 // ==================== ZEGO 配置 ====================
 const ZEGO_CONFIG = {
@@ -479,6 +482,8 @@ const audienceMainStreamID = ref('')
 const whiteboardLayoutRefreshTimer = ref(null)
 const audienceWhiteboardRetryTimer = ref(null)
 const audienceWhiteboardSyncing = ref(false)
+const audienceRoomStatusRetryTimer = ref(null)
+const audienceRoomStatusRetryCount = ref(0)
 const workspaceRef = ref(null)
 const leftPanelRef = ref(null)
 const videoContainerRef = ref(null)
@@ -494,6 +499,7 @@ const cameraPreviewSeq = ref(0)
 const cameraPreviewPresets = ref([])
 const previewSceneIndex = ref(0)
 const localStreamProvider = ref('native')
+const audienceAutoJoinStarted = ref(false)
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
 const whiteboardResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
@@ -1708,6 +1714,49 @@ const clearAudienceWhiteboardRetryTimer = () => {
   }
 }
 
+const clearAudienceRoomStatusRetryTimer = () => {
+  if (audienceRoomStatusRetryTimer.value) {
+    clearTimeout(audienceRoomStatusRetryTimer.value)
+    audienceRoomStatusRetryTimer.value = null
+  }
+  audienceRoomStatusRetryCount.value = 0
+}
+
+const syncAudienceRoomStatus = async () => {
+  if (canPublishLive.value) return
+  try {
+    const res = await getLiveRoomDetail(roomId)
+    roomInfo.value = res
+    zegoRoomID.value = res.zegoRoomId || zegoRoomID.value || 'room_' + roomId
+    const liveNow = ['living', 'paused'].includes(String(res.status || ''))
+    if (liveNow) {
+      isLiving.value = true
+      wbStageText.value = wbStageText.value || '白板同步中...'
+      clearAudienceRoomStatusRetryTimer()
+      if (!audienceAutoJoinStarted.value && liveIdentity.value) {
+        audienceAutoJoinStarted.value = true
+        await startAudienceSession(liveIdentity.value)
+      }
+      return
+    }
+    if (audienceRoomStatusRetryCount.value < 6) {
+      audienceRoomStatusRetryCount.value += 1
+      audienceRoomStatusRetryTimer.value = setTimeout(() => {
+        audienceRoomStatusRetryTimer.value = null
+        syncAudienceRoomStatus()
+      }, 2000)
+    }
+  } catch (err) {
+    if (audienceRoomStatusRetryCount.value < 6) {
+      audienceRoomStatusRetryCount.value += 1
+      audienceRoomStatusRetryTimer.value = setTimeout(() => {
+        audienceRoomStatusRetryTimer.value = null
+        syncAudienceRoomStatus()
+      }, 2000)
+    }
+  }
+}
+
 const shouldSyncAudienceWhiteboard = () => {
   return !canPublishLive.value && isLiving.value && !!zg.value && !!zegoRoomID.value
 }
@@ -1751,6 +1800,8 @@ const startAudienceSession = async (authInfo) => {
   const userName = authInfo.userName
   const token = authInfo.token
   liveIdentity.value = { userId: userID, userName, token }
+  isLiving.value = true
+  wbStageText.value = '白板同步中...'
 
   await resetRoomSessionBeforeStart(zegoRoomID.value)
   roomState.value = 'DISCONNECTED'
@@ -1762,8 +1813,6 @@ const startAudienceSession = async (authInfo) => {
   )
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
-  isLiving.value = true
-  wbStageText.value = '白板同步中...'
   try {
     await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
     wbStageText.value = '白板已同步'
@@ -2923,6 +2972,8 @@ onMounted(async () => {
   const res = await getLiveRoomDetail(roomId)
   roomInfo.value = res
   zegoRoomID.value = res.zegoRoomId || 'room_' + roomId
+  const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
+  isLiving.value = isAssistantUser || ['living', 'paused'].includes(String(res.status || ''))
   cameraPreviewPresets.value = loadCameraPreviewPresets()
   try {
     const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
@@ -2958,7 +3009,14 @@ onMounted(async () => {
   clampWhiteboardPanelWidth()
   try {
     const authInfo = await getZegoAuth()
-    canPublishLive.value = !!authInfo?.canPublish
+    canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
+    if ((isAssistantUser || !authInfo?.canPublish) && !audienceAutoJoinStarted.value) {
+      audienceAutoJoinStarted.value = true
+      await startAudienceSession(authInfo)
+    }
+    if (isAssistantUser || !authInfo?.canPublish) {
+      syncAudienceRoomStatus()
+    }
   } catch (err) {}
   await refreshCameraDevices()
   await restoreCameraPreviewTiles()
@@ -2975,6 +3033,7 @@ onBeforeUnmount(() => {
     whiteboardLayoutRefreshTimer.value = null
   }
   clearAudienceWhiteboardRetryTimer()
+  clearAudienceRoomStatusRetryTimer()
   audienceWhiteboardSyncing.value = false
   cameraPreviewTiles.value.forEach((tile) => {
     if (tile.isPublishing) {
