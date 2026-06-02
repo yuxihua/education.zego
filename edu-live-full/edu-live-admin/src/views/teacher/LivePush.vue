@@ -599,30 +599,28 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   let lastError = null
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const subViewList = await withTimeout(
-        zegoSuperBoard.value.querySuperBoardSubViewList(),
-        5000,
-        '查询白板子视图超时（5秒）'
-      )
-      if (Array.isArray(subViewList) && subViewList.length > 0) {
-        const target = subViewList[subViewList.length - 1]
-        if (target?.uniqueID) {
-          await withTimeout(
-            zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(target.uniqueID),
-            8000,
-            '切换白板子视图超时（8秒）'
-          )
-          refreshCurrentSuperBoardView()
-          whiteboardReady.value = true
-          return
-        }
+      if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+        whiteboardReady.value = true
+        return
       }
 
-      const result = await zegoSuperBoard.value.createWhiteboardView({
-        name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
-      })
+      const result = await withTimeout(
+        zegoSuperBoard.value.createWhiteboardView({
+          name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
+        }),
+        12000,
+        '创建基础白板超时（12秒）'
+      )
 
       await switchToCreatedSubView(result)
+      if (!currentSuperBoardView.value) {
+        refreshCurrentSuperBoardView()
+      }
+
+      if (!currentSuperBoardView.value) {
+        throw new Error('基础白板创建后未激活')
+      }
+
       whiteboardReady.value = true
       return
     } catch (err) {
@@ -631,6 +629,12 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
         await delay(500)
         continue
       }
+
+      if (attempt < 5) {
+        await delay(500)
+        continue
+      }
+
       break
     }
   }
@@ -779,6 +783,7 @@ const uploadPPT = async () => {
       wbStageText.value = '步骤 3/3：创建并切换课件视图'
 
       let wbResult = null
+      let createFileViewError = null
       try {
         wbResult = await withTimeout(
           zegoSuperBoard.value.createFileView({ fileID }),
@@ -786,7 +791,8 @@ const uploadPPT = async () => {
           '创建课件视图超时（30秒）'
         )
       } catch (createErr) {
-        console.warn('[LivePush] createFileView failed, fallback to query list:', createErr)
+        createFileViewError = createErr
+        console.warn('[LivePush] createFileView failed, will try current active subview:', createErr)
       }
 
       let switched = false
@@ -796,21 +802,22 @@ const uploadPPT = async () => {
       }
 
       if (!switched) {
-        const targetSubView = await withTimeout(
-          waitAndFindFileSubView(fileID, file.name),
-          50000,
-          '等待课件白板生成超时（50秒）'
-        )
-        if (!targetSubView?.uniqueID) {
-          throw new Error('课件正在转码，暂未生成可展示白板，请稍后再试')
+        await delay(300)
+        switched = !!(currentSuperBoardView.value || refreshCurrentSuperBoardView())
+      }
+
+      if (!switched && createFileViewError) {
+        throw new Error('创建课件视图失败：' + parseErrorMessage(createFileViewError))
+      }
+
+      if (!switched) {
+        const active = zegoSuperBoard.value?.getSuperBoardView?.()?.getCurrentSuperBoardSubView?.()
+        if (active) {
+          currentSuperBoardView.value = active
+          totalPage.value = active.getPageCount?.() || 1
+          currentPage.value = active.getCurrentPage?.() || 1
+          switched = true
         }
-        await withTimeout(
-          zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID),
-          8000,
-          '切换课件白板超时（8秒）'
-        )
-        refreshCurrentSuperBoardView()
-        switched = !!currentSuperBoardView.value
       }
 
       if (!switched) {
