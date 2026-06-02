@@ -96,7 +96,7 @@ const ROLE_DEFAULT_PERMISSIONS = {
     'system.permission.manage'
   ],
   teacher: ['dashboard.view', 'course.manage', 'live.manage', 'question.manage', 'homework.manage'],
-  assistant: ['dashboard.view', 'student.manage', 'homework.manage', 'checkin.manage'],
+  assistant: ['dashboard.view', 'live.manage', 'student.manage', 'homework.manage', 'checkin.manage'],
   sales: ['dashboard.view', 'distribution.orders.view', 'distribution.hierarchy.view', 'order.manage']
 };
 

@@ -3,7 +3,8 @@
     <!-- 顶部工具栏 -->
     <div class="top-bar">
       <div class="room-info">
-        <el-tag type="danger" effect="dark" v-if="isLiving">● 直播中</el-tag>
+        <el-tag type="success" effect="dark" v-if="isLiving && !canPublishLive">● 听课中</el-tag>
+        <el-tag type="danger" effect="dark" v-else-if="isLiving">● 直播中</el-tag>
         <el-tag type="info" v-else>未开始</el-tag>
         <span class="room-title">{{ roomInfo.title }}</span>
         <span class="online-count">
@@ -24,6 +25,7 @@
           {{ showInteractionPanel ? '隐藏交流窗' : '显示交流窗' }}
         </el-button>
         <el-select
+          v-if="canPublishLive"
           v-model="activeCameraDeviceId"
           placeholder="主摄像头"
           size="large"
@@ -39,10 +41,10 @@
             :value="device.deviceId"
           />
         </el-select>
-        <el-button size="large" @click="addCameraPreview">
+        <el-button v-if="canPublishLive" size="large" @click="addCameraPreview">
           添加摄像头
         </el-button>
-        <el-button size="large" @click="refreshCameraDevices">
+        <el-button v-if="canPublishLive" size="large" @click="refreshCameraDevices">
           刷新设备
         </el-button>
         <el-button 
@@ -50,7 +52,7 @@
           size="large"
           @click="isLiving ? handleEndLive() : handleStartLive()"
         >
-          {{ isLiving ? '结束直播' : '开始直播' }}
+          {{ canPublishLive ? (isLiving ? '结束直播' : '开始直播') : (isLiving ? '退出听课' : '进入听课') }}
         </el-button>
       </div>
     </div>
@@ -381,11 +383,11 @@
     </div>
 
     <!-- 结束直播确认 -->
-    <el-dialog v-model="endDialogVisible" title="结束直播" width="400px">
-      <p>确认结束直播？结束后将自动生成回放。</p>
+    <el-dialog v-model="endDialogVisible" :title="canPublishLive ? '结束直播' : '退出听课'" width="400px">
+      <p>{{ canPublishLive ? '确认结束直播？结束后将自动生成回放。' : '确认退出当前听课房间？' }}</p>
       <template #footer>
         <el-button @click="endDialogVisible = false">取消</el-button>
-        <el-button type="danger" @click="confirmEndLive">确认结束</el-button>
+        <el-button :type="canPublishLive ? 'danger' : 'primary'" @click="confirmEndLive">{{ canPublishLive ? '确认结束' : '确认退出' }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -472,6 +474,8 @@ const localVideoRef = ref(null)
 const zegoAuthInfo = ref(null)
 const liveIdentity = ref(null)
 const roomState = ref('DISCONNECTED')
+const canPublishLive = ref(true)
+const audienceMainStreamID = ref('')
 const whiteboardLayoutRefreshTimer = ref(null)
 const workspaceRef = ref(null)
 const leftPanelRef = ref(null)
@@ -1537,6 +1541,10 @@ const initZego = async () => {
   zg.value.on('roomStreamUpdate', async (roomID, updateType, streamList) => {
     if (updateType === 'ADD') {
       for (const stream of streamList) {
+        if (!canPublishLive.value && stream.streamID === `teacher_${roomId}`) {
+          await playAudienceMainStream()
+          continue
+        }
         if (!stream.streamID.includes('screen')) {
           coHostStreams.value.push({
             streamID: stream.streamID,
@@ -1608,6 +1616,49 @@ const getZegoAuth = async () => {
   return authInfo
 }
 
+const playAudienceMainStream = async () => {
+  if (!zg.value || !localVideoRef.value) return
+  const streamID = `teacher_${roomId}`
+  try {
+    if (audienceMainStreamID.value && audienceMainStreamID.value !== streamID) {
+      try {
+        zg.value.stopPlayingStream(audienceMainStreamID.value)
+      } catch (e) {}
+    }
+    await zg.value.startPlayingStream(streamID, {
+      video: localVideoRef.value,
+      audio: true
+    })
+    audienceMainStreamID.value = streamID
+  } catch (e) {
+    ElMessage.info('已进入房间，等待老师开始推流...')
+  }
+}
+
+const startAudienceSession = async (authInfo) => {
+  const userID = authInfo.userId
+  const userName = authInfo.userName
+  const token = authInfo.token
+  liveIdentity.value = { userId: userID, userName, token }
+
+  await resetRoomSessionBeforeStart(zegoRoomID.value)
+  roomState.value = 'DISCONNECTED'
+
+  await withTimeout(
+    zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+    8000,
+    '登录房间超时（8秒）'
+  )
+
+  await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
+  try {
+    await initWhiteboard(zegoRoomID.value, token, userID, userName)
+  } catch (err) {}
+  await playAudienceMainStream()
+  isLiving.value = true
+  ElMessage.success('已进入听课房间')
+}
+
 const ensureZegoReady = async () => {
   const authInfo = await getZegoAuth()
   if (!ZEGO_CONFIG.appID) {
@@ -1623,8 +1674,10 @@ const ensureZegoReady = async () => {
 const handleStartLive = async () => {
   try {
     const authInfo = await ensureZegoReady()
+    canPublishLive.value = !!authInfo.canPublish
     if (!authInfo.canPublish) {
-      throw new Error('当前账号不是本直播间讲师，无推流权限')
+      await startAudienceSession(authInfo)
+      return
     }
     const userID = authInfo.userId
     const userName = authInfo.userName
@@ -1759,9 +1812,16 @@ const handleEndLive = () => {
 const confirmEndLive = async () => {
   try {
     const streamID = 'teacher_' + roomId
-    try {
-      zg.value.stopPublishingStream(streamID)
-    } catch (e) {}
+    if (canPublishLive.value) {
+      try {
+        zg.value.stopPublishingStream(streamID)
+      } catch (e) {}
+    } else if (audienceMainStreamID.value) {
+      try {
+        zg.value.stopPlayingStream(audienceMainStreamID.value)
+      } catch (e) {}
+      audienceMainStreamID.value = ''
+    }
 
     try {
       if (localStream.value) {
@@ -1789,10 +1849,12 @@ const confirmEndLive = async () => {
     } catch (e) {}
 
     let stopError = null
-    try {
-      await endLive(roomId)
-    } catch (err) {
-      stopError = err
+    if (canPublishLive.value) {
+      try {
+        await endLive(roomId)
+      } catch (err) {
+        stopError = err
+      }
     }
 
     try {
@@ -1827,9 +1889,9 @@ const confirmEndLive = async () => {
     isLiving.value = false
     endDialogVisible.value = false
     onlineCount.value = 0
-    ElMessage.success('直播已结束，回放生成中...')
+    ElMessage.success(canPublishLive.value ? '直播已结束，回放生成中...' : '已退出听课房间')
   } catch (err) {
-    ElMessage.error('结束直播失败：' + parseErrorMessage(err))
+    ElMessage.error((canPublishLive.value ? '结束直播失败：' : '退出听课失败：') + parseErrorMessage(err))
   }
 }
 
@@ -2748,6 +2810,10 @@ onMounted(async () => {
   await nextTick()
   clampWhiteboardPanelHeight()
   clampWhiteboardPanelWidth()
+  try {
+    const authInfo = await getZegoAuth()
+    canPublishLive.value = !!authInfo?.canPublish
+  } catch (err) {}
   await refreshCameraDevices()
   await restoreCameraPreviewTiles()
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
