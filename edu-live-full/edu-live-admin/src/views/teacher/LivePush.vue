@@ -1788,80 +1788,48 @@ const ensureWhiteboardReadyForUpload = async () => {
 }
 
 const setWbTool = (tool) => {
-  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
     ElMessage.warning('白板未就绪')
     return
   }
 
-  const subView = currentSuperBoardView.value
-  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
-  const runtimeEnum =
-    ZegoSuperBoardWeb?.ZegoSuperBoardSubViewToolType ||
-    ZegoSuperBoardWeb?.ZegoSuperBoardToolType ||
-    null
-
-  const fallbackToolCandidates = {
-    selector: [1, 0],
-    pen: [2, 1],
-    text: [4, 3, 2],
-    eraser: [8, 5, 4]
+  const toolEnum = ZegoSuperBoardWeb?.ZegoSuperBoardTool || {}
+  const toolMap = {
+    selector: toolEnum.Selector,
+    pen: toolEnum.Pen,
+    text: toolEnum.Text,
+    eraser: toolEnum.Eraser
+  }
+  const targetTool = Number.isFinite(toolMap[tool]) ? toolMap[tool] : null
+  if (targetTool === null) {
+    ElMessage.warning('当前白板不支持该工具')
+    return
   }
 
-  const enumToolCandidates = runtimeEnum
-    ? {
-        selector: [runtimeEnum.SELECTOR, runtimeEnum.SELECT, runtimeEnum.NONE],
-        pen: [runtimeEnum.PEN],
-        text: [runtimeEnum.TEXT],
-        eraser: [runtimeEnum.ERASER]
-      }
-    : {}
-
-  const candidates = [
-    ...(enumToolCandidates[tool] || []),
-    ...(fallbackToolCandidates[tool] || [])
-  ].filter((value) => typeof value === 'number' && Number.isFinite(value))
-
-  for (const value of candidates) {
-    try {
-      if (subView?.setToolType) {
-        subView.setToolType(value)
-        return
-      }
-    } catch (e) {}
-    try {
-      if (boardView?.setToolType) {
-        boardView.setToolType(value)
-        return
-      }
-    } catch (e) {}
+  try {
+    // 进入绘制模式后，工具切换才会生效。
+    zegoSuperBoard.value.setOperationMode?.(ZegoSuperBoardWeb.ZegoSuperBoardOperationMode.Draw)
+    const ok = zegoSuperBoard.value.setToolType?.(targetTool)
+    if (ok === false) {
+      ElMessage.warning('当前白板不支持该工具')
+    }
+  } catch (e) {
+    ElMessage.warning('当前白板不支持该工具')
   }
-
-  ElMessage.warning('当前白板不支持该工具')
 }
 
 const setWbColor = (color) => {
-  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
     ElMessage.warning('白板未就绪')
     return
   }
-  const subView = currentSuperBoardView.value
-  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
 
   try {
-    if (subView?.setBrushColor) {
-      subView.setBrushColor(color)
-      return
+    const ok = zegoSuperBoard.value.setBrushColor?.(color)
+    if (ok === false) {
+      ElMessage.warning('当前白板不支持颜色设置')
     }
   } catch (e) {}
-
-  try {
-    if (boardView?.setBrushColor) {
-      boardView.setBrushColor(color)
-      return
-    }
-  } catch (e) {}
-
-  ElMessage.warning('当前白板不支持颜色设置')
 }
 
 const clearWb = () => {
@@ -1870,14 +1838,6 @@ const clearWb = () => {
     return
   }
   const subView = currentSuperBoardView.value
-  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
-
-  try {
-    if (subView?.clear) {
-      subView.clear()
-      return
-    }
-  } catch (e) {}
 
   try {
     if (subView?.clearCurrentPage) {
@@ -1887,8 +1847,8 @@ const clearWb = () => {
   } catch (e) {}
 
   try {
-    if (boardView?.clearCurrentPage) {
-      boardView.clearCurrentPage()
+    if (subView?.clearAllPage) {
+      subView.clearAllPage()
       return
     }
   } catch (e) {}
