@@ -482,6 +482,8 @@ const currentRoomLoginRoomID = ref('')
 const currentRoomLoginUserID = ref('')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
+const audiencePlayRetryTimer = ref(null)
+const audiencePlayRetryCount = ref(0)
 const whiteboardLayoutRefreshTimer = ref(null)
 const audienceWhiteboardRetryTimer = ref(null)
 const audienceWhiteboardSyncing = ref(false)
@@ -1471,7 +1473,11 @@ const refreshWhiteboardLayout = async () => {
   await waitForNextPaint()
 
   const activeSubView = currentSuperBoardView.value || (refreshCurrentSuperBoardView() ? currentSuperBoardView.value : null)
-  activeSubView?.reloadView?.()
+  try {
+    await Promise.resolve(activeSubView?.reloadView?.())
+  } catch (err) {
+    console.warn('[LivePush] whiteboard reload skipped:', parseErrorMessage(err))
+  }
 }
 
 const scheduleWhiteboardLayoutRefresh = () => {
@@ -1626,7 +1632,10 @@ const initZego = async () => {
           const teacherStreamPrefix = `teacher_${roomId}`
           const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
           if (!audienceMainStreamID.value && isTeacherStream) {
-            await playAudienceStream(stream.streamID, { silent: true })
+            const started = await playAudienceStream(stream.streamID, { silent: true })
+            if (!started) {
+              scheduleAudienceMainStreamRetry('room_stream_add', 800)
+            }
             scheduleAudienceWhiteboardSync('teacher_stream_add', 800)
             continue
           }
@@ -1659,7 +1668,10 @@ const initZego = async () => {
           if (localVideoRef.value) {
             localVideoRef.value.innerHTML = ''
           }
-          await playAudienceMainStream()
+          const restarted = await playAudienceMainStream()
+          if (!restarted) {
+            scheduleAudienceMainStreamRetry('focused_stream_removed', 1000)
+          }
           continue
         }
         zg.value.stopPlayingStream(stream.streamID)
@@ -1691,7 +1703,11 @@ const initZego = async () => {
             ElMessage.info(`${msg.fromUser.userName} 申请连麦`)
           }
         } else if (data.type === 'stream_focus' && !canPublishLive.value && data.streamID) {
-          playAudienceStream(String(data.streamID), { silent: true })
+          playAudienceStream(String(data.streamID), { silent: true }).then((ok) => {
+            if (!ok) {
+              scheduleAudienceMainStreamRetry('stream_focus', 700)
+            }
+          })
           scheduleAudienceWhiteboardSync('stream_focus', 600)
         }
       } catch (e) {}
@@ -1771,6 +1787,39 @@ const playAudienceStream = async (streamID, options = {}) => {
 
 const playAudienceMainStream = async () => {
   return playAudienceStream(`teacher_${roomId}`)
+}
+
+const clearAudiencePlayRetryTimer = () => {
+  if (audiencePlayRetryTimer.value) {
+    clearTimeout(audiencePlayRetryTimer.value)
+    audiencePlayRetryTimer.value = null
+  }
+  audiencePlayRetryCount.value = 0
+}
+
+const scheduleAudienceMainStreamRetry = (reason = 'unknown', delayMs = 1200) => {
+  if (canPublishLive.value || !isLiving.value) return
+  if (audienceMainStreamID.value) return
+  if (audiencePlayRetryCount.value >= 20) return
+
+  if (audiencePlayRetryTimer.value) {
+    clearTimeout(audiencePlayRetryTimer.value)
+  }
+
+  audiencePlayRetryTimer.value = setTimeout(async () => {
+    audiencePlayRetryTimer.value = null
+    if (canPublishLive.value || !isLiving.value || audienceMainStreamID.value) return
+    audiencePlayRetryCount.value += 1
+    const started = await playAudienceMainStream()
+    if (!started) {
+      console.warn('[LivePush] audience stream retry failed', {
+        reason,
+        retry: audiencePlayRetryCount.value,
+        target: `teacher_${roomId}`
+      })
+      scheduleAudienceMainStreamRetry(reason, 1400)
+    }
+  }, Math.max(200, Number(delayMs) || 0))
 }
 
 const clearAudienceWhiteboardRetryTimer = () => {
@@ -1925,6 +1974,11 @@ const startAudienceSession = async (authInfo) => {
     scheduleAudienceWhiteboardSync('audience_session_start', 1500)
   }
   scheduleAudienceWhiteboardSync('audience_after_play', 1000)
+  if (!audienceMainStreamID.value) {
+    scheduleAudienceMainStreamRetry('audience_session_start', 900)
+  } else {
+    clearAudiencePlayRetryTimer()
+  }
   ElMessage.success('已进入听课房间')
 }
 
@@ -2033,6 +2087,7 @@ const handleStartLive = async () => {
 }
 
 const teardownSessionWithoutEndingLive = async () => {
+  clearAudiencePlayRetryTimer()
   const streamID = 'teacher_' + roomId
   try {
     if (canPublishLive.value) {
@@ -3268,6 +3323,7 @@ onBeforeUnmount(() => {
   }
   clearAudienceWhiteboardRetryTimer()
   clearAudienceRoomStatusRetryTimer()
+  clearAudiencePlayRetryTimer()
   audienceWhiteboardSyncing.value = false
   cameraPreviewTiles.value.forEach((tile) => {
     if (tile.isPublishing) {
