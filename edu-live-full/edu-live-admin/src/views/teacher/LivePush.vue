@@ -121,15 +121,84 @@
         <!-- 白板区域 -->
         <div class="whiteboard-container" :class="{ fullscreen: isWhiteboardFull }">
           <div class="wb-toolbar">
-            <el-button-group>
-              <el-button size="small" @click="setWbTool('selector')">选择</el-button>
-              <el-button size="small" @click="setWbTool('pen')">画笔</el-button>
-              <el-button size="small" @click="setWbTool('text')">文字</el-button>
-              <el-button size="small" @click="setWbTool('eraser')">橡皮</el-button>
+            <el-button-group v-if="!wbClassProtectMode">
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'selector' ? 'primary' : 'default'" @click="setWbTool('selector')">选择</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'scroll' ? 'primary' : 'default'" @click="setWbOperationMode('scroll')">拖拽</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'pen' ? 'primary' : 'default'" @click="setWbTool('pen')">画笔</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'text' ? 'primary' : 'default'" @click="setWbTool('text')">文字</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'line' ? 'primary' : 'default'" @click="setWbTool('line')">直线</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'rect' ? 'primary' : 'default'" @click="setWbTool('rect')">矩形</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'ellipse' ? 'primary' : 'default'" @click="setWbTool('ellipse')">椭圆</el-button>
+              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'eraser' ? 'primary' : 'default'" @click="setWbTool('eraser')">橡皮</el-button>
             </el-button-group>
-            <el-color-picker v-model="wbColor" size="small" @change="setWbColor" />
-            <el-button size="small" @click="clearWb">清空</el-button>
-            <el-button size="small" type="primary" :disabled="!isLiving" @click="uploadPPT">上传 PPT</el-button>
+            <el-select
+              v-if="!wbClassProtectMode"
+              v-model="wbPreset"
+              :disabled="wbToolbarLocked"
+              size="small"
+              style="width: 114px"
+              @change="applyWbPreset"
+            >
+              <el-option label="板书预设" value="blackboard" />
+              <el-option label="批注预设" value="annotation" />
+              <el-option label="几何预设" value="geometry" />
+            </el-select>
+            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="switchWbPrevTool">上一工具(Tab)</el-button>
+            <el-button v-if="!wbClassProtectMode" size="small" @click="toggleWbToolbarCompact">{{ wbToolbarCompact ? '展开工具' : '精简工具' }}</el-button>
+            <el-button size="small" @click="toggleWbToolbarLock">{{ wbToolbarLocked ? '解锁工具' : '锁定工具' }}</el-button>
+            <el-button size="small" @click="toggleWbClassProtectMode">{{ wbClassProtectMode ? '退出课堂保护' : '课堂保护' }}</el-button>
+            <el-color-picker v-if="!wbClassProtectMode && !wbToolbarCompact" v-model="wbColor" size="small" :disabled="wbToolbarLocked" @change="setWbColor" />
+            <el-select
+              v-if="!wbClassProtectMode && !wbToolbarCompact"
+              v-model="wbBrushSize"
+              :disabled="wbToolbarLocked"
+              size="small"
+              style="width: 96px"
+              @change="setWbBrushSize"
+            >
+              <el-option v-for="size in wbBrushSizeOptions" :key="size" :label="`${size}px`" :value="size" />
+            </el-select>
+            <el-select
+              v-if="!wbClassProtectMode && !wbToolbarCompact"
+              v-model="wbLineStyle"
+              :disabled="wbToolbarLocked"
+              size="small"
+              style="width: 88px"
+              @change="setWbLineStyle"
+            >
+              <el-option label="实线" value="solid" />
+              <el-option label="虚线" value="dashed" />
+            </el-select>
+            <el-switch
+              v-if="!wbClassProtectMode && !wbToolbarCompact"
+              v-model="wbShapeFilled"
+              :disabled="wbToolbarLocked"
+              size="small"
+              inline-prompt
+              active-text="填充"
+              inactive-text="空心"
+              @change="setWbShapeFilled"
+            />
+            <el-select
+              v-if="!wbClassProtectMode && !wbToolbarCompact"
+              v-model="wbAlpha"
+              :disabled="wbToolbarLocked"
+              size="small"
+              style="width: 92px"
+              @change="setWbAlpha"
+            >
+              <el-option
+                v-for="alpha in wbAlphaOptions"
+                :key="alpha"
+                :label="`透明${100 - alpha}%`"
+                :value="alpha"
+              />
+            </el-select>
+            <el-button size="small" :disabled="wbToolbarLocked" @click="undoWb">撤销</el-button>
+            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="redoWb">重做</el-button>
+            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="clearWb">清空</el-button>
+            <span class="wb-shortcut-tip">快捷键: G课堂保护 | Tab上一工具 | K锁定 | M精简 | V/P/T/L/R/O/E/H | 空格按住拖拽 | Ctrl+Z/Y | [ / ]</span>
+            <el-button v-if="!wbClassProtectMode" size="small" type="primary" :disabled="!isLiving" @click="uploadPPT">上传 PPT</el-button>
             <el-button size="small" @click="prevPage" :disabled="currentPage <= 1">上一页</el-button>
             <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
             <el-button size="small" @click="nextPage" :disabled="currentPage >= totalPage">下一页</el-button>
@@ -344,6 +413,21 @@ const zegoSuperBoard = ref(null)
 const currentSuperBoardView = ref(null)
 const isWhiteboardFull = ref(false)
 const wbColor = ref('#000000')
+const wbBrushSize = ref(6)
+const wbBrushSizeOptions = [2, 4, 6, 8, 10, 12, 16, 20]
+const wbLineStyle = ref('solid')
+const wbShapeFilled = ref(false)
+const wbAlpha = ref(100)
+const wbAlphaOptions = [100, 90, 80, 70, 60, 50, 40, 30, 20]
+const wbPreset = ref('blackboard')
+const wbActiveTool = ref('pen')
+const wbPrevTool = ref('selector')
+const wbOperationMode = ref('draw')
+const wbHotkeyPanActive = ref(false)
+const wbOperationModeBeforePan = ref('draw')
+const wbToolbarCompact = ref(false)
+const wbToolbarLocked = ref(false)
+const wbClassProtectMode = ref(false)
 const currentPage = ref(1)
 const totalPage = ref(1)
 const whiteboardReady = ref(false)
@@ -1788,6 +1872,10 @@ const ensureWhiteboardReadyForUpload = async () => {
 }
 
 const setWbTool = (tool) => {
+  if (wbToolbarLocked.value || wbClassProtectMode.value) {
+    ElMessage.warning('工具栏已锁定，按 K 可解锁')
+    return
+  }
   if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
     ElMessage.warning('白板未就绪')
     return
@@ -1797,6 +1885,9 @@ const setWbTool = (tool) => {
   const fallbackToolEnum = {
     Pen: 1,
     Text: 2,
+    Line: 4,
+    Rect: 8,
+    Ellipse: 16,
     Selector: 32,
     Eraser: 64
   }
@@ -1804,6 +1895,9 @@ const setWbTool = (tool) => {
     selector: Number.isFinite(toolEnum.Selector) ? toolEnum.Selector : fallbackToolEnum.Selector,
     pen: Number.isFinite(toolEnum.Pen) ? toolEnum.Pen : fallbackToolEnum.Pen,
     text: Number.isFinite(toolEnum.Text) ? toolEnum.Text : fallbackToolEnum.Text,
+    line: Number.isFinite(toolEnum.Line) ? toolEnum.Line : fallbackToolEnum.Line,
+    rect: Number.isFinite(toolEnum.Rect) ? toolEnum.Rect : fallbackToolEnum.Rect,
+    ellipse: Number.isFinite(toolEnum.Ellipse) ? toolEnum.Ellipse : fallbackToolEnum.Ellipse,
     eraser: Number.isFinite(toolEnum.Eraser) ? toolEnum.Eraser : fallbackToolEnum.Eraser
   }
   const targetTool = Number.isFinite(toolMap[tool]) ? toolMap[tool] : null
@@ -1817,16 +1911,252 @@ const setWbTool = (tool) => {
     const modeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardOperationMode || {}
     const drawMode = Number.isFinite(modeEnum.Draw) ? modeEnum.Draw : 4
     zegoSuperBoard.value.setOperationMode?.(drawMode)
+    wbOperationMode.value = 'draw'
     const ok = zegoSuperBoard.value.setToolType?.(targetTool)
     if (ok === false) {
       ElMessage.warning('当前白板不支持该工具')
+    } else {
+      if (tool !== wbActiveTool.value) {
+        wbPrevTool.value = wbActiveTool.value
+      }
+      wbActiveTool.value = tool
+      // 工具变化后重应用绘图风格，保证图形工具参数不丢失。
+      applyWbDrawStyle({ silent: true })
     }
   } catch (e) {
     ElMessage.warning('当前白板不支持该工具')
   }
 }
 
+const trySetWbProperty = (candidates) => {
+  const board = zegoSuperBoard.value
+  if (!board) return null
+  let hadMethod = false
+  for (const item of candidates) {
+    const method = board?.[item.name]
+    if (typeof method !== 'function') continue
+    hadMethod = true
+    try {
+      const result = method.call(board, ...(item.args || []))
+      if (result !== false) return true
+    } catch (e) {}
+  }
+  return hadMethod ? false : null
+}
+
+const setWbLineStyle = (style, options = {}) => {
+  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
+    if (!options.silent) ElMessage.warning('当前模式不允许修改线型')
+    return
+  }
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
+    if (!options.silent) ElMessage.warning('白板未就绪')
+    return
+  }
+
+  const normalizedStyle = style === 'dashed' ? 'dashed' : 'solid'
+  wbLineStyle.value = normalizedStyle
+  const lineStyleEnum = ZegoSuperBoardWeb?.ZegoSuperBoardLineStyle || {}
+  const enumValue = normalizedStyle === 'dashed'
+    ? [lineStyleEnum.Dash, lineStyleEnum.Dashed].find((value) => Number.isFinite(value))
+    : lineStyleEnum.Solid
+
+  const result = trySetWbProperty([
+    { name: 'setLineStyle', args: [enumValue] },
+    { name: 'setLineStyle', args: [normalizedStyle] },
+    { name: 'setBrushLineStyle', args: [enumValue] },
+    { name: 'setBrushLineStyle', args: [normalizedStyle] },
+    { name: 'setPenLineStyle', args: [enumValue] },
+    { name: 'setPenLineStyle', args: [normalizedStyle] },
+    { name: 'setBrushDashed', args: [normalizedStyle === 'dashed'] },
+    { name: 'setDashed', args: [normalizedStyle === 'dashed'] }
+  ])
+
+  if (result === false && !options.silent) {
+    ElMessage.warning('当前白板不支持线型设置')
+  }
+}
+
+const setWbShapeFilled = (filled, options = {}) => {
+  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
+    if (!options.silent) ElMessage.warning('当前模式不允许修改填充')
+    return
+  }
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
+    if (!options.silent) ElMessage.warning('白板未就绪')
+    return
+  }
+
+  const normalizedFilled = !!filled
+  wbShapeFilled.value = normalizedFilled
+  const fillModeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardFillMode || {}
+  const enumValue = normalizedFilled
+    ? [fillModeEnum.Fill, fillModeEnum.Filled].find((value) => Number.isFinite(value))
+    : [fillModeEnum.Hollow, fillModeEnum.Stroke].find((value) => Number.isFinite(value))
+
+  const result = trySetWbProperty([
+    { name: 'setFillMode', args: [enumValue] },
+    { name: 'setShapeFillMode', args: [enumValue] },
+    { name: 'setShapeFilled', args: [normalizedFilled] },
+    { name: 'setGraphicFilled', args: [normalizedFilled] },
+    { name: 'setBrushFilled', args: [normalizedFilled] }
+  ])
+
+  if (result === false && !options.silent) {
+    ElMessage.warning('当前白板不支持填充设置')
+  }
+}
+
+const setWbAlpha = (alpha, options = {}) => {
+  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
+    if (!options.silent) ElMessage.warning('当前模式不允许修改透明度')
+    return
+  }
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
+    if (!options.silent) ElMessage.warning('白板未就绪')
+    return
+  }
+
+  const normalizedAlpha = Math.max(1, Math.min(100, Number(alpha) || 100))
+  wbAlpha.value = normalizedAlpha
+  const alphaRate = normalizedAlpha / 100
+
+  const result = trySetWbProperty([
+    { name: 'setBrushAlpha', args: [alphaRate] },
+    { name: 'setBrushAlpha', args: [normalizedAlpha] },
+    { name: 'setBrushOpacity', args: [alphaRate] },
+    { name: 'setBrushOpacity', args: [normalizedAlpha] },
+    { name: 'setPenAlpha', args: [alphaRate] },
+    { name: 'setPenAlpha', args: [normalizedAlpha] },
+    { name: 'setPenOpacity', args: [alphaRate] },
+    { name: 'setPenOpacity', args: [normalizedAlpha] },
+    { name: 'setGraphicAlpha', args: [alphaRate] },
+    { name: 'setGraphicOpacity', args: [alphaRate] }
+  ])
+
+  if (result === false && !options.silent) {
+    ElMessage.warning('当前白板不支持透明度设置')
+  }
+}
+
+const applyWbDrawStyle = (options = {}) => {
+  setWbLineStyle(wbLineStyle.value, options)
+  setWbShapeFilled(wbShapeFilled.value, options)
+  setWbAlpha(wbAlpha.value, options)
+}
+
+const applyWbPreset = (preset, options = {}) => {
+  const normalizedPreset = ['blackboard', 'annotation', 'geometry'].includes(preset) ? preset : 'blackboard'
+  wbPreset.value = normalizedPreset
+
+  const presetMap = {
+    blackboard: {
+      tool: 'pen',
+      color: '#ffffff',
+      size: 8,
+      lineStyle: 'solid',
+      filled: false,
+      alpha: 100
+    },
+    annotation: {
+      tool: 'pen',
+      color: '#ff4d4f',
+      size: 6,
+      lineStyle: 'solid',
+      filled: false,
+      alpha: 80
+    },
+    geometry: {
+      tool: 'line',
+      color: '#1890ff',
+      size: 4,
+      lineStyle: 'solid',
+      filled: false,
+      alpha: 100
+    }
+  }
+
+  const config = presetMap[normalizedPreset]
+  wbColor.value = config.color
+  wbBrushSize.value = config.size
+  wbLineStyle.value = config.lineStyle
+  wbShapeFilled.value = config.filled
+  wbAlpha.value = config.alpha
+
+  if (wbClassProtectMode.value || wbToolbarLocked.value) {
+    return
+  }
+
+  setWbColor(config.color)
+  setWbBrushSize(config.size)
+  setWbLineStyle(config.lineStyle, { silent: true, force: true })
+  setWbShapeFilled(config.filled, { silent: true, force: true })
+  setWbAlpha(config.alpha, { silent: true, force: true })
+  if (!options.keepTool) {
+    setWbTool(config.tool)
+  }
+}
+
+const setWbOperationMode = (mode, options = {}) => {
+  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
+    if (!options.silent) ElMessage.warning('工具栏已锁定，按 K 可解锁')
+    return
+  }
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
+    if (!options.silent) ElMessage.warning('白板未就绪')
+    return
+  }
+  const modeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardOperationMode || {}
+  const modeMap = {
+    none: Number.isFinite(modeEnum.None) ? modeEnum.None : 1,
+    scroll: Number.isFinite(modeEnum.Scroll) ? modeEnum.Scroll : 2,
+    draw: Number.isFinite(modeEnum.Draw) ? modeEnum.Draw : 4,
+    zoom: Number.isFinite(modeEnum.Zoom) ? modeEnum.Zoom : 8
+  }
+  const targetMode = modeMap[mode]
+  if (!Number.isFinite(targetMode)) return
+  try {
+    zegoSuperBoard.value.setOperationMode?.(targetMode)
+    wbOperationMode.value = mode
+  } catch (e) {}
+}
+
+const switchWbPrevTool = () => {
+  const previousTool = wbPrevTool.value || 'selector'
+  if (previousTool === wbActiveTool.value) return
+  setWbTool(previousTool)
+}
+
+const toggleWbToolbarCompact = () => {
+  wbToolbarCompact.value = !wbToolbarCompact.value
+}
+
+const toggleWbToolbarLock = () => {
+  wbToolbarLocked.value = !wbToolbarLocked.value
+  if (wbToolbarLocked.value) {
+    ElMessage.info('白板工具栏已锁定（按 K 可解锁）')
+  } else {
+    ElMessage.success('白板工具栏已解锁')
+  }
+}
+
+const toggleWbClassProtectMode = () => {
+  wbClassProtectMode.value = !wbClassProtectMode.value
+  if (wbClassProtectMode.value) {
+    wbToolbarLocked.value = true
+    wbToolbarCompact.value = true
+    ElMessage.info('已进入课堂保护模式（按 G 可退出）')
+  } else {
+    wbToolbarLocked.value = false
+    ElMessage.success('已退出课堂保护模式')
+  }
+}
+
 const setWbColor = (color) => {
+  if (wbToolbarLocked.value || wbClassProtectMode.value) {
+    ElMessage.warning('当前模式不允许修改颜色')
+    return
+  }
   if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
     ElMessage.warning('白板未就绪')
     return
@@ -1838,6 +2168,185 @@ const setWbColor = (color) => {
       ElMessage.warning('当前白板不支持颜色设置')
     }
   } catch (e) {}
+}
+
+const setWbBrushSize = (size) => {
+  if (wbToolbarLocked.value || wbClassProtectMode.value) {
+    ElMessage.warning('当前模式不允许修改线宽')
+    return
+  }
+  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+  const target = Number(size)
+  if (!Number.isFinite(target) || target <= 0) return
+  wbBrushSize.value = target
+  try {
+    const ok = zegoSuperBoard.value.setBrushSize?.(target)
+    if (ok === false) {
+      ElMessage.warning('当前白板不支持线宽设置')
+    }
+  } catch (e) {}
+}
+
+const undoWb = () => {
+  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+  try {
+    currentSuperBoardView.value?.undo?.()
+  } catch (e) {
+    ElMessage.warning('当前白板不支持撤销')
+  }
+}
+
+const redoWb = () => {
+  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+  try {
+    currentSuperBoardView.value?.redo?.()
+  } catch (e) {
+    ElMessage.warning('当前白板不支持重做')
+  }
+}
+
+const handleWbShortcutKeydown = (event) => {
+  const target = event.target
+  const tagName = String(target?.tagName || '').toLowerCase()
+  const editable = !!target?.isContentEditable || ['input', 'textarea', 'select'].includes(tagName)
+  if (editable) return
+
+  const key = String(event.key || '').toLowerCase()
+  const ctrlOrMeta = event.ctrlKey || event.metaKey
+
+  if (!ctrlOrMeta && !event.altKey && key === 'k') {
+    event.preventDefault()
+    toggleWbToolbarLock()
+    return
+  }
+
+  if (!ctrlOrMeta && !event.altKey && key === 'm') {
+    event.preventDefault()
+    toggleWbToolbarCompact()
+    return
+  }
+
+  if (!ctrlOrMeta && !event.altKey && key === 'g') {
+    event.preventDefault()
+    toggleWbClassProtectMode()
+    return
+  }
+
+  if (wbClassProtectMode.value) {
+    if (ctrlOrMeta && key === 'z') {
+      event.preventDefault()
+      undoWb()
+      return
+    }
+    return
+  }
+
+  if (wbToolbarLocked.value) {
+    return
+  }
+
+  if (!ctrlOrMeta && !event.altKey && key === ' ') {
+    event.preventDefault()
+    if (!wbHotkeyPanActive.value && !event.repeat) {
+      wbOperationModeBeforePan.value = wbOperationMode.value
+      wbHotkeyPanActive.value = true
+      setWbOperationMode('scroll', { silent: true, force: true })
+    }
+    return
+  }
+
+  if (!ctrlOrMeta && !event.altKey && key === 'tab') {
+    event.preventDefault()
+    switchWbPrevTool()
+    return
+  }
+
+  if (ctrlOrMeta && key === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) {
+      redoWb()
+    } else {
+      undoWb()
+    }
+    return
+  }
+
+  if (ctrlOrMeta && key === 'y') {
+    event.preventDefault()
+    redoWb()
+    return
+  }
+
+  if (ctrlOrMeta || event.altKey) {
+    return
+  }
+
+  const toolHotkeyMap = {
+    v: 'selector',
+    p: 'pen',
+    b: 'pen',
+    t: 'text',
+    l: 'line',
+    r: 'rect',
+    o: 'ellipse',
+    e: 'eraser'
+  }
+
+  const targetTool = toolHotkeyMap[key]
+  if (targetTool) {
+    event.preventDefault()
+    setWbTool(targetTool)
+    return
+  }
+
+  if (key === 'h') {
+    event.preventDefault()
+    setWbOperationMode('scroll')
+    return
+  }
+
+  if (key === 'f') {
+    event.preventDefault()
+    setWbShapeFilled(!wbShapeFilled.value)
+    return
+  }
+
+  if (key === 'd') {
+    event.preventDefault()
+    setWbLineStyle(wbLineStyle.value === 'solid' ? 'dashed' : 'solid')
+    return
+  }
+
+  if (key === '[' || key === ']') {
+    const currentIndex = wbBrushSizeOptions.indexOf(wbBrushSize.value)
+    const safeIndex = currentIndex < 0 ? wbBrushSizeOptions.indexOf(6) : currentIndex
+    const nextIndex = key === '['
+      ? Math.max(0, safeIndex - 1)
+      : Math.min(wbBrushSizeOptions.length - 1, safeIndex + 1)
+    const nextSize = wbBrushSizeOptions[nextIndex]
+    if (nextSize !== wbBrushSize.value) {
+      event.preventDefault()
+      setWbBrushSize(nextSize)
+    }
+  }
+}
+
+const handleWbShortcutKeyup = (event) => {
+  const key = String(event.key || '').toLowerCase()
+  if (key !== ' ') return
+  if (!wbHotkeyPanActive.value) return
+  event.preventDefault()
+  wbHotkeyPanActive.value = false
+  setWbOperationMode(wbOperationModeBeforePan.value || 'draw', { silent: true, force: true })
 }
 
 const clearWb = () => {
@@ -2128,6 +2637,8 @@ onMounted(async () => {
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
   document.addEventListener('mousemove', handlePanelMouseMove)
   document.addEventListener('mouseup', handlePanelMouseUp)
+  document.addEventListener('keydown', handleWbShortcutKeydown)
+  document.addEventListener('keyup', handleWbShortcutKeyup)
 })
 
 onBeforeUnmount(() => {
@@ -2148,6 +2659,8 @@ onBeforeUnmount(() => {
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
   document.removeEventListener('mousemove', handlePanelMouseMove)
   document.removeEventListener('mouseup', handlePanelMouseUp)
+  document.removeEventListener('keydown', handleWbShortcutKeydown)
+  document.removeEventListener('keyup', handleWbShortcutKeyup)
   if (isLiving.value) {
     confirmEndLive()
   }
@@ -2376,6 +2889,12 @@ onBeforeUnmount(() => {
     text-overflow: ellipsis;
     font-size: 12px;
     color: #666;
+  }
+
+  .wb-shortcut-tip {
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
   }
 }
 
