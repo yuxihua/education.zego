@@ -311,6 +311,7 @@ import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
+import * as ZegoSuperBoardWeb from 'zego-superboard-web'
 import { ZegoSuperBoardManager } from 'zego-superboard-web'
 import { getLiveRoomDetail, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
@@ -1787,19 +1788,112 @@ const ensureWhiteboardReadyForUpload = async () => {
 }
 
 const setWbTool = (tool) => {
-  if (!currentSuperBoardView.value) return
-  const toolMap = { selector: 0, pen: 1, text: 2, eraser: 4 }
-  currentSuperBoardView.value.setToolType(toolMap[tool] || 0)
+  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+
+  const subView = currentSuperBoardView.value
+  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+  const runtimeEnum =
+    ZegoSuperBoardWeb?.ZegoSuperBoardSubViewToolType ||
+    ZegoSuperBoardWeb?.ZegoSuperBoardToolType ||
+    null
+
+  const fallbackToolCandidates = {
+    selector: [1, 0],
+    pen: [2, 1],
+    text: [4, 3, 2],
+    eraser: [8, 5, 4]
+  }
+
+  const enumToolCandidates = runtimeEnum
+    ? {
+        selector: [runtimeEnum.SELECTOR, runtimeEnum.SELECT, runtimeEnum.NONE],
+        pen: [runtimeEnum.PEN],
+        text: [runtimeEnum.TEXT],
+        eraser: [runtimeEnum.ERASER]
+      }
+    : {}
+
+  const candidates = [
+    ...(enumToolCandidates[tool] || []),
+    ...(fallbackToolCandidates[tool] || [])
+  ].filter((value) => typeof value === 'number' && Number.isFinite(value))
+
+  for (const value of candidates) {
+    try {
+      if (subView?.setToolType) {
+        subView.setToolType(value)
+        return
+      }
+    } catch (e) {}
+    try {
+      if (boardView?.setToolType) {
+        boardView.setToolType(value)
+        return
+      }
+    } catch (e) {}
+  }
+
+  ElMessage.warning('当前白板不支持该工具')
 }
 
 const setWbColor = (color) => {
-  if (!currentSuperBoardView.value) return
-  currentSuperBoardView.value.setBrushColor(color)
+  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+  const subView = currentSuperBoardView.value
+  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+
+  try {
+    if (subView?.setBrushColor) {
+      subView.setBrushColor(color)
+      return
+    }
+  } catch (e) {}
+
+  try {
+    if (boardView?.setBrushColor) {
+      boardView.setBrushColor(color)
+      return
+    }
+  } catch (e) {}
+
+  ElMessage.warning('当前白板不支持颜色设置')
 }
 
 const clearWb = () => {
-  if (!currentSuperBoardView.value) return
-  currentSuperBoardView.value.clear()
+  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
+    ElMessage.warning('白板未就绪')
+    return
+  }
+  const subView = currentSuperBoardView.value
+  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+
+  try {
+    if (subView?.clear) {
+      subView.clear()
+      return
+    }
+  } catch (e) {}
+
+  try {
+    if (subView?.clearCurrentPage) {
+      subView.clearCurrentPage()
+      return
+    }
+  } catch (e) {}
+
+  try {
+    if (boardView?.clearCurrentPage) {
+      boardView.clearCurrentPage()
+      return
+    }
+  } catch (e) {}
+
+  ElMessage.warning('当前白板不支持清空操作')
 }
 
 const uploadPPT = async () => {
