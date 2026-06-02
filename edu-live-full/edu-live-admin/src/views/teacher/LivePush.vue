@@ -477,6 +477,8 @@ const roomState = ref('DISCONNECTED')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
 const whiteboardLayoutRefreshTimer = ref(null)
+const audienceWhiteboardRetryTimer = ref(null)
+const audienceWhiteboardSyncing = ref(false)
 const workspaceRef = ref(null)
 const leftPanelRef = ref(null)
 const videoContainerRef = ref(null)
@@ -545,6 +547,23 @@ const renderPreviewStream = async (container, stream) => {
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
   videoEl.muted = true
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'cover'
+  container.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
+}
+
+const renderRemoteStream = async (container, stream) => {
+  if (!container || !stream) return
+  container.innerHTML = ''
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = false
   videoEl.playsInline = true
   videoEl.srcObject = stream
   videoEl.style.width = '100%'
@@ -1541,9 +1560,19 @@ const initZego = async () => {
   zg.value.on('roomStreamUpdate', async (roomID, updateType, streamList) => {
     if (updateType === 'ADD') {
       for (const stream of streamList) {
-        if (!canPublishLive.value && stream.streamID === `teacher_${roomId}`) {
-          await playAudienceMainStream()
-          continue
+        if (!canPublishLive.value) {
+          const teacherStreamPrefix = `teacher_${roomId}`
+          const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
+          if (!audienceMainStreamID.value && isTeacherStream) {
+            await playAudienceStream(stream.streamID, { silent: true })
+            scheduleAudienceWhiteboardSync('teacher_stream_add', 800)
+            continue
+          }
+          if (audienceMainStreamID.value && stream.streamID === audienceMainStreamID.value) {
+            await playAudienceStream(stream.streamID, { silent: true })
+            scheduleAudienceWhiteboardSync('focused_stream_readd', 800)
+            continue
+          }
         }
         if (!stream.streamID.includes('screen')) {
           coHostStreams.value.push({
@@ -1560,6 +1589,17 @@ const initZego = async () => {
       }
     } else {
       for (const stream of streamList) {
+        if (!canPublishLive.value && audienceMainStreamID.value && stream.streamID === audienceMainStreamID.value) {
+          try {
+            zg.value.stopPlayingStream(stream.streamID)
+          } catch (e) {}
+          audienceMainStreamID.value = ''
+          if (localVideoRef.value) {
+            localVideoRef.value.innerHTML = ''
+          }
+          await playAudienceMainStream()
+          continue
+        }
         zg.value.stopPlayingStream(stream.streamID)
         coHostStreams.value = coHostStreams.value.filter(s => s.streamID !== stream.streamID)
       }
@@ -1588,6 +1628,9 @@ const initZego = async () => {
             })
             ElMessage.info(`${msg.fromUser.userName} 申请连麦`)
           }
+        } else if (data.type === 'stream_focus' && !canPublishLive.value && data.streamID) {
+          playAudienceStream(String(data.streamID), { silent: true })
+          scheduleAudienceWhiteboardSync('stream_focus', 600)
         }
       } catch (e) {}
     })
@@ -1616,23 +1659,91 @@ const getZegoAuth = async () => {
   return authInfo
 }
 
-const playAudienceMainStream = async () => {
-  if (!zg.value || !localVideoRef.value) return
-  const streamID = `teacher_${roomId}`
+const playAudienceStream = async (streamID, options = {}) => {
+  if (!zg.value || !localVideoRef.value || !streamID) return false
+  const { silent = false } = options
   try {
-    if (audienceMainStreamID.value && audienceMainStreamID.value !== streamID) {
+    if (audienceMainStreamID.value) {
       try {
         zg.value.stopPlayingStream(audienceMainStreamID.value)
       } catch (e) {}
+      audienceMainStreamID.value = ''
     }
-    await zg.value.startPlayingStream(streamID, {
-      video: localVideoRef.value,
-      audio: true
-    })
+
+    let started = false
+    try {
+      await zg.value.startPlayingStream(streamID, {
+        video: localVideoRef.value,
+        audio: true
+      })
+      started = true
+    } catch (bindErr) {
+      const remoteStream = await zg.value.startPlayingStream(streamID)
+      await renderRemoteStream(localVideoRef.value, remoteStream)
+      started = true
+    }
+
+    if (!started) {
+      throw new Error('播放老师画面失败')
+    }
+
     audienceMainStreamID.value = streamID
+    return true
   } catch (e) {
-    ElMessage.info('已进入房间，等待老师开始推流...')
+    if (!silent) {
+      ElMessage.info('已进入房间，等待老师开始推流...')
+    }
+    return false
   }
+}
+
+const playAudienceMainStream = async () => {
+  return playAudienceStream(`teacher_${roomId}`)
+}
+
+const clearAudienceWhiteboardRetryTimer = () => {
+  if (audienceWhiteboardRetryTimer.value) {
+    clearTimeout(audienceWhiteboardRetryTimer.value)
+    audienceWhiteboardRetryTimer.value = null
+  }
+}
+
+const shouldSyncAudienceWhiteboard = () => {
+  return !canPublishLive.value && isLiving.value && !!zg.value && !!zegoRoomID.value
+}
+
+const scheduleAudienceWhiteboardSync = (reason = 'unknown', delayMs = 4000) => {
+  if (!shouldSyncAudienceWhiteboard()) return
+  if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
+
+  if (audienceWhiteboardRetryTimer.value) {
+    clearTimeout(audienceWhiteboardRetryTimer.value)
+  }
+
+  audienceWhiteboardRetryTimer.value = setTimeout(async () => {
+    audienceWhiteboardRetryTimer.value = null
+    if (!shouldSyncAudienceWhiteboard() || audienceWhiteboardSyncing.value) return
+    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
+
+    audienceWhiteboardSyncing.value = true
+    try {
+      const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
+      const token = authInfo?.token
+      const userID = authInfo?.userId
+      const userName = authInfo?.userName
+      if (!token || !userID) {
+        throw new Error('白板鉴权信息缺失')
+      }
+
+      await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
+      wbStageText.value = '白板已同步'
+    } catch (err) {
+      wbStageText.value = '等待老师共享白板...'
+      scheduleAudienceWhiteboardSync(reason, 4500)
+    } finally {
+      audienceWhiteboardSyncing.value = false
+    }
+  }, Math.max(300, Number(delayMs) || 0))
 }
 
 const startAudienceSession = async (authInfo) => {
@@ -1652,10 +1763,15 @@ const startAudienceSession = async (authInfo) => {
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
   try {
-    await initWhiteboard(zegoRoomID.value, token, userID, userName)
-  } catch (err) {}
+    await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
+    wbStageText.value = '白板已同步'
+  } catch (err) {
+    wbStageText.value = '等待老师共享白板...'
+    scheduleAudienceWhiteboardSync('audience_session_start', 1500)
+  }
   await playAudienceMainStream()
   isLiving.value = true
+  scheduleAudienceWhiteboardSync('audience_after_play', 1000)
   ElMessage.success('已进入听课房间')
 }
 
@@ -1871,6 +1987,8 @@ const confirmEndLive = async () => {
     whiteboardReady.value = false
     currentSuperBoardView.value = null
     liveIdentity.value = null
+    clearAudienceWhiteboardRetryTimer()
+    audienceWhiteboardSyncing.value = false
     for (const tile of cameraPreviewTiles.value) {
       if (tile.isPublishing) {
         try {
@@ -1955,7 +2073,8 @@ const switchCamera = async () => {
 }
 
 // ==================== 白板 ====================
-const initWhiteboard = async (roomID, token, userID, userName) => {
+const initWhiteboard = async (roomID, token, userID, userName, options = {}) => {
+  const { viewerOnly = false } = options
   await nextTick()
 
   if (!whiteboardRef.value || !whiteboardRef.value.offsetWidth || !whiteboardRef.value.offsetHeight) {
@@ -1999,6 +2118,27 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
       if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
         whiteboardReady.value = true
         return
+      }
+
+      if (viewerOnly) {
+        const subViewList = await withTimeout(
+          zegoSuperBoard.value.querySuperBoardSubViewList(),
+          8000,
+          '查询白板子视图超时（8秒）'
+        )
+        const firstSubView = Array.isArray(subViewList)
+          ? subViewList.find((item) => item?.uniqueID)
+          : null
+
+        if (firstSubView?.uniqueID) {
+          await switchToCreatedSubView({ uniqueID: firstSubView.uniqueID })
+          if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+            whiteboardReady.value = true
+            return
+          }
+        }
+
+        throw new Error('当前暂无老师共享白板')
       }
 
       const result = await withTimeout(
@@ -2828,6 +2968,8 @@ onBeforeUnmount(() => {
     clearTimeout(whiteboardLayoutRefreshTimer.value)
     whiteboardLayoutRefreshTimer.value = null
   }
+  clearAudienceWhiteboardRetryTimer()
+  audienceWhiteboardSyncing.value = false
   cameraPreviewTiles.value.forEach((tile) => {
     if (tile.isPublishing) {
       try {
