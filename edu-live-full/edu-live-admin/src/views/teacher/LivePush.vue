@@ -372,6 +372,7 @@ const cameraPreviewTiles = ref([])
 const cameraPreviewSeq = ref(0)
 const cameraPreviewPresets = ref([])
 const previewSceneIndex = ref(0)
+const localStreamProvider = ref('native')
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
 const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
@@ -631,30 +632,66 @@ const buildCameraConstraints = (deviceId, withAudio = true) => ({
   }
 })
 
-const createCameraStream = async (deviceId, withAudio = true) => {
+const createZegoCameraStream = async (deviceId, withAudio = true) => {
+  if (!zg.value?.createStream) {
+    throw new Error('ZEGO 推流引擎未就绪')
+  }
+  const cameraConfig = {
+    video: true,
+    audio: withAudio,
+    videoQuality: 2,
+    width: 1280,
+    height: 720,
+    frameRate: 15,
+    bitrate: 1200
+  }
+  if (deviceId) {
+    cameraConfig.videoInputID = deviceId
+  }
+  return zg.value.createStream({ camera: cameraConfig })
+}
+
+const createNativeCameraStream = async (deviceId, withAudio = true) => {
   const constraints = buildCameraConstraints(deviceId, withAudio)
   return navigator.mediaDevices.getUserMedia(constraints)
 }
 
-const stopMediaStream = (stream) => {
+const createCameraStream = async (deviceId, withAudio = true, preferZego = false) => {
+  if (preferZego) {
+    try {
+      return { stream: await createZegoCameraStream(deviceId, withAudio), provider: 'zego' }
+    } catch (err) {
+      console.warn('[LivePush] createZegoCameraStream failed, fallback to native:', err)
+    }
+  }
+  return { stream: await createNativeCameraStream(deviceId, withAudio), provider: 'native' }
+}
+
+const releaseMediaStream = (stream, provider = 'native') => {
   if (!stream) return
+  if (provider === 'zego') {
+    try {
+      zg.value?.destroyStream?.(stream)
+    } catch (e) {}
+  }
   try {
     stream.getTracks().forEach((track) => track.stop())
   } catch (e) {}
 }
 
-const publishMainCameraStream = async (stream) => {
+const publishMainCameraStream = async (stream, provider = 'native') => {
   const streamID = 'teacher_' + roomId
   try {
     zg.value?.stopPublishingStream?.(streamID)
   } catch (e) {}
   try {
     if (localStream.value) {
-      stopMediaStream(localStream.value)
+      releaseMediaStream(localStream.value, localStreamProvider.value)
       localStream.value = null
     }
   } catch (e) {}
   localStream.value = stream
+  localStreamProvider.value = provider
   applyMainStreamTrackState(localStream.value)
   await renderLocalStream(localVideoRef.value, localStream.value)
   if (isLiving.value && !isScreenSharing.value) {
@@ -722,8 +759,11 @@ const setMainCamera = async (deviceId) => {
   const previousDeviceId = activeCameraDeviceId.value
   activeCameraDeviceId.value = deviceId
   try {
-    const stream = await createCameraStream(deviceId, true)
-    await publishMainCameraStream(stream)
+    const { stream, provider } = await createCameraStream(deviceId, true, true)
+    await publishMainCameraStream(stream, provider)
+    if (provider !== 'zego') {
+      throw new Error('摄像头流未接入 ZEGO，请刷新后重试')
+    }
     if (isLiving.value && !isScreenSharing.value) {
       await announceFocusedStream(`teacher_${roomId}`, 'main_camera')
     }
@@ -751,7 +791,9 @@ const selectMainCameraFromPreview = async (deviceId) => {
 }
 
 const createCameraPreviewTile = async (deviceId, options = {}) => {
-  const stream = await createCameraStream(deviceId, false)
+  const previewPreferZego = !!isLiving.value
+  const created = await createCameraStream(deviceId, false, previewPreferZego)
+  const stream = created.stream
   const deviceInfo = cameraDevices.value.find((item) => item.deviceId === deviceId)
   const id = options.id || `camera-${Date.now()}-${cameraPreviewSeq.value += 1}`
   const tile = {
@@ -762,7 +804,8 @@ const createCameraPreviewTile = async (deviceId, options = {}) => {
     streamID: `teacher_${roomId}_cam_${id}`,
     isPublishing: false,
     publishing: false,
-    autoPublish: !!options.autoPublish
+    autoPublish: !!options.autoPublish,
+    streamProvider: created.provider
   }
   cameraPreviewTiles.value.push(tile)
   await nextTick()
@@ -819,6 +862,18 @@ const addCameraPreview = async () => {
 
 const startPreviewPublishing = async (tile) => {
   if (!tile) return
+  if (tile.streamProvider !== 'zego') {
+    const upgraded = await createCameraStream(tile.deviceId, false, true)
+    if (upgraded.provider !== 'zego') {
+      throw new Error('副机位未接入 ZEGO，无法推流')
+    }
+    releaseMediaStream(tile.stream, tile.streamProvider)
+    tile.stream = upgraded.stream
+    tile.streamProvider = upgraded.provider
+    await nextTick()
+    const container = document.getElementById(`camera-preview-${tile.id}`)
+    await renderPreviewStream(container, tile.stream)
+  }
   await zg.value.startPublishingStream(tile.streamID, tile.stream)
   tile.isPublishing = true
 }
@@ -945,7 +1000,7 @@ const removeCameraPreview = async (id) => {
   if (previewSceneIndex.value >= cameraPreviewTiles.value.length) {
     previewSceneIndex.value = 0
   }
-  stopMediaStream(removed?.stream)
+  releaseMediaStream(removed?.stream, removed?.streamProvider)
   removeCameraPreviewPreset(removed?.deviceId)
 }
 
@@ -1476,9 +1531,9 @@ const confirmEndLive = async () => {
 
     try {
       if (localStream.value) {
-        stopMediaStream(localStream.value)
-        zg.value.destroyStream(localStream.value)
+        releaseMediaStream(localStream.value, localStreamProvider.value)
         localStream.value = null
+        localStreamProvider.value = 'native'
       }
     } catch (e) {}
 
@@ -1527,7 +1582,7 @@ const confirmEndLive = async () => {
         } catch (e) {}
         tile.isPublishing = false
       }
-      stopMediaStream(tile.stream)
+      releaseMediaStream(tile.stream, tile.streamProvider)
     }
     cameraPreviewTiles.value = []
 
@@ -2025,7 +2080,7 @@ onBeforeUnmount(() => {
       } catch (e) {}
       tile.isPublishing = false
     }
-    stopMediaStream(tile.stream)
+    releaseMediaStream(tile.stream, tile.streamProvider)
   })
   cameraPreviewTiles.value = []
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
