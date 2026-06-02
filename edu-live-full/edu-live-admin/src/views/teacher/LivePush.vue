@@ -1916,6 +1916,7 @@ const startAudienceSession = async (authInfo) => {
   }
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
+  await playAudienceMainStream()
   try {
     await initWhiteboard(roomID, token, userID, userName, { viewerOnly: true })
     wbStageText.value = '白板已同步'
@@ -1923,7 +1924,6 @@ const startAudienceSession = async (authInfo) => {
     wbStageText.value = '等待老师共享白板...'
     scheduleAudienceWhiteboardSync('audience_session_start', 1500)
   }
-  await playAudienceMainStream()
   scheduleAudienceWhiteboardSync('audience_after_play', 1000)
   ElMessage.success('已进入听课房间')
 }
@@ -2355,21 +2355,40 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       }
 
       if (viewerOnly) {
-        const subViewList = await withTimeout(
-          zegoSuperBoard.value.querySuperBoardSubViewList(),
-          8000,
-          '查询白板子视图超时（8秒）'
-        )
-        const firstSubView = Array.isArray(subViewList)
-          ? subViewList.find((item) => item?.uniqueID)
-          : null
+        let firstSubView = null
+        for (let queryTry = 0; queryTry < 3; queryTry += 1) {
+          try {
+            const subViewList = await withTimeout(
+              zegoSuperBoard.value.querySuperBoardSubViewList(),
+              12000,
+              '查询白板子视图超时（12秒）'
+            )
+            firstSubView = Array.isArray(subViewList)
+              ? subViewList.find((item) => item?.uniqueID)
+              : null
+          } catch (queryErr) {
+            console.warn('[LivePush] querySuperBoardSubViewList failed:', {
+              roomID: targetRoomID,
+              userID,
+              queryTry: queryTry + 1,
+              error: parseErrorMessage(queryErr)
+            })
+          }
 
-        if (firstSubView?.uniqueID) {
-          await switchToCreatedSubView({ uniqueID: firstSubView.uniqueID })
+          if (firstSubView?.uniqueID) {
+            await switchToCreatedSubView({ uniqueID: firstSubView.uniqueID })
+            if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+              whiteboardReady.value = true
+              return
+            }
+          }
+
           if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
             whiteboardReady.value = true
             return
           }
+
+          await delay(1200)
         }
 
         throw new Error('当前暂无老师共享白板')
