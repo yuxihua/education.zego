@@ -375,6 +375,8 @@ const handleStartLive = async () => {
     liveIdentity.value = { userId: userID, userName, token }
     
     await zg.value.loginRoom(zegoRoomID.value, token, { userID, userName })
+    // 等待房间用户状态稳定后再初始化白板，避免 SuperBoard 报“用户不存在”
+    await delay(1200)
 
     localStream.value = await zg.value.createStream({
       camera: { video: true, audio: true, videoQuality: 2, width: 1280, height: 720 }
@@ -592,19 +594,32 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
     console.error('[LivePush] SuperBoard error:', error)
   })
   
-  await zegoSuperBoard.value.init(zg.value, {
-    parentDomID: whiteboardDomId,
-    appID: ZEGO_CONFIG.appID,
-    token: token,
-    roomID: roomID,
-    userID: userID,
-    userName: userName || roomInfo.value.teacherName || userID,
-    isTestEnv: false
-  })
-
   let lastError = null
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
+      if (attempt > 0) {
+        try {
+          zegoSuperBoard.value.destroy?.()
+        } catch (e) {}
+        await delay(500)
+      }
+
+      await withTimeout(
+        zegoSuperBoard.value.init(zg.value, {
+          parentDomID: whiteboardDomId,
+          appID: ZEGO_CONFIG.appID,
+          token: token,
+          roomID: roomID,
+          userID: userID,
+          userName: userName || userID,
+          isTestEnv: false
+        }),
+        10000,
+        '白板服务初始化超时（10秒）'
+      )
+
+      await delay(300)
+
       if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
         whiteboardReady.value = true
         return
@@ -632,7 +647,13 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
     } catch (err) {
       lastError = err
       if (isWhiteboardUserNotExistError(err) && attempt < 9) {
-        wbStageText.value = `白板用户同步中...(${attempt + 1}/10)`
+        wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${userID}`
+        console.warn('[LivePush] whiteboard user not exist, retrying', {
+          attempt: attempt + 1,
+          roomID,
+          userID,
+          err
+        })
         await delay(1500)
         continue
       }

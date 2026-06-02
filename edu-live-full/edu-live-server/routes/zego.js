@@ -243,13 +243,19 @@ router.get('/token', auth, asyncHandler(async (req, res) => {
       canPublish = approved === '1';
     }
   } else {
-    const baseUserId = `${req.user.role || 'user'}_${req.user.id}`;
-    const safeSessionId = String(sessionId || '')
-      .replace(/[^a-zA-Z0-9_-]/g, '')
-      .slice(0, 24);
-    const autoSessionId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    userId = `${baseUserId}_${safeSessionId || autoSessionId}`.slice(0, 64);
     canPublish = req.user.role === 'superadmin' || Number(room.anchorId) === Number(req.user.id);
+
+    if (canPublish) {
+      // 讲师推流身份固定，避免 SuperBoard 出现“用户不存在”
+      userId = `teacher_${req.user.id}`;
+    } else {
+      const baseUserId = `${req.user.role || 'user'}_${req.user.id}`;
+      const safeSessionId = String(sessionId || '')
+        .replace(/[^a-zA-Z0-9_-]/g, '')
+        .slice(0, 24);
+      const autoSessionId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      userId = `${baseUserId}_${safeSessionId || autoSessionId}`.slice(0, 64);
+    }
   }
 
   const payload = JSON.stringify({
