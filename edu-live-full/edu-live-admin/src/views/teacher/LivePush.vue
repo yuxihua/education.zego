@@ -121,7 +121,17 @@
         <!-- 白板区域 -->
         <div class="whiteboard-container" :class="{ fullscreen: isWhiteboardFull }">
           <div class="wb-toolbar">
-            <el-button-group v-if="!wbClassProtectMode">
+            <el-select
+              v-if="!wbClassProtectMode && wbToolbarCompact"
+              v-model="wbToolPicker"
+              :disabled="wbToolbarLocked"
+              size="small"
+              style="width: 106px"
+              @change="selectWbToolFromPicker"
+            >
+              <el-option v-for="item in wbToolPickerOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-button-group v-if="!wbClassProtectMode && !wbToolbarCompact">
               <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'selector' ? 'primary' : 'default'" @click="setWbTool('selector')">选择</el-button>
               <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'scroll' ? 'primary' : 'default'" @click="setWbOperationMode('scroll')">拖拽</el-button>
               <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'pen' ? 'primary' : 'default'" @click="setWbTool('pen')">画笔</el-button>
@@ -131,18 +141,6 @@
               <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'ellipse' ? 'primary' : 'default'" @click="setWbTool('ellipse')">椭圆</el-button>
               <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'eraser' ? 'primary' : 'default'" @click="setWbTool('eraser')">橡皮</el-button>
             </el-button-group>
-            <el-select
-              v-if="!wbClassProtectMode"
-              v-model="wbPreset"
-              :disabled="wbToolbarLocked"
-              size="small"
-              style="width: 114px"
-              @change="applyWbPreset"
-            >
-              <el-option label="板书预设" value="blackboard" />
-              <el-option label="批注预设" value="annotation" />
-              <el-option label="几何预设" value="geometry" />
-            </el-select>
             <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="switchWbPrevTool">上一工具(Tab)</el-button>
             <el-button v-if="!wbClassProtectMode" size="small" @click="toggleWbToolbarCompact">{{ wbToolbarCompact ? '展开工具' : '精简工具' }}</el-button>
             <el-button size="small" @click="toggleWbToolbarLock">{{ wbToolbarLocked ? '解锁工具' : '锁定工具' }}</el-button>
@@ -197,7 +195,7 @@
             <el-button size="small" :disabled="wbToolbarLocked" @click="undoWb">撤销</el-button>
             <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="redoWb">重做</el-button>
             <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="clearWb">清空</el-button>
-            <span class="wb-shortcut-tip">快捷键: G课堂保护 | Tab上一工具 | K锁定 | M精简 | V/P/T/L/R/O/E/H | 空格按住拖拽 | Ctrl+Z/Y | [ / ]</span>
+            <span class="wb-shortcut-tip">快捷键: G保护 K锁定 M精简 Tab切回 Ctrl+Z/Y [ / ]</span>
             <el-button v-if="!wbClassProtectMode" size="small" type="primary" :disabled="!isLiving" @click="uploadPPT">上传 PPT</el-button>
             <el-button size="small" @click="prevPage" :disabled="currentPage <= 1">上一页</el-button>
             <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
@@ -419,15 +417,25 @@ const wbLineStyle = ref('solid')
 const wbShapeFilled = ref(false)
 const wbAlpha = ref(100)
 const wbAlphaOptions = [100, 90, 80, 70, 60, 50, 40, 30, 20]
-const wbPreset = ref('blackboard')
 const wbActiveTool = ref('pen')
 const wbPrevTool = ref('selector')
 const wbOperationMode = ref('draw')
 const wbHotkeyPanActive = ref(false)
 const wbOperationModeBeforePan = ref('draw')
-const wbToolbarCompact = ref(false)
+const wbToolbarCompact = ref(true)
 const wbToolbarLocked = ref(false)
 const wbClassProtectMode = ref(false)
+const wbToolPicker = ref('pen')
+const wbToolPickerOptions = [
+  { label: '选择', value: 'selector' },
+  { label: '拖拽', value: 'scroll' },
+  { label: '画笔', value: 'pen' },
+  { label: '文字', value: 'text' },
+  { label: '直线', value: 'line' },
+  { label: '矩形', value: 'rect' },
+  { label: '椭圆', value: 'ellipse' },
+  { label: '橡皮', value: 'eraser' }
+]
 const currentPage = ref(1)
 const totalPage = ref(1)
 const whiteboardReady = ref(false)
@@ -1920,6 +1928,7 @@ const setWbTool = (tool) => {
         wbPrevTool.value = wbActiveTool.value
       }
       wbActiveTool.value = tool
+      wbToolPicker.value = tool
       // 工具变化后重应用绘图风格，保证图形工具参数不丢失。
       applyWbDrawStyle({ silent: true })
     }
@@ -2045,58 +2054,6 @@ const applyWbDrawStyle = (options = {}) => {
   setWbAlpha(wbAlpha.value, options)
 }
 
-const applyWbPreset = (preset, options = {}) => {
-  const normalizedPreset = ['blackboard', 'annotation', 'geometry'].includes(preset) ? preset : 'blackboard'
-  wbPreset.value = normalizedPreset
-
-  const presetMap = {
-    blackboard: {
-      tool: 'pen',
-      color: '#ffffff',
-      size: 8,
-      lineStyle: 'solid',
-      filled: false,
-      alpha: 100
-    },
-    annotation: {
-      tool: 'pen',
-      color: '#ff4d4f',
-      size: 6,
-      lineStyle: 'solid',
-      filled: false,
-      alpha: 80
-    },
-    geometry: {
-      tool: 'line',
-      color: '#1890ff',
-      size: 4,
-      lineStyle: 'solid',
-      filled: false,
-      alpha: 100
-    }
-  }
-
-  const config = presetMap[normalizedPreset]
-  wbColor.value = config.color
-  wbBrushSize.value = config.size
-  wbLineStyle.value = config.lineStyle
-  wbShapeFilled.value = config.filled
-  wbAlpha.value = config.alpha
-
-  if (wbClassProtectMode.value || wbToolbarLocked.value) {
-    return
-  }
-
-  setWbColor(config.color)
-  setWbBrushSize(config.size)
-  setWbLineStyle(config.lineStyle, { silent: true, force: true })
-  setWbShapeFilled(config.filled, { silent: true, force: true })
-  setWbAlpha(config.alpha, { silent: true, force: true })
-  if (!options.keepTool) {
-    setWbTool(config.tool)
-  }
-}
-
 const setWbOperationMode = (mode, options = {}) => {
   if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
     if (!options.silent) ElMessage.warning('工具栏已锁定，按 K 可解锁')
@@ -2118,7 +2075,16 @@ const setWbOperationMode = (mode, options = {}) => {
   try {
     zegoSuperBoard.value.setOperationMode?.(targetMode)
     wbOperationMode.value = mode
+    wbToolPicker.value = mode === 'scroll' ? 'scroll' : wbActiveTool.value
   } catch (e) {}
+}
+
+const selectWbToolFromPicker = (tool) => {
+  if (tool === 'scroll') {
+    setWbOperationMode('scroll')
+    return
+  }
+  setWbTool(tool)
 }
 
 const switchWbPrevTool = () => {
@@ -2867,13 +2833,17 @@ onBeforeUnmount(() => {
 }
 
 .wb-toolbar {
-  height: 44px;
+  min-height: 44px;
   background: #f5f5f5;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
   border-bottom: 1px solid #ddd;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: thin;
   
   .page-info {
     color: #333;
@@ -2895,6 +2865,7 @@ onBeforeUnmount(() => {
     font-size: 12px;
     color: #888;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 }
 
