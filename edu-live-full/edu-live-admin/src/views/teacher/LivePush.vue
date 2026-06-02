@@ -500,6 +500,7 @@ const cameraPreviewPresets = ref([])
 const previewSceneIndex = ref(0)
 const localStreamProvider = ref('native')
 const audienceAutoJoinStarted = ref(false)
+const teacherAutoResumeStarted = ref(false)
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
 const whiteboardResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
@@ -1839,8 +1840,9 @@ const ensureZegoReady = async () => {
 // ==================== 直播控制 ====================
 const handleStartLive = async () => {
   try {
+    const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
     const authInfo = await ensureZegoReady()
-    canPublishLive.value = !!authInfo.canPublish
+    canPublishLive.value = !!authInfo.canPublish && !isAssistantUser
     if (!authInfo.canPublish) {
       await startAudienceSession(authInfo)
       return
@@ -1903,19 +1905,83 @@ const handleStartLive = async () => {
     if (localStream.value) {
       await zg.value.startPublishingStream(streamID, localStream.value)
     }
-    try {
-      await startLive(roomId, { pushUrl: streamID })
-    } catch (startErr) {
-      console.warn('[LivePush] startLive sync failed:', startErr)
+    const roomAlreadyLiving = ['living', 'paused'].includes(String(roomInfo.value?.status || ''))
+    if (!roomAlreadyLiving) {
+      try {
+        await startLive(roomId, { pushUrl: streamID })
+      } catch (startErr) {
+        console.warn('[LivePush] startLive sync failed:', startErr)
+      }
+    }
+    roomInfo.value = {
+      ...(roomInfo.value || {}),
+      status: 'living',
+      actualStartTime: roomInfo.value?.actualStartTime || new Date().toISOString()
     }
     isLiving.value = true
     await announceFocusedStream(streamID, 'live_start')
     await restoreCameraPreviewTiles()
     await restoreAutoPublishCameraStreams()
-    ElMessage.success('直播已开始')
+    ElMessage.success(roomAlreadyLiving ? '已恢复直播会话' : '直播已开始')
   } catch (err) {
     ElMessage.error('开始直播失败: ' + parseErrorMessage(err))
   }
+}
+
+const teardownSessionWithoutEndingLive = async () => {
+  const streamID = 'teacher_' + roomId
+  try {
+    if (canPublishLive.value) {
+      zg.value?.stopPublishingStream?.(streamID)
+      zg.value?.stopPublishingStream?.(streamID + '_screen')
+    } else if (audienceMainStreamID.value) {
+      zg.value?.stopPlayingStream?.(audienceMainStreamID.value)
+      audienceMainStreamID.value = ''
+    }
+  } catch (e) {}
+
+  try {
+    coHostStreams.value.forEach((s) => {
+      try {
+        zg.value?.stopPlayingStream?.(s.streamID)
+      } catch (e) {}
+    })
+    coHostStreams.value = []
+  } catch (e) {}
+
+  try {
+    if (screenStream.value) {
+      zg.value?.destroyStream?.(screenStream.value)
+      screenStream.value = null
+    }
+  } catch (e) {}
+
+  try {
+    if (localStream.value) {
+      releaseMediaStream(localStream.value, localStreamProvider.value)
+      localStream.value = null
+      localStreamProvider.value = 'native'
+    }
+  } catch (e) {}
+
+  for (const tile of cameraPreviewTiles.value) {
+    try {
+      if (tile.isPublishing) {
+        zg.value?.stopPublishingStream?.(tile.streamID)
+      }
+    } catch (e) {}
+    tile.isPublishing = false
+    releaseMediaStream(tile.stream, tile.streamProvider)
+  }
+  cameraPreviewTiles.value = []
+
+  try {
+    await zg.value?.logoutRoom?.(zegoRoomID.value)
+  } catch (e) {}
+
+  try {
+    zegoSuperBoard.value?.destroy?.()
+  } catch (e) {}
 }
 
 const refreshCurrentSuperBoardView = () => {
@@ -2973,7 +3039,11 @@ onMounted(async () => {
   roomInfo.value = res
   zegoRoomID.value = res.zegoRoomId || 'room_' + roomId
   const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
-  isLiving.value = isAssistantUser || ['living', 'paused'].includes(String(res.status || ''))
+  const roomAlreadyLiving = ['living', 'paused'].includes(String(res.status || ''))
+  isLiving.value = isAssistantUser ? roomAlreadyLiving : false
+  if (!isAssistantUser && roomAlreadyLiving) {
+    wbStageText.value = '检测到未结束直播，正在恢复会话...'
+  }
   cameraPreviewPresets.value = loadCameraPreviewPresets()
   try {
     const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
@@ -3014,6 +3084,10 @@ onMounted(async () => {
       audienceAutoJoinStarted.value = true
       await startAudienceSession(authInfo)
     }
+    if (!isAssistantUser && canPublishLive.value && roomAlreadyLiving && !teacherAutoResumeStarted.value) {
+      teacherAutoResumeStarted.value = true
+      await handleStartLive()
+    }
     if (isAssistantUser || !authInfo?.canPublish) {
       syncAudienceRoomStatus()
     }
@@ -3050,9 +3124,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', handlePanelMouseUp)
   document.removeEventListener('keydown', handleWbShortcutKeydown)
   document.removeEventListener('keyup', handleWbShortcutKeyup)
-  if (isLiving.value) {
-    confirmEndLive()
-  }
+  teardownSessionWithoutEndingLive()
   if (zg.value) {
     zg.value.destroyEngine()
   }
