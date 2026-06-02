@@ -35,6 +35,7 @@ export const getLiveList = async (params = {}) => {
 }
 
 export const createLiveRoom = (data) => request.post('/live/room', data)
+export const startLive = (id, data) => request.post(`/live/room/${id}/start`, data)
 
 export const getLiveRoomDetail = async (id) => {
 	const res = await request.get(`/live/room/${id}`)

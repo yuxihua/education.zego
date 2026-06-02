@@ -400,7 +400,7 @@ import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
 import * as ZegoSuperBoardWeb from 'zego-superboard-web'
 import { ZegoSuperBoardManager } from 'zego-superboard-web'
-import { getLiveRoomDetail, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
+import { getLiveRoomDetail, startLive, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
 const route = useRoute()
 const roomId = route.params.id
@@ -1853,6 +1853,11 @@ const handleStartLive = async () => {
     const streamID = 'teacher_' + roomId
     if (localStream.value) {
       await zg.value.startPublishingStream(streamID, localStream.value)
+    }
+    try {
+      await startLive(roomId, { pushUrl: streamID })
+    } catch (startErr) {
+      console.warn('[LivePush] startLive sync failed:', startErr)
     }
     isLiving.value = true
     await announceFocusedStream(streamID, 'live_start')
