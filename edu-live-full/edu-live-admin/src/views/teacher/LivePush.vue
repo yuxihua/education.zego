@@ -478,6 +478,8 @@ const zegoAuthInfo = ref(null)
 const liveIdentity = ref(null)
 const roomState = ref('DISCONNECTED')
 const engineAppID = ref(0)
+const currentRoomLoginRoomID = ref('')
+const currentRoomLoginUserID = ref('')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
 const whiteboardLayoutRefreshTimer = ref(null)
@@ -534,6 +536,16 @@ const parseErrorMessage = (err, fallback = '未知错误') => {
 
 const normalizeRoomID = (value) => String(value || '').trim()
 const getFallbackRoomID = () => normalizeRoomID(`room_${roomId}`)
+
+const markCurrentRoomLogin = (roomID, userID) => {
+  currentRoomLoginRoomID.value = normalizeRoomID(roomID)
+  currentRoomLoginUserID.value = String(userID || '').trim()
+}
+
+const clearCurrentRoomLogin = () => {
+  currentRoomLoginRoomID.value = ''
+  currentRoomLoginUserID.value = ''
+}
 
 const ensureRoomIDReady = async () => {
   let roomID = normalizeRoomID(zegoRoomID.value || roomInfo.value?.zegoRoomId)
@@ -1490,13 +1502,21 @@ const waitRoomConnected = async (timeoutMs = 12000) => {
 
 const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => {
   if (!zg.value?.loginRoom) return
-  if (String(roomState.value || '').toUpperCase() === 'CONNECTED') return
+  const normalizedRoomID = normalizeRoomID(roomID)
+  const normalizedUserID = String(userID || '').trim()
+  const connected = String(roomState.value || '').toUpperCase() === 'CONNECTED'
+  const sameRoomAndUser =
+    connected &&
+    currentRoomLoginRoomID.value === normalizedRoomID &&
+    currentRoomLoginUserID.value === normalizedUserID
+  if (sameRoomAndUser) return
   try {
     await withTimeout(
       zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
       6000,
       '白板前房间保活登录超时（6秒）'
     )
+    markCurrentRoomLogin(normalizedRoomID, normalizedUserID)
     await withTimeout(waitRoomConnected(8000), 9000, '白板前房间连接未就绪')
   } catch (err) {
     if (!isAlreadyInRoomError(err)) {
@@ -1570,6 +1590,7 @@ const resetRoomSessionBeforeStart = async (roomID) => {
     await zg.value.logoutRoom(roomID)
     await delay(300)
   } catch (e) {}
+  clearCurrentRoomLogin()
 }
 
 // ==================== 初始化 ZEGO ====================
@@ -1591,6 +1612,9 @@ const initZego = async () => {
   zg.value.on('roomStateUpdate', (roomID, state) => {
     if (String(roomID) === String(zegoRoomID.value || '')) {
       roomState.value = String(state || '')
+      if (String(state || '').toUpperCase() !== 'CONNECTED') {
+        clearCurrentRoomLogin()
+      }
     }
   })
 
@@ -1868,6 +1892,7 @@ const startAudienceSession = async (authInfo) => {
       8000,
       '登录房间超时（8秒）'
     )
+    markCurrentRoomLogin(roomID, userID)
   } catch (loginErr) {
     if (!isLoginRoomLimitError(loginErr)) {
       throw loginErr
@@ -1887,6 +1912,7 @@ const startAudienceSession = async (authInfo) => {
       8000,
       '重试登录房间超时（8秒）'
     )
+    markCurrentRoomLogin(roomID, userID)
   }
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
@@ -1963,6 +1989,7 @@ const handleStartLive = async () => {
         8000,
         '登录房间超时（8秒）'
       )
+      markCurrentRoomLogin(roomID, userID)
 
       // 3) 连接成功后创建/挂载白板
       await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
@@ -2274,6 +2301,13 @@ const switchCamera = async () => {
 const initWhiteboard = async (roomID, token, userID, userName, options = {}) => {
   const targetRoomID = normalizeRoomID(roomID) || (await ensureRoomIDReady())
   zegoRoomID.value = targetRoomID
+  console.info('[LivePush] initWhiteboard context', {
+    roomID: targetRoomID,
+    userID,
+    viewerOnly: !!options?.viewerOnly,
+    roomState: roomState.value,
+    appID: ZEGO_CONFIG.appID
+  })
   const { viewerOnly = false } = options
   await nextTick()
 
@@ -2362,6 +2396,12 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       return
     } catch (err) {
       lastError = err
+      console.warn('[LivePush] initWhiteboard attempt failed', {
+        attempt: attempt + 1,
+        roomID: targetRoomID,
+        userID,
+        error: parseErrorMessage(err)
+      })
       if (isWhiteboardUserNotExistError(err) && attempt < 9) {
         wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${userID}`
         console.warn('[LivePush] whiteboard user not exist, retrying', {
