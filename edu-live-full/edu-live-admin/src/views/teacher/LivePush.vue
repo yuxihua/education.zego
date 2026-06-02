@@ -204,6 +204,7 @@ const chatScrollRef = ref(null)
 const localVideoRef = ref(null)
 const zegoAuthInfo = ref(null)
 const liveIdentity = ref(null)
+const roomState = ref('DISCONNECTED')
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -266,19 +267,39 @@ const isAlreadyInRoomError = (err) => {
   return msg.includes('already') && msg.includes('room')
 }
 
+const waitRoomConnected = async (timeoutMs = 12000) => {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (String(roomState.value || '').toUpperCase() === 'CONNECTED') {
+      return true
+    }
+    await delay(200)
+  }
+  throw new Error('房间连接未就绪')
+}
+
 const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => {
   if (!zg.value?.loginRoom) return
   try {
     await withTimeout(
-      zg.value.loginRoom(roomID, token, { userID, userName }),
+      zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
       6000,
       '白板前房间保活登录超时（6秒）'
     )
+    await withTimeout(waitRoomConnected(8000), 9000, '白板前房间连接未就绪')
   } catch (err) {
     if (!isAlreadyInRoomError(err)) {
       console.warn('[LivePush] ensureRoomLoginForWhiteboard ignored error:', err)
     }
   }
+}
+
+const resetRoomSessionBeforeStart = async (roomID) => {
+  if (!zg.value?.logoutRoom) return
+  try {
+    await zg.value.logoutRoom(roomID)
+    await delay(300)
+  } catch (e) {}
 }
 
 // ==================== 初始化 ZEGO ====================
@@ -293,6 +314,12 @@ const initZego = async () => {
       onlineCount.value += userList.length
     } else {
       onlineCount.value = Math.max(0, onlineCount.value - userList.length)
+    }
+  })
+
+  zg.value.on('roomStateUpdate', (roomID, state) => {
+    if (String(roomID) === String(zegoRoomID.value || '')) {
+      roomState.value = String(state || '')
     }
   })
 
@@ -393,10 +420,52 @@ const handleStartLive = async () => {
     const userName = authInfo.userName
     const token = authInfo.token
     liveIdentity.value = { userId: userID, userName, token }
-    
-    await zg.value.loginRoom(zegoRoomID.value, token, { userID, userName })
-    // 等待房间用户状态稳定后再初始化白板，避免 SuperBoard 报“用户不存在”
-    await delay(1200)
+
+    // 清理可能残留的旧会话，再按官方推荐顺序初始化：先 SuperBoard，再登录房间。
+    await resetRoomSessionBeforeStart(zegoRoomID.value)
+    roomState.value = 'DISCONNECTED'
+
+    try {
+      whiteboardReady.value = false
+      currentSuperBoardView.value = null
+      wbStageText.value = '白板初始化中...'
+      // 1) 先初始化 SuperBoard SDK
+      zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
+      zegoSuperBoard.value.off?.('error')
+      zegoSuperBoard.value.on?.('error', (error) => {
+        console.error('[LivePush] SuperBoard error:', error)
+      })
+      await withTimeout(
+        zegoSuperBoard.value.init(zg.value, {
+          parentDomID: whiteboardDomId,
+          appID: ZEGO_CONFIG.appID,
+          token,
+          roomID: zegoRoomID.value,
+          userID,
+          userName: userName || userID,
+          isTestEnv: false
+        }),
+        10000,
+        '白板服务初始化超时（10秒）'
+      )
+
+      // 2) 再登录房间
+      await withTimeout(
+        zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+        8000,
+        '登录房间超时（8秒）'
+      )
+
+      // 3) 连接成功后创建/挂载白板
+      await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
+      await initWhiteboard(zegoRoomID.value, token, userID, userName)
+      wbStageText.value = '白板就绪'
+    } catch (wbErr) {
+      whiteboardReady.value = false
+      wbStageText.value = '白板未就绪：' + parseErrorMessage(wbErr)
+      const wbCode = wbErr?.code || wbErr?.errorCode
+      ElMessage.warning('白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
+    }
 
     localStream.value = await zg.value.createStream({
       camera: { video: true, audio: true, videoQuality: 2, width: 1280, height: 720 }
@@ -408,19 +477,6 @@ const handleStartLive = async () => {
     await zg.value.startPublishingStream(streamID, localStream.value)
     isLiving.value = true
     ElMessage.success('直播已开始')
-
-    try {
-      whiteboardReady.value = false
-      currentSuperBoardView.value = null
-      wbStageText.value = '白板初始化中...'
-      await initWhiteboard(zegoRoomID.value, token, userID, userName)
-      wbStageText.value = '白板就绪'
-    } catch (wbErr) {
-      whiteboardReady.value = false
-      wbStageText.value = '白板未就绪：' + parseErrorMessage(wbErr)
-      const wbCode = wbErr?.code || wbErr?.errorCode
-      ElMessage.warning('直播已开始，但白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
-    }
   } catch (err) {
     ElMessage.error('开始直播失败: ' + parseErrorMessage(err))
   }
@@ -528,6 +584,7 @@ const confirmEndLive = async () => {
 
     try {
       await zg.value.logoutRoom(zegoRoomID.value)
+      roomState.value = 'DISCONNECTED'
     } catch (e) {}
 
     try {
@@ -676,6 +733,13 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
           userID,
           err
         })
+
+        // 开播前阶段允许强制重建房间会话，提升白板识别用户成功率。
+        if (!isLiving.value || !localStream.value) {
+          await resetRoomSessionBeforeStart(roomID)
+          await ensureRoomLoginForWhiteboard(roomID, token, userID, userName)
+        }
+
         await delay(1500)
         continue
       }
