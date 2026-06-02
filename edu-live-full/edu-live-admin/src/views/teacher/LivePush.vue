@@ -57,9 +57,9 @@
 
     <div class="main-area" :class="{ 'free-layout': layoutFreeMode }" ref="workspaceRef">
       <!-- 左侧：视频 + 白板 -->
-      <div class="left-panel">
+      <div class="left-panel" ref="leftPanelRef">
         <!-- 视频区域 -->
-        <div v-if="!layoutFreeMode && showVideoPanel && !isWhiteboardFull" class="video-container">
+        <div v-if="!layoutFreeMode && showVideoPanel && !isWhiteboardFull" class="video-container" ref="videoContainerRef">
           <div class="local-video" ref="localVideoRef"></div>
           <div class="video-controls">
             <el-button 
@@ -119,7 +119,12 @@
         </div>
 
         <!-- 白板区域 -->
-        <div class="whiteboard-container" :class="{ fullscreen: isWhiteboardFull }">
+        <div
+          class="whiteboard-container"
+          :class="{ fullscreen: isWhiteboardFull }"
+          :style="getWhiteboardContainerStyle()"
+          ref="whiteboardContainerRef"
+        >
           <div class="wb-toolbar">
             <el-select
               v-if="!wbClassProtectMode && wbToolbarCompact"
@@ -206,9 +211,22 @@
             </el-button>
           </div>
           <div class="whiteboard" :id="whiteboardDomId" ref="whiteboardRef"></div>
+          <div
+            v-if="!isWhiteboardFull"
+            class="wb-splitter wb-splitter-right"
+            title="拖动调整白板宽度"
+            @mousedown.prevent="beginWhiteboardWidthResize"
+          ></div>
         </div>
 
-        <div v-if="cameraPreviewTiles.length > 0" class="camera-gallery" :class="{ 'free-layout': layoutFreeMode }">
+        <div
+          v-if="!isWhiteboardFull"
+          class="wb-splitter"
+          title="拖动调整白板高度"
+          @mousedown.prevent="beginWhiteboardResize"
+        ></div>
+
+        <div v-if="cameraPreviewTiles.length > 0" class="camera-gallery" :class="{ 'free-layout': layoutFreeMode }" ref="cameraGalleryRef">
           <div class="camera-gallery-header">
             <div class="camera-gallery-summary">
               <span>多摄像头预览</span>
@@ -456,6 +474,10 @@ const liveIdentity = ref(null)
 const roomState = ref('DISCONNECTED')
 const whiteboardLayoutRefreshTimer = ref(null)
 const workspaceRef = ref(null)
+const leftPanelRef = ref(null)
+const videoContainerRef = ref(null)
+const whiteboardContainerRef = ref(null)
+const cameraGalleryRef = ref(null)
 const layoutFreeMode = ref(false)
 const showVideoPanel = ref(true)
 const showInteractionPanel = ref(true)
@@ -468,6 +490,9 @@ const previewSceneIndex = ref(0)
 const localStreamProvider = ref('native')
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
+const whiteboardResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
+const whiteboardPanelHeight = ref(0)
+const whiteboardPanelWidth = ref(0)
 const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
 const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520 })
 const layoutStorageKey = `teacher_live_push_layout_${roomId}`
@@ -571,6 +596,8 @@ const saveLayoutState = () => {
       showInteractionPanel: showInteractionPanel.value,
       interactionCollapsed: interactionCollapsed.value,
       rightPanelWidth: rightPanelWidth.value,
+      whiteboardPanelHeight: whiteboardPanelHeight.value,
+      whiteboardPanelWidth: whiteboardPanelWidth.value,
       floatingVideoState: { ...floatingVideoState },
       floatingInteractionState: { ...floatingInteractionState }
     }))
@@ -583,6 +610,68 @@ const getWorkspaceSize = () => {
     width: el?.clientWidth || 0,
     height: el?.clientHeight || 0
   }
+}
+
+const getWhiteboardResizeBounds = () => {
+  const leftHeight = leftPanelRef.value?.clientHeight || 0
+  const minimum = 260
+  if (!leftHeight) {
+    return { min: minimum, max: Math.max(minimum, whiteboardPanelHeight.value || minimum) }
+  }
+
+  const sectionGap = 16
+  let occupiedHeight = 0
+  let gapCount = 0
+
+  if (!layoutFreeMode.value && showVideoPanel.value && !isWhiteboardFull.value && videoContainerRef.value) {
+    occupiedHeight += videoContainerRef.value.offsetHeight || 0
+    gapCount += 1
+  }
+
+  if (cameraPreviewTiles.value.length > 0 && cameraGalleryRef.value) {
+    occupiedHeight += cameraGalleryRef.value.offsetHeight || 0
+    gapCount += 1
+  }
+
+  const max = Math.max(minimum, leftHeight - occupiedHeight - gapCount * sectionGap)
+  return { min: minimum, max }
+}
+
+const getWhiteboardWidthBounds = () => {
+  const leftWidth = leftPanelRef.value?.clientWidth || 0
+  const minimum = 640
+  if (!leftWidth) {
+    return { min: minimum, max: Math.max(minimum, whiteboardPanelWidth.value || minimum) }
+  }
+  return { min: minimum, max: Math.max(minimum, leftWidth - 16) }
+}
+
+const clampWhiteboardPanelHeight = () => {
+  if (!whiteboardPanelHeight.value || isWhiteboardFull.value) return
+  const bounds = getWhiteboardResizeBounds()
+  whiteboardPanelHeight.value = clamp(whiteboardPanelHeight.value, bounds.min, bounds.max)
+}
+
+const clampWhiteboardPanelWidth = () => {
+  if (!whiteboardPanelWidth.value || isWhiteboardFull.value) return
+  const bounds = getWhiteboardWidthBounds()
+  whiteboardPanelWidth.value = clamp(whiteboardPanelWidth.value, bounds.min, bounds.max)
+}
+
+const getWhiteboardContainerStyle = () => {
+  const style = {}
+  if (!isWhiteboardFull.value) {
+    if (whiteboardPanelHeight.value > 0) {
+      style.height = `${whiteboardPanelHeight.value}px`
+      style.flex = 'none'
+    }
+    if (whiteboardPanelWidth.value > 0) {
+      style.width = `${whiteboardPanelWidth.value}px`
+      style.flex = 'none'
+      style.alignSelf = 'flex-start'
+    }
+  }
+  return style
 }
 
 const initFreeLayoutPositions = () => {
@@ -1111,6 +1200,7 @@ const resetLayout = async () => {
   floatingInteractionState.y = 16
   floatingInteractionState.width = 360
   floatingInteractionState.height = 520
+  whiteboardPanelHeight.value = 0
   try {
     localStorage.removeItem(layoutStorageKey)
   } catch (e) {}
@@ -1179,7 +1269,41 @@ const beginPanelResize = (panel, event) => {
   }
 }
 
+const beginWhiteboardResize = (event) => {
+  if (event.button !== 0 || isWhiteboardFull.value) return
+  const targetHeight = whiteboardPanelHeight.value || whiteboardContainerRef.value?.getBoundingClientRect?.().height || 0
+  if (!targetHeight) return
+  whiteboardResizeState.active = true
+  whiteboardResizeState.mode = 'height'
+  whiteboardResizeState.startY = event.clientY
+  whiteboardResizeState.startHeight = targetHeight
+}
+
+const beginWhiteboardWidthResize = (event) => {
+  if (event.button !== 0 || isWhiteboardFull.value) return
+  const targetWidth = whiteboardPanelWidth.value || whiteboardContainerRef.value?.getBoundingClientRect?.().width || 0
+  if (!targetWidth) return
+  whiteboardResizeState.active = true
+  whiteboardResizeState.mode = 'width'
+  whiteboardResizeState.startX = event.clientX
+  whiteboardResizeState.startWidth = targetWidth
+}
+
 const handlePanelMouseMove = (event) => {
+  if (whiteboardResizeState.active) {
+    if (whiteboardResizeState.mode === 'height') {
+      const dy = event.clientY - whiteboardResizeState.startY
+      const bounds = getWhiteboardResizeBounds()
+      whiteboardPanelHeight.value = clamp(whiteboardResizeState.startHeight + dy, bounds.min, bounds.max)
+    } else if (whiteboardResizeState.mode === 'width') {
+      const dx = event.clientX - whiteboardResizeState.startX
+      const bounds = getWhiteboardWidthBounds()
+      whiteboardPanelWidth.value = clamp(whiteboardResizeState.startWidth + dx, bounds.min, bounds.max)
+    }
+    scheduleWhiteboardLayoutRefresh()
+    return
+  }
+
   if (!panelDragState.active || !layoutFreeMode.value) return
   const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
   const { width, height } = getWorkspaceSize()
@@ -1211,6 +1335,13 @@ const handlePanelMouseMove = (event) => {
 }
 
 const handlePanelMouseUp = () => {
+  if (whiteboardResizeState.active) {
+    whiteboardResizeState.active = false
+    whiteboardResizeState.mode = ''
+    saveLayoutState()
+    return
+  }
+
   if (!panelDragState.active || !layoutFreeMode.value) return
   const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
   applyMagneticSnap(targetState)
@@ -1334,9 +1465,19 @@ watch([layoutFreeMode, showVideoPanel, isWhiteboardFull], async () => {
   if (layoutFreeMode.value) {
     initFreeLayoutPositions()
   }
+  clampWhiteboardPanelHeight()
+  clampWhiteboardPanelWidth()
   if (showVideoPanel.value && !isWhiteboardFull.value && localStream.value) {
     await renderLocalStream(localVideoRef.value, localStream.value)
   }
+  saveLayoutState()
+  scheduleWhiteboardLayoutRefresh()
+})
+
+watch(() => cameraPreviewTiles.value.length, async () => {
+  await nextTick()
+  clampWhiteboardPanelHeight()
+  clampWhiteboardPanelWidth()
   saveLayoutState()
   scheduleWhiteboardLayoutRefresh()
 })
@@ -2590,6 +2731,12 @@ onMounted(async () => {
     if (savedLayout.rightPanelWidth) {
       rightPanelWidth.value = savedLayout.rightPanelWidth
     }
+    if (savedLayout.whiteboardPanelHeight) {
+      whiteboardPanelHeight.value = Number(savedLayout.whiteboardPanelHeight) || 0
+    }
+    if (savedLayout.whiteboardPanelWidth) {
+      whiteboardPanelWidth.value = Number(savedLayout.whiteboardPanelWidth) || 0
+    }
     if (savedLayout.floatingVideoState) {
       Object.assign(floatingVideoState, savedLayout.floatingVideoState)
     }
@@ -2598,6 +2745,9 @@ onMounted(async () => {
     }
   }
   initFreeLayoutPositions()
+  await nextTick()
+  clampWhiteboardPanelHeight()
+  clampWhiteboardPanelWidth()
   await refreshCameraDevices()
   await restoreCameraPreviewTiles()
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
@@ -2816,6 +2966,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   min-width: 0;
   min-height: 0;
   
@@ -2830,6 +2981,27 @@ onBeforeUnmount(() => {
     width: 100vw;
     height: 100vh;
   }
+}
+
+.wb-splitter {
+  height: 10px;
+  margin: -6px 8px -2px;
+  border-radius: 999px;
+  cursor: row-resize;
+  background: linear-gradient(90deg, transparent 0%, rgba(64, 158, 255, 0.25) 50%, transparent 100%);
+  flex: none;
+}
+
+.wb-splitter-right {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: 10px;
+  height: calc(100% - 44px);
+  margin: 0;
+  cursor: ew-resize;
+  z-index: 6;
+  background: linear-gradient(180deg, transparent 0%, rgba(64, 158, 255, 0.25) 50%, transparent 100%);
 }
 
 .wb-toolbar {
