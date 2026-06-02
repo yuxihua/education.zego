@@ -531,6 +531,27 @@ const parseErrorMessage = (err, fallback = '未知错误') => {
   }
 }
 
+const normalizeRoomID = (value) => String(value || '').trim()
+
+const ensureRoomIDReady = async () => {
+  let roomID = normalizeRoomID(zegoRoomID.value || roomInfo.value?.zegoRoomId)
+  if (roomID) {
+    zegoRoomID.value = roomID
+    return roomID
+  }
+
+  const detail = await getLiveRoomDetail(roomId)
+  if (detail) {
+    roomInfo.value = detail
+  }
+  roomID = normalizeRoomID(detail?.zegoRoomId)
+  if (!roomID) {
+    throw new Error('直播间 roomID 为空，无法初始化直播会话')
+  }
+  zegoRoomID.value = roomID
+  return roomID
+}
+
 const renderLocalStream = async (container, stream) => {
   if (!container || !stream) return
   container.innerHTML = ''
@@ -1653,8 +1674,9 @@ const initZego = async () => {
 // 获取 Token
 const getZegoAuth = async () => {
   const token = localStorage.getItem('token')
+  const roomID = await ensureRoomIDReady()
   const query = new URLSearchParams({
-    roomID: String(zegoRoomID.value || ''),
+    roomID,
     sessionId: zegoSessionId
   })
   const res = await fetch(`${ZEGO_CONFIG.tokenUrl}?${query.toString()}`, {
@@ -1734,7 +1756,10 @@ const syncAudienceRoomStatus = async () => {
   try {
     const res = await getLiveRoomDetail(roomId)
     roomInfo.value = res
-    zegoRoomID.value = res.zegoRoomId || zegoRoomID.value || 'room_' + roomId
+    const nextRoomID = normalizeRoomID(res?.zegoRoomId)
+    if (nextRoomID) {
+      zegoRoomID.value = nextRoomID
+    }
     const liveNow = ['living', 'paused'].includes(String(res.status || ''))
     if (liveNow) {
       isLiving.value = true
@@ -1815,16 +1840,17 @@ const startAudienceSession = async (authInfo) => {
   const userID = authInfo.userId
   const userName = authInfo.userName
   const token = authInfo.token
+  const roomID = await ensureRoomIDReady()
   liveIdentity.value = { userId: userID, userName, token }
   isLiving.value = true
   wbStageText.value = '白板同步中...'
 
-  await resetRoomSessionBeforeStart(zegoRoomID.value)
+  await resetRoomSessionBeforeStart(roomID)
   roomState.value = 'DISCONNECTED'
 
   try {
     await withTimeout(
-      zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+      zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
       8000,
       '登录房间超时（8秒）'
     )
@@ -1842,7 +1868,7 @@ const startAudienceSession = async (authInfo) => {
     await initZego()
 
     await withTimeout(
-      zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+      zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
       8000,
       '重试登录房间超时（8秒）'
     )
@@ -1850,7 +1876,7 @@ const startAudienceSession = async (authInfo) => {
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
   try {
-    await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
+    await initWhiteboard(roomID, token, userID, userName, { viewerOnly: true })
     wbStageText.value = '白板已同步'
   } catch (err) {
     wbStageText.value = '等待老师共享白板...'
@@ -1877,6 +1903,7 @@ const handleStartLive = async () => {
   try {
     const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
     const authInfo = await ensureZegoReady()
+    const roomID = await ensureRoomIDReady()
     canPublishLive.value = !!authInfo.canPublish && !isAssistantUser
     if (!canPublishLive.value) {
       await startAudienceSession(authInfo)
@@ -1888,7 +1915,7 @@ const handleStartLive = async () => {
     liveIdentity.value = { userId: userID, userName, token }
 
     // 清理可能残留的旧会话，再按官方推荐顺序初始化：先 SuperBoard，再登录房间。
-    await resetRoomSessionBeforeStart(zegoRoomID.value)
+    await resetRoomSessionBeforeStart(roomID)
     roomState.value = 'DISCONNECTED'
 
     try {
@@ -1906,7 +1933,7 @@ const handleStartLive = async () => {
           parentDomID: whiteboardDomId,
           appID: ZEGO_CONFIG.appID,
           token,
-          roomID: zegoRoomID.value,
+          roomID,
           userID,
           userName: userName || userID,
           isTestEnv: false
@@ -1917,14 +1944,14 @@ const handleStartLive = async () => {
 
       // 2) 再登录房间
       await withTimeout(
-        zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+        zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
         8000,
         '登录房间超时（8秒）'
       )
 
       // 3) 连接成功后创建/挂载白板
       await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
-      await initWhiteboard(zegoRoomID.value, token, userID, userName)
+      await initWhiteboard(roomID, token, userID, userName)
       wbStageText.value = '白板就绪'
     } catch (wbErr) {
       whiteboardReady.value = false
@@ -3070,87 +3097,97 @@ const scrollToBottom = () => {
 
 // ==================== 生命周期 ====================
 onMounted(async () => {
-  const res = await getLiveRoomDetail(roomId)
-  roomInfo.value = res
-  zegoRoomID.value = res.zegoRoomId || 'room_' + roomId
   const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
-  const roomAlreadyLiving = ['living', 'paused'].includes(String(res.status || ''))
-  isLiving.value = isAssistantUser ? roomAlreadyLiving : false
-  if (!isAssistantUser && roomAlreadyLiving) {
-    wbStageText.value = '检测到未结束直播，正在恢复会话...'
-  }
-  cameraPreviewPresets.value = loadCameraPreviewPresets()
   try {
-    const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
-    if (savedCameraDeviceId) {
-      activeCameraDeviceId.value = savedCameraDeviceId
+    const res = await getLiveRoomDetail(roomId)
+    roomInfo.value = res
+    zegoRoomID.value = normalizeRoomID(res?.zegoRoomId)
+    const roomAlreadyLiving = ['living', 'paused'].includes(String(res.status || ''))
+    isLiving.value = isAssistantUser ? roomAlreadyLiving : false
+    if (!isAssistantUser && roomAlreadyLiving) {
+      wbStageText.value = '检测到未结束直播，正在恢复会话...'
     }
-  } catch (e) {}
-  const savedLayout = loadLayoutState()
-  if (savedLayout) {
-    layoutFreeMode.value = !!savedLayout.layoutFreeMode
-    showVideoPanel.value = savedLayout.showVideoPanel !== false
-    showInteractionPanel.value = savedLayout.showInteractionPanel !== false
-    interactionCollapsed.value = !!savedLayout.interactionCollapsed
-    if (savedLayout.rightPanelWidth) {
-      rightPanelWidth.value = savedLayout.rightPanelWidth
-    }
-    if (savedLayout.whiteboardPanelHeight) {
-      whiteboardPanelHeight.value = Number(savedLayout.whiteboardPanelHeight) || 0
-    }
-    if (savedLayout.whiteboardPanelWidth) {
-      whiteboardPanelWidth.value = Number(savedLayout.whiteboardPanelWidth) || 0
-    }
-    if (savedLayout.floatingVideoState) {
-      Object.assign(floatingVideoState, savedLayout.floatingVideoState)
-    }
-    if (savedLayout.floatingInteractionState) {
-      Object.assign(floatingInteractionState, savedLayout.floatingInteractionState)
-    }
-  }
-  initFreeLayoutPositions()
-  await nextTick()
-  clampWhiteboardPanelHeight()
-  clampWhiteboardPanelWidth()
-  if (isAssistantUser && !zg.value) {
+    cameraPreviewPresets.value = loadCameraPreviewPresets()
     try {
-      await initZego()
+      const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
+      if (savedCameraDeviceId) {
+        activeCameraDeviceId.value = savedCameraDeviceId
+      }
     } catch (e) {}
-  }
-  try {
-    const authInfo = await getZegoAuth()
-    canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
-    if ((isAssistantUser || !authInfo?.canPublish) && !audienceAutoJoinStarted.value) {
-      if (!zg.value) {
-        await initZego()
+    const savedLayout = loadLayoutState()
+    if (savedLayout) {
+      layoutFreeMode.value = !!savedLayout.layoutFreeMode
+      showVideoPanel.value = savedLayout.showVideoPanel !== false
+      showInteractionPanel.value = savedLayout.showInteractionPanel !== false
+      interactionCollapsed.value = !!savedLayout.interactionCollapsed
+      if (savedLayout.rightPanelWidth) {
+        rightPanelWidth.value = savedLayout.rightPanelWidth
       }
-      audienceAutoJoinStarted.value = true
+      if (savedLayout.whiteboardPanelHeight) {
+        whiteboardPanelHeight.value = Number(savedLayout.whiteboardPanelHeight) || 0
+      }
+      if (savedLayout.whiteboardPanelWidth) {
+        whiteboardPanelWidth.value = Number(savedLayout.whiteboardPanelWidth) || 0
+      }
+      if (savedLayout.floatingVideoState) {
+        Object.assign(floatingVideoState, savedLayout.floatingVideoState)
+      }
+      if (savedLayout.floatingInteractionState) {
+        Object.assign(floatingInteractionState, savedLayout.floatingInteractionState)
+      }
+    }
+    initFreeLayoutPositions()
+    await nextTick()
+    clampWhiteboardPanelHeight()
+    clampWhiteboardPanelWidth()
+    if (isAssistantUser && !zg.value) {
       try {
-        await startAudienceSession(authInfo)
-      } catch (audErr) {
-        audienceAutoJoinStarted.value = false
-        wbStageText.value = '听课连接失败，正在重试...'
+        await initZego()
+      } catch (e) {}
+    }
+    try {
+      const authInfo = await getZegoAuth()
+      canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
+      if ((isAssistantUser || !authInfo?.canPublish) && !audienceAutoJoinStarted.value) {
+        if (!zg.value) {
+          await initZego()
+        }
+        audienceAutoJoinStarted.value = true
+        try {
+          await startAudienceSession(authInfo)
+        } catch (audErr) {
+          audienceAutoJoinStarted.value = false
+          wbStageText.value = '听课连接失败，正在重试...'
+          console.error('[LivePush] audience session start failed:', audErr)
+        }
       }
+      if (!isAssistantUser && canPublishLive.value && roomAlreadyLiving && !teacherAutoResumeStarted.value) {
+        teacherAutoResumeStarted.value = true
+        await handleStartLive()
+      }
+      if (isAssistantUser || !authInfo?.canPublish) {
+        syncAudienceRoomStatus()
+      }
+    } catch (err) {
+      if (isAssistantUser) {
+        canPublishLive.value = false
+        wbStageText.value = '听课初始化失败，正在重试...'
+        syncAudienceRoomStatus()
+      }
+      console.error('[LivePush] auth/init failed:', err)
     }
-    if (!isAssistantUser && canPublishLive.value && roomAlreadyLiving && !teacherAutoResumeStarted.value) {
-      teacherAutoResumeStarted.value = true
-      await handleStartLive()
-    }
-    if (isAssistantUser || !authInfo?.canPublish) {
-      syncAudienceRoomStatus()
-    }
-  } catch (err) {
-    if (!canPublishLive.value) {
-      wbStageText.value = '听课初始化失败，正在重试...'
-    }
+    await refreshCameraDevices()
+    await restoreCameraPreviewTiles()
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
+    document.addEventListener('mousemove', handlePanelMouseMove)
+    document.addEventListener('mouseup', handlePanelMouseUp)
+    document.addEventListener('keydown', handleWbShortcutKeydown)
+    document.addEventListener('keyup', handleWbShortcutKeyup)
+  } catch (mountErr) {
+    console.error('[LivePush] mount failed:', mountErr)
+    wbStageText.value = '页面初始化失败：' + parseErrorMessage(mountErr)
+    ElMessage.error('直播页面初始化失败：' + parseErrorMessage(mountErr))
   }
-  await refreshCameraDevices()
-  await restoreCameraPreviewTiles()
-  navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
-  document.addEventListener('mousemove', handlePanelMouseMove)
-  document.addEventListener('mouseup', handlePanelMouseUp)
-  document.addEventListener('keydown', handleWbShortcutKeydown)
-  document.addEventListener('keyup', handleWbShortcutKeyup)
 })
 
 onBeforeUnmount(() => {
@@ -3177,9 +3214,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleWbShortcutKeydown)
   document.removeEventListener('keyup', handleWbShortcutKeyup)
   teardownSessionWithoutEndingLive()
-  if (zg.value) {
-    zg.value.destroyEngine()
-  }
 })
 </script>
 
