@@ -68,7 +68,28 @@ function checkCourseInstitutionAccess(req, res, course) {
   return true;
 }
 
-async function checkStudentCourseAccess(req, res, courseId) {
+function isRoomPurchaseExempt(room) {
+  if (!room) return false;
+  const raw = room?.toJSON ? room.toJSON() : room;
+  const hasCoursePrice = raw?.course && raw.course.price !== undefined && raw.course.price !== null;
+  const price = Number(raw?.course?.price);
+  if (hasCoursePrice && !Number.isNaN(price) && price <= 0) {
+    return true;
+  }
+
+  const settings = raw?.settings || {};
+  return Boolean(
+    settings.classroomId ||
+    settings.fixedClassroom ||
+    settings.isFixedClassroom ||
+    settings.allowNoPurchase ||
+    settings.publicAccess ||
+    settings.openAccess
+  );
+}
+
+async function checkStudentCourseAccess(req, res, courseId, options = {}) {
+  const { allowNoPurchase = false } = options;
   if (!isStudentIdentity(req) && req.user?.role !== 'superadmin') {
     fail(res, '仅学员可访问直播观看页', 403, 403);
     return null;
@@ -78,6 +99,10 @@ async function checkStudentCourseAccess(req, res, courseId) {
   if (!studentId) {
     fail(res, '学员身份无效，请重新登录', 401, 401);
     return null;
+  }
+
+  if (allowNoPurchase) {
+    return { exempt: true };
   }
 
   const order = await Order.findOne({
@@ -187,13 +212,10 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
     return fail(res, '无效的课程ID', 400, 400);
   }
 
-  const access = await checkStudentCourseAccess(req, res, courseId);
-  if (!access) return;
-
   const room = await LiveRoom.findOne({
     where: { courseId },
     include: [
-      { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName'] },
+      { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName', 'price'] },
       { model: PPTFile, as: 'pptFiles', attributes: ['id', 'name', 'type', 'pageCount'] }
     ],
     order: [['createdAt', 'DESC']]
@@ -202,6 +224,11 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
   if (!room) {
     return success(res, null, '该课程暂未创建直播间');
   }
+
+  const access = await checkStudentCourseAccess(req, res, courseId, {
+    allowNoPurchase: isRoomPurchaseExempt(room)
+  });
+  if (!access) return;
 
   success(res, buildStudentRoomPayload(room));
 }));
@@ -213,7 +240,7 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
 router.get('/student/room/:id', auth, asyncHandler(async (req, res) => {
   const room = await LiveRoom.findByPk(req.params.id, {
     include: [
-      { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName'] },
+      { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName', 'price'] },
       { model: PPTFile, as: 'pptFiles', attributes: ['id', 'name', 'type', 'pageCount'] }
     ]
   });
@@ -222,7 +249,9 @@ router.get('/student/room/:id', auth, asyncHandler(async (req, res) => {
     return fail(res, '直播间不存在', 404, 404);
   }
 
-  const access = await checkStudentCourseAccess(req, res, room.courseId);
+  const access = await checkStudentCourseAccess(req, res, room.courseId, {
+    allowNoPurchase: isRoomPurchaseExempt(room)
+  });
   if (!access) return;
 
   await LiveRoom.increment('totalViewCount', { where: { id: room.id } });
@@ -572,13 +601,15 @@ router.post('/room/:id/chat/send', auth, liveLimiter, asyncHandler(async (req, r
   const { content, userId, nickname, avatar } = req.body;
 
   const room = await LiveRoom.findByPk(id, {
-    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
   if (isStudentIdentity(req)) {
-    const access = await checkStudentCourseAccess(req, res, room.courseId);
+    const access = await checkStudentCourseAccess(req, res, room.courseId, {
+      allowNoPurchase: isRoomPurchaseExempt(room)
+    });
     if (!access) return;
   } else if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
@@ -626,13 +657,15 @@ router.get('/room/:id/chat/history', auth, asyncHandler(async (req, res) => {
   const { limit = 50 } = req.query;
 
   const room = await LiveRoom.findByPk(id, {
-    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
   if (isStudentIdentity(req)) {
-    const access = await checkStudentCourseAccess(req, res, room.courseId);
+    const access = await checkStudentCourseAccess(req, res, room.courseId, {
+      allowNoPurchase: isRoomPurchaseExempt(room)
+    });
     if (!access) return;
   } else if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
@@ -653,13 +686,15 @@ router.post('/room/:id/online', auth, asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
   const room = await LiveRoom.findByPk(id, {
-    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
   if (isStudentIdentity(req)) {
-    const access = await checkStudentCourseAccess(req, res, room.courseId);
+    const access = await checkStudentCourseAccess(req, res, room.courseId, {
+      allowNoPurchase: isRoomPurchaseExempt(room)
+    });
     if (!access) return;
   } else if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
@@ -688,13 +723,15 @@ router.post('/room/:id/offline', auth, asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
   const room = await LiveRoom.findByPk(id, {
-    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
   if (isStudentIdentity(req)) {
-    const access = await checkStudentCourseAccess(req, res, room.courseId);
+    const access = await checkStudentCourseAccess(req, res, room.courseId, {
+      allowNoPurchase: isRoomPurchaseExempt(room)
+    });
     if (!access) return;
   } else if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
@@ -717,13 +754,15 @@ router.post('/room/:id/cohost/request', auth, asyncHandler(async (req, res) => {
   const { userId, userName } = req.body;
 
   const room = await LiveRoom.findByPk(id, {
-    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
   }
 
-  const access = await checkStudentCourseAccess(req, res, room.courseId);
+  const access = await checkStudentCourseAccess(req, res, room.courseId, {
+    allowNoPurchase: isRoomPurchaseExempt(room)
+  });
   if (!access) return;
 
   await writeOperationLog(req, {
