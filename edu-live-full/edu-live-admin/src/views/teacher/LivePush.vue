@@ -1762,6 +1762,8 @@ const startAudienceSession = async (authInfo) => {
   )
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
+  isLiving.value = true
+  wbStageText.value = '白板同步中...'
   try {
     await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
     wbStageText.value = '白板已同步'
@@ -1770,7 +1772,6 @@ const startAudienceSession = async (authInfo) => {
     scheduleAudienceWhiteboardSync('audience_session_start', 1500)
   }
   await playAudienceMainStream()
-  isLiving.value = true
   scheduleAudienceWhiteboardSync('audience_after_play', 1000)
   ElMessage.success('已进入听课房间')
 }
