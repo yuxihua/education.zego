@@ -203,6 +203,7 @@ const chatText = ref('')
 const chatScrollRef = ref(null)
 const localVideoRef = ref(null)
 const zegoAuthInfo = ref(null)
+const liveIdentity = ref(null)
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -371,6 +372,7 @@ const handleStartLive = async () => {
     const userID = authInfo.userId
     const userName = authInfo.userName
     const token = authInfo.token
+    liveIdentity.value = { userId: userID, userName, token }
     
     await zg.value.loginRoom(zegoRoomID.value, token, { userID, userName })
 
@@ -388,9 +390,12 @@ const handleStartLive = async () => {
     try {
       whiteboardReady.value = false
       currentSuperBoardView.value = null
+      wbStageText.value = '白板初始化中...'
       await initWhiteboard(zegoRoomID.value, token, userID, userName)
+      wbStageText.value = '白板就绪'
     } catch (wbErr) {
       whiteboardReady.value = false
+      wbStageText.value = '白板未就绪：' + parseErrorMessage(wbErr)
       const wbCode = wbErr?.code || wbErr?.errorCode
       ElMessage.warning('直播已开始，但白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
     }
@@ -511,6 +516,7 @@ const confirmEndLive = async () => {
 
     whiteboardReady.value = false
     currentSuperBoardView.value = null
+    liveIdentity.value = null
 
     if (stopError) {
       throw stopError
@@ -597,7 +603,7 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   })
 
   let lastError = null
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
         whiteboardReady.value = true
@@ -625,12 +631,13 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
       return
     } catch (err) {
       lastError = err
-      if (isWhiteboardUserNotExistError(err) && attempt < 5) {
-        await delay(500)
+      if (isWhiteboardUserNotExistError(err) && attempt < 9) {
+        wbStageText.value = `白板用户同步中...(${attempt + 1}/10)`
+        await delay(1500)
         continue
       }
 
-      if (attempt < 5) {
+      if (attempt < 9) {
         await delay(500)
         continue
       }
@@ -647,7 +654,7 @@ const ensureWhiteboardReadyForUpload = async () => {
     return true
   }
 
-  const authInfo = zegoAuthInfo.value || (await getZegoAuth())
+  const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
   const token = authInfo?.token
   const userID = authInfo?.userId
   const userName = authInfo?.userName
