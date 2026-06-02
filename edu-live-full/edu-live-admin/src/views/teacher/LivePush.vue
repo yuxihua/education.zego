@@ -1794,11 +1794,17 @@ const setWbTool = (tool) => {
   }
 
   const toolEnum = ZegoSuperBoardWeb?.ZegoSuperBoardTool || {}
+  const fallbackToolEnum = {
+    Pen: 1,
+    Text: 2,
+    Selector: 32,
+    Eraser: 64
+  }
   const toolMap = {
-    selector: toolEnum.Selector,
-    pen: toolEnum.Pen,
-    text: toolEnum.Text,
-    eraser: toolEnum.Eraser
+    selector: Number.isFinite(toolEnum.Selector) ? toolEnum.Selector : fallbackToolEnum.Selector,
+    pen: Number.isFinite(toolEnum.Pen) ? toolEnum.Pen : fallbackToolEnum.Pen,
+    text: Number.isFinite(toolEnum.Text) ? toolEnum.Text : fallbackToolEnum.Text,
+    eraser: Number.isFinite(toolEnum.Eraser) ? toolEnum.Eraser : fallbackToolEnum.Eraser
   }
   const targetTool = Number.isFinite(toolMap[tool]) ? toolMap[tool] : null
   if (targetTool === null) {
@@ -1808,7 +1814,9 @@ const setWbTool = (tool) => {
 
   try {
     // 进入绘制模式后，工具切换才会生效。
-    zegoSuperBoard.value.setOperationMode?.(ZegoSuperBoardWeb.ZegoSuperBoardOperationMode.Draw)
+    const modeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardOperationMode || {}
+    const drawMode = Number.isFinite(modeEnum.Draw) ? modeEnum.Draw : 4
+    zegoSuperBoard.value.setOperationMode?.(drawMode)
     const ok = zegoSuperBoard.value.setToolType?.(targetTool)
     if (ok === false) {
       ElMessage.warning('当前白板不支持该工具')
