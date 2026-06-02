@@ -395,14 +395,15 @@ const refreshCurrentSuperBoardView = () => {
 const switchToCreatedSubView = async (result) => {
   // 兼容不同 SDK 返回结构：可能直接带 fileView/whiteboardView，也可能仅返回 uniqueID。
   const directView = result?.fileView || result?.whiteboardView || null
+  const directUniqueID = directView?.getModel?.()?.uniqueID || null
+  const uniqueID = directUniqueID || result?.uniqueID || result?.model?.uniqueID || null
+
   if (directView) {
     currentSuperBoardView.value = directView
     totalPage.value = directView.getPageCount?.() || 1
     currentPage.value = directView.getCurrentPage?.() || 1
-    return
   }
 
-  const uniqueID = result?.uniqueID || result?.model?.uniqueID || null
   if (!uniqueID) {
     refreshCurrentSuperBoardView()
     return
@@ -416,6 +417,18 @@ const switchToCreatedSubView = async (result) => {
 
   await boardView.switchSuperBoardSubView(uniqueID)
   refreshCurrentSuperBoardView()
+}
+
+const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 30, interval = 1000) => {
+  for (let retry = 0; retry < maxRetry; retry += 1) {
+    const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
+    const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === fileName)
+    if (targetSubView?.uniqueID) {
+      return targetSubView
+    }
+    await delay(interval)
+  }
+  return null
 }
 
 const handleEndLive = () => {
@@ -708,26 +721,26 @@ const uploadPPT = async () => {
         console.warn('[LivePush] createFileView failed, fallback to query list:', createErr)
       }
 
+      let switched = false
       if (wbResult) {
         await switchToCreatedSubView(wbResult)
-      } else {
-        let switched = false
-        for (let retry = 0; retry < 8; retry += 1) {
-          const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
-          const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === file.name)
-          if (targetSubView?.uniqueID) {
-            await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID)
-            refreshCurrentSuperBoardView()
-            switched = true
-            break
-          }
-          await delay(500)
-        }
-
-        if (!switched) {
-          refreshCurrentSuperBoardView()
-        }
+        switched = !!(currentSuperBoardView.value || refreshCurrentSuperBoardView())
       }
+
+      if (!switched) {
+        const targetSubView = await waitAndFindFileSubView(fileID, file.name)
+        if (!targetSubView?.uniqueID) {
+          throw new Error('课件正在转码，暂未生成可展示白板，请稍后再试')
+        }
+        await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID)
+        refreshCurrentSuperBoardView()
+        switched = !!currentSuperBoardView.value
+      }
+
+      if (!switched) {
+        throw new Error('已上传课件，但未切换到课件白板')
+      }
+
       ElMessage.success('PPT 加载成功')
     } catch (err) {
       ElMessage.error('PPT 上传失败: ' + parseErrorMessage(err, '请检查白板转码配置'))
