@@ -1,6 +1,6 @@
 <template>
   <el-container class="admin-layout">
-    <el-aside width="220px" class="sidebar">
+    <el-aside v-if="!isImmersivePage" width="220px" class="sidebar">
       <div class="logo">
         <el-icon size="28" color="#fff"><School /></el-icon>
         <span>教培直播后台</span>
@@ -8,7 +8,7 @@
       <Sidebar />
     </el-aside>
     <el-container>
-      <el-header class="header">
+      <el-header v-if="!isImmersivePage" class="header">
         <div class="header-left">
           <breadcrumb />
         </div>
@@ -27,7 +27,7 @@
           </el-dropdown>
         </div>
       </el-header>
-      <el-main class="main-content">
+      <el-main class="main-content" :class="{ immersive: isImmersivePage }">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" :key="route.fullPath" />
@@ -39,6 +39,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import Sidebar from '@/components/Sidebar.vue'
@@ -46,6 +47,7 @@ import Sidebar from '@/components/Sidebar.vue'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const isImmersivePage = computed(() => route.path.startsWith('/teacher/live-push/'))
 
 const handleCommand = (cmd) => {
   if (cmd === 'logout') {
@@ -62,6 +64,7 @@ const handleCommand = (cmd) => {
 .header { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; z-index: 10; }
 .user-info { cursor: pointer; display: flex; align-items: center; gap: 6px; }
 .main-content { padding: 20px; overflow-y: auto; }
+.main-content.immersive { padding: 0; overflow: hidden; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

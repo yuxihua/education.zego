@@ -29,6 +29,31 @@
                 <div v-if="showRealtimePlayer" class="video-wrapper realtime-wrapper">
                   <div ref="remoteVideoRef" class="realtime-player"></div>
                 </div>
+
+                <div v-if="teacherStreams.length > 1" class="stream-switcher">
+                  <span class="stream-switcher-label">观看机位</span>
+                  <el-switch
+                    v-model="autoFollowTeacherFocus"
+                    size="small"
+                    inline-prompt
+                    active-text="跟随"
+                    inactive-text="手动"
+                  />
+                  <el-select
+                    v-model="selectedTeacherStreamId"
+                    size="small"
+                    style="width: 240px"
+                    @change="handleTeacherStreamChange"
+                  >
+                    <el-option
+                      v-for="item in teacherStreams"
+                      :key="item.streamID"
+                      :label="item.label"
+                      :value="item.streamID"
+                    />
+                  </el-select>
+                </div>
+
                 <div v-else-if="primaryVideoUrl" class="video-wrapper">
                   <video :src="primaryVideoUrl" controls playsinline class="video-player" />
                 </div>
@@ -161,6 +186,9 @@ const chatMessages = ref([])
 const chatText = ref('')
 const chatSending = ref(false)
 const chatScrollRef = ref(null)
+const teacherStreams = ref([])
+const selectedTeacherStreamId = ref('')
+const autoFollowTeacherFocus = ref(true)
 const localVideoRef = ref(null)
 const localStream = ref(null)
 const cohostRequested = ref(false)
@@ -220,6 +248,82 @@ const primaryVideoUrl = computed(() => {
   if (roomInfo.value?.replayUrl) return roomInfo.value.replayUrl
   return ''
 })
+
+const getTeacherStreamMeta = (streamID) => {
+  const roomNumericId = String(roomInfo.value?.id || '')
+  const base = roomNumericId ? `teacher_${roomNumericId}` : ''
+  if (!streamID || !base) return null
+  if (streamID === `${base}_screen`) {
+    return { streamID, label: '讲师屏幕共享', priority: 3 }
+  }
+  if (streamID === base) {
+    return { streamID, label: '讲师主机位', priority: 2 }
+  }
+  if (streamID.startsWith(`${base}_cam_`)) {
+    return { streamID, label: `讲师副机位 ${streamID.slice((`${base}_cam_`).length, (`${base}_cam_`).length + 4)}`, priority: 1 }
+  }
+  return null
+}
+
+const sortTeacherStreams = (list) => {
+  return [...list].sort((a, b) => {
+    if (a.priority !== b.priority) return b.priority - a.priority
+    return a.label.localeCompare(b.label)
+  })
+}
+
+const upsertTeacherStreams = (streamList) => {
+  let changed = false
+  streamList.forEach((stream) => {
+    const meta = getTeacherStreamMeta(stream.streamID)
+    if (!meta) return
+    const existing = teacherStreams.value.find((item) => item.streamID === meta.streamID)
+    if (!existing) {
+      teacherStreams.value.push(meta)
+      changed = true
+    }
+  })
+  if (changed) {
+    teacherStreams.value = sortTeacherStreams(teacherStreams.value)
+  }
+}
+
+const removeTeacherStreams = (streamList) => {
+  const removeSet = new Set(streamList.map((item) => item.streamID))
+  teacherStreams.value = teacherStreams.value.filter((item) => !removeSet.has(item.streamID))
+  if (!teacherStreams.value.some((item) => item.streamID === selectedTeacherStreamId.value)) {
+    selectedTeacherStreamId.value = ''
+  }
+}
+
+const handleTeacherStreamChange = async (streamID) => {
+  if (!streamID) return
+  autoFollowTeacherFocus.value = false
+  const ok = await playStream(streamID)
+  if (!ok) {
+    liveError.value = '机位切换失败，请稍后重试'
+  }
+}
+
+const handleTeacherFocusMessage = async (streamID, source = '') => {
+  if (!streamID) return
+  upsertTeacherStreams([{ streamID }])
+  const sourceText = source === 'screen_share_start' || source === 'scene_screen'
+    ? '屏幕共享'
+    : source === 'scene_main' || source === 'live_start' || source === 'main_camera' || source === 'screen_share_stop'
+      ? '主讲机位'
+      : source === 'scene_preview'
+        ? '副机位'
+        : '机位'
+  if (!autoFollowTeacherFocus.value) {
+    liveNotice.value = `老师已切换到${sourceText}（当前为手动机位模式）`
+    return
+  }
+  const played = await playStream(streamID)
+  if (!played) {
+    liveError.value = `老师切换到了${sourceText}，但当前机位暂不可播放`
+  }
+}
 
 const reportOnlineState = async (action) => {
   if (!roomInfo.value?.id) return
@@ -326,6 +430,7 @@ const playStream = async (streamID) => {
       audio: true
     })
     currentStreamId.value = streamID
+    selectedTeacherStreamId.value = streamID
     liveError.value = ''
     liveNotice.value = streamID.endsWith('_screen') ? '当前正在观看老师屏幕共享' : '已接入老师实时直播'
     return true
@@ -336,7 +441,9 @@ const playStream = async (streamID) => {
 
 const tryPlayKnownStreams = async () => {
   if (!roomInfo.value?.id) return false
-  const candidates = [`teacher_${roomInfo.value.id}_screen`, `teacher_${roomInfo.value.id}`]
+  const knownCandidates = sortTeacherStreams(teacherStreams.value).map((item) => item.streamID)
+  const fallbackCandidates = [`teacher_${roomInfo.value.id}_screen`, `teacher_${roomInfo.value.id}`]
+  const candidates = [...new Set([...knownCandidates, ...fallbackCandidates])]
   for (const streamID of candidates) {
     const played = await playStream(streamID)
     if (played) return true
@@ -351,17 +458,32 @@ const initZego = async () => {
     if (roomID !== roomInfo.value?.zegoRoomId) return
 
     if (updateType === 'ADD') {
-      const orderedStreams = [...streamList].sort((a, b) => Number(String(b.streamID || '').endsWith('_screen')) - Number(String(a.streamID || '').endsWith('_screen')))
-      for (const stream of orderedStreams) {
-        const ok = await playStream(stream.streamID)
-        if (ok) break
+      upsertTeacherStreams(streamList)
+      const orderedStreams = sortTeacherStreams(
+        streamList
+          .map((stream) => getTeacherStreamMeta(stream.streamID))
+          .filter(Boolean)
+      )
+      if (!currentStreamId.value) {
+        for (const stream of orderedStreams) {
+          const ok = await playStream(stream.streamID)
+          if (ok) break
+        }
+      } else {
+        const screenStream = orderedStreams.find((item) => item.streamID.endsWith('_screen'))
+        if (screenStream && currentStreamId.value !== screenStream.streamID) {
+          await playStream(screenStream.streamID)
+        }
       }
-    } else if (streamList.some((item) => item.streamID === currentStreamId.value)) {
-      stopPlaying()
-      const switched = await tryPlayKnownStreams()
-      if (!switched) {
-        liveNotice.value = ''
-        liveError.value = '老师当前未推流，可稍后刷新重试'
+    } else {
+      removeTeacherStreams(streamList)
+      if (streamList.some((item) => item.streamID === currentStreamId.value)) {
+        stopPlaying()
+        const switched = await tryPlayKnownStreams()
+        if (!switched) {
+          liveNotice.value = ''
+          liveError.value = '老师当前未推流，可稍后刷新重试'
+        }
       }
     }
   })
@@ -391,6 +513,8 @@ const initZego = async () => {
         } else if (data.type === 'cohost_kick' && data.targetUserID === zegoAuthInfo.value?.userId) {
           await stopCohost(false)
           liveError.value = '老师已结束你的连麦'
+        } else if (data.type === 'stream_focus' && data.streamID) {
+          await handleTeacherFocusMessage(data.streamID, data.source || '')
         }
       } catch (err) {}
     }
@@ -420,6 +544,8 @@ const connectRealtime = async () => {
   if (!realtimeEligible.value) return
 
   liveError.value = ''
+  teacherStreams.value = []
+  selectedTeacherStreamId.value = ''
   try {
     const authInfo = await getZegoAuth()
     if (!ZEGO_CONFIG.appID) {
@@ -565,6 +691,9 @@ const toggleCamera = () => {
 const cleanupRealtime = async () => {
   stopPlaying()
   stopChatPolling()
+  teacherStreams.value = []
+  selectedTeacherStreamId.value = ''
+  autoFollowTeacherFocus.value = true
   if (isCohosting.value) {
     await stopCohost(false)
   }
@@ -677,6 +806,19 @@ onBeforeUnmount(cleanupRealtime)
   width: 100%;
   min-height: 360px;
   background: #000;
+}
+
+.stream-switcher {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stream-switcher-label {
+  font-size: 13px;
+  color: #606266;
 }
 
 .action-links {

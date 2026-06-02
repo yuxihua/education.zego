@@ -11,6 +11,40 @@
         </span>
       </div>
       <div class="actions">
+        <el-button size="large" @click="toggleLayoutMode">
+          {{ layoutFreeMode ? '锁定布局' : '自由布局' }}
+        </el-button>
+        <el-button size="large" @click="resetLayout">
+          重置布局
+        </el-button>
+        <el-button size="large" @click="showVideoPanel = !showVideoPanel">
+          {{ showVideoPanel ? '隐藏摄像头' : '显示摄像头' }}
+        </el-button>
+        <el-button size="large" @click="showInteractionPanel = !showInteractionPanel">
+          {{ showInteractionPanel ? '隐藏交流窗' : '显示交流窗' }}
+        </el-button>
+        <el-select
+          v-model="activeCameraDeviceId"
+          placeholder="主摄像头"
+          size="large"
+          filterable
+          clearable
+          style="width: 220px"
+          @change="handleMainCameraChange"
+        >
+          <el-option
+            v-for="device in cameraDevices"
+            :key="device.deviceId"
+            :label="device.label"
+            :value="device.deviceId"
+          />
+        </el-select>
+        <el-button size="large" @click="addCameraPreview">
+          添加摄像头
+        </el-button>
+        <el-button size="large" @click="refreshCameraDevices">
+          刷新设备
+        </el-button>
         <el-button 
           :type="isLiving ? 'danger' : 'primary'" 
           size="large"
@@ -21,11 +55,11 @@
       </div>
     </div>
 
-    <div class="main-area">
+    <div class="main-area" :class="{ 'free-layout': layoutFreeMode }" ref="workspaceRef">
       <!-- 左侧：视频 + 白板 -->
       <div class="left-panel">
         <!-- 视频区域 -->
-        <div class="video-container" v-show="!isWhiteboardFull">
+        <div v-if="!layoutFreeMode && showVideoPanel && !isWhiteboardFull" class="video-container">
           <div class="local-video" ref="localVideoRef"></div>
           <div class="video-controls">
             <el-button 
@@ -55,6 +89,35 @@
           </div>
         </div>
 
+        <div
+          v-else-if="layoutFreeMode && showVideoPanel && !isWhiteboardFull"
+          class="video-container floating-video"
+          :style="getVideoPanelStyle()"
+        >
+          <div class="floating-handle" @mousedown.prevent="beginPanelDrag('video', $event)">
+            <span>摄像头</span>
+            <div class="floating-actions">
+              <el-button text size="small" @click.stop="showVideoPanel = false">隐藏</el-button>
+            </div>
+          </div>
+          <div class="local-video" ref="localVideoRef"></div>
+          <div class="video-controls floating-controls">
+            <el-button :type="isCameraOn ? 'primary' : 'info'" circle @click="toggleCamera">
+              <el-icon><VideoCamera /></el-icon>
+            </el-button>
+            <el-button :type="isMicOn ? 'primary' : 'info'" circle @click="toggleMic">
+              <el-icon><Microphone /></el-icon>
+            </el-button>
+            <el-button :type="isScreenSharing ? 'danger' : 'info'" circle @click="toggleScreenShare">
+              <el-icon><Monitor /></el-icon>
+            </el-button>
+            <el-button type="info" circle @click="switchCamera">
+              <el-icon><Switch /></el-icon>
+            </el-button>
+          </div>
+          <div class="resize-handle" @mousedown.prevent="beginPanelResize('video', $event)"></div>
+        </div>
+
         <!-- 白板区域 -->
         <div class="whiteboard-container" :class="{ fullscreen: isWhiteboardFull }">
           <div class="wb-toolbar">
@@ -71,16 +134,106 @@
             <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
             <el-button size="small" @click="nextPage" :disabled="currentPage >= totalPage">下一页</el-button>
             <span v-if="wbStageText" class="wb-stage">{{ wbStageText }}</span>
-            <el-button size="small" @click="isWhiteboardFull = !isWhiteboardFull">
+            <el-button size="small" @click="toggleWhiteboardFull">
               {{ isWhiteboardFull ? '退出全屏' : '全屏' }}
             </el-button>
           </div>
           <div class="whiteboard" :id="whiteboardDomId" ref="whiteboardRef"></div>
         </div>
+
+        <div v-if="cameraPreviewTiles.length > 0" class="camera-gallery" :class="{ 'free-layout': layoutFreeMode }">
+          <div class="camera-gallery-header">
+            <div class="camera-gallery-summary">
+              <span>多摄像头预览</span>
+              <span class="camera-gallery-count">{{ cameraPreviewTiles.length }} 路</span>
+            </div>
+            <div class="camera-scene-actions">
+              <el-button text size="small" @click="applyScenePreset('main')">主讲</el-button>
+              <el-button text size="small" @click="applyScenePreset('screen')">屏幕</el-button>
+              <el-button text size="small" @click="applyScenePreset('preview')">副机位巡览</el-button>
+            </div>
+          </div>
+          <div class="camera-gallery-list">
+            <div v-for="tile in cameraPreviewTiles" :key="tile.id" class="camera-gallery-item">
+              <div class="camera-gallery-item-head">
+                <div class="camera-title-wrap">
+                  <span class="camera-gallery-title">{{ tile.label }}</span>
+                  <span class="camera-stream-state" :class="{ publishing: tile.isPublishing }">
+                    {{ tile.isPublishing ? '推流中' : '仅预览' }}
+                  </span>
+                </div>
+                <div class="floating-actions">
+                  <el-switch
+                    :model-value="!!tile.autoPublish"
+                    size="small"
+                    inline-prompt
+                    active-text="自动"
+                    inactive-text="手动"
+                    @change="(value) => setPreviewAutoPublish(tile.id, value)"
+                  />
+                  <el-button
+                    text
+                    size="small"
+                    :disabled="!isLiving || tile.publishing"
+                    @click="togglePreviewPublishing(tile.id)"
+                  >
+                    {{ tile.isPublishing ? '停推' : '副机位推流' }}
+                  </el-button>
+                  <el-button text size="small" @click="renameCameraPreview(tile.id)">重命名</el-button>
+                  <el-button text size="small" @click="moveCameraPreview(tile.id, -1)">上移</el-button>
+                  <el-button text size="small" @click="moveCameraPreview(tile.id, 1)">下移</el-button>
+                  <el-button text size="small" @click="selectMainCameraFromPreview(tile.deviceId)">设主摄像头</el-button>
+                  <el-button text size="small" @click="removeCameraPreview(tile.id)">关闭</el-button>
+                </div>
+              </div>
+              <div :id="`camera-preview-${tile.id}`" class="camera-preview-video"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="layoutFreeMode && !showVideoPanel" class="restore-tab restore-video" @click="showVideoPanel = true">
+        显示摄像头
+      </div>
+
+      <div v-if="layoutFreeMode && !showInteractionPanel" class="restore-tab restore-interaction" @click="showInteractionPanel = true">
+        显示交流窗
       </div>
 
       <!-- 右侧：互动面板 -->
-      <div class="right-panel">
+      <div
+        v-if="showInteractionPanel"
+        class="right-panel"
+        :class="{ floating: layoutFreeMode, docked: !layoutFreeMode, collapsed: interactionCollapsed }"
+        :style="getInteractionPanelStyle()"
+      >
+        <div v-if="!layoutFreeMode && !interactionCollapsed" class="dock-resize-handle" @mousedown.prevent="beginPanelResize('side', $event)"></div>
+        <div v-if="layoutFreeMode" class="floating-panel-header" @mousedown.prevent="beginPanelDrag('interaction', $event)">
+          <span>交流窗口</span>
+          <div class="floating-actions">
+            <el-button text size="small" @click.stop="toggleInteractionCollapse">
+              {{ interactionCollapsed ? '展开' : '折叠' }}
+            </el-button>
+            <el-button text size="small" @click.stop="showInteractionPanel = false">隐藏</el-button>
+          </div>
+        </div>
+
+        <div v-else-if="!layoutFreeMode" class="dock-panel-header">
+          <span>交流窗口</span>
+          <div class="floating-actions">
+            <el-button text size="small" @click.stop="toggleInteractionCollapse">
+              {{ interactionCollapsed ? '展开' : '折叠' }}
+            </el-button>
+            <el-button text size="small" @click.stop="showInteractionPanel = false">隐藏</el-button>
+          </div>
+        </div>
+
+        <div v-if="interactionCollapsed" class="panel-collapsed-rail" @click="toggleInteractionCollapse">
+          <span>交流窗</span>
+        </div>
+
+        <div v-else class="interaction-body">
+
         <!-- 连麦申请 -->
         <el-card class="panel-card" v-if="handUpList.length > 0">
           <template #header>
@@ -136,6 +289,9 @@
             </el-input>
           </div>
         </el-card>
+
+        <div v-if="layoutFreeMode" class="resize-handle" @mousedown.prevent="beginPanelResize('interaction', $event)"></div>
+        </div>
       </div>
     </div>
 
@@ -151,7 +307,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
@@ -205,6 +361,27 @@ const localVideoRef = ref(null)
 const zegoAuthInfo = ref(null)
 const liveIdentity = ref(null)
 const roomState = ref('DISCONNECTED')
+const whiteboardLayoutRefreshTimer = ref(null)
+const workspaceRef = ref(null)
+const layoutFreeMode = ref(false)
+const showVideoPanel = ref(true)
+const showInteractionPanel = ref(true)
+const cameraDevices = ref([])
+const activeCameraDeviceId = ref('')
+const cameraPreviewTiles = ref([])
+const cameraPreviewSeq = ref(0)
+const cameraPreviewPresets = ref([])
+const previewSceneIndex = ref(0)
+const interactionCollapsed = ref(false)
+const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
+const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
+const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520 })
+const layoutStorageKey = `teacher_live_push_layout_${roomId}`
+const cameraStorageKey = `teacher_live_push_camera_${roomId}`
+const cameraPreviewStorageKey = `teacher_live_push_camera_previews_${roomId}`
+const snapDistance = 24
+const defaultDockedRightPanelWidth = 340
+const rightPanelWidth = ref(defaultDockedRightPanelWidth)
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -239,7 +416,678 @@ const renderLocalStream = async (container, stream) => {
   } catch (e) {}
 }
 
+const renderPreviewStream = async (container, stream) => {
+  if (!container || !stream) return
+  container.innerHTML = ''
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = true
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'cover'
+  container.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
+}
+
+const applyMainStreamTrackState = (stream) => {
+  if (!stream) return
+  stream.getVideoTracks().forEach((track) => {
+    track.enabled = isCameraOn.value
+  })
+  stream.getAudioTracks().forEach((track) => {
+    track.enabled = isMicOn.value
+  })
+}
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const waitForNextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
+const applyMagneticSnap = (targetState) => {
+  const { width, height } = getWorkspaceSize()
+  if (!width || !height) return
+  const rightGap = width - (targetState.x + targetState.width)
+  const bottomGap = height - (targetState.y + targetState.height)
+
+  if (targetState.x <= snapDistance) targetState.x = 8
+  if (targetState.y <= snapDistance) targetState.y = 8
+  if (rightGap <= snapDistance) targetState.x = Math.max(8, width - targetState.width - 8)
+  if (bottomGap <= snapDistance) targetState.y = Math.max(8, height - targetState.height - 8)
+}
+
+const loadLayoutState = () => {
+  try {
+    const raw = localStorage.getItem(layoutStorageKey)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch (e) {
+    return null
+  }
+}
+
+const saveLayoutState = () => {
+  try {
+    localStorage.setItem(layoutStorageKey, JSON.stringify({
+      layoutFreeMode: layoutFreeMode.value,
+      showVideoPanel: showVideoPanel.value,
+      showInteractionPanel: showInteractionPanel.value,
+      interactionCollapsed: interactionCollapsed.value,
+      rightPanelWidth: rightPanelWidth.value,
+      floatingVideoState: { ...floatingVideoState },
+      floatingInteractionState: { ...floatingInteractionState }
+    }))
+  } catch (e) {}
+}
+
+const getWorkspaceSize = () => {
+  const el = workspaceRef.value
+  return {
+    width: el?.clientWidth || 0,
+    height: el?.clientHeight || 0
+  }
+}
+
+const initFreeLayoutPositions = () => {
+  const { width, height } = getWorkspaceSize()
+  if (!width || !height) return
+  const saved = loadLayoutState()
+  if (saved?.floatingVideoState) {
+    Object.assign(floatingVideoState, saved.floatingVideoState)
+  } else {
+  floatingVideoState.x = 24
+  floatingVideoState.y = 24
+  floatingVideoState.width = clamp(Math.floor(width * 0.28), 280, 460)
+  floatingVideoState.height = clamp(Math.floor(height * 0.28), 200, 320)
+  }
+  if (saved?.floatingInteractionState) {
+    Object.assign(floatingInteractionState, saved.floatingInteractionState)
+  } else {
+  floatingInteractionState.width = clamp(Math.floor(width * 0.28), 320, 420)
+  floatingInteractionState.height = clamp(Math.floor(height - 32), 420, height - 24)
+  floatingInteractionState.x = Math.max(24, width - floatingInteractionState.width - 24)
+  floatingInteractionState.y = 16
+  }
+  if (saved?.rightPanelWidth) {
+    rightPanelWidth.value = clamp(saved.rightPanelWidth, 280, Math.max(280, Math.floor(width * 0.45)))
+  }
+  if (saved?.interactionCollapsed) {
+    interactionCollapsed.value = true
+  }
+}
+
+const toggleLayoutMode = async () => {
+  layoutFreeMode.value = !layoutFreeMode.value
+  if (layoutFreeMode.value) {
+    await nextTick()
+    initFreeLayoutPositions()
+  } else {
+    rightPanelWidth.value = rightPanelWidth.value || defaultDockedRightPanelWidth
+  }
+  saveLayoutState()
+  scheduleWhiteboardLayoutRefresh()
+}
+
+const refreshCameraDevices = async () => {
+  try {
+    const currentSelected = activeCameraDeviceId.value
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const videoInputs = devices.filter((device) => device.kind === 'videoinput')
+    cameraDevices.value = videoInputs.map((device, index) => ({
+      deviceId: device.deviceId,
+      label: device.label || `摄像头 ${index + 1}`
+    }))
+    if (cameraDevices.value.length === 0) {
+      activeCameraDeviceId.value = ''
+      return
+    }
+    const selectedExists = cameraDevices.value.some((item) => item.deviceId === currentSelected)
+    if (selectedExists) {
+      activeCameraDeviceId.value = currentSelected
+      return
+    }
+    activeCameraDeviceId.value = cameraDevices.value[0].deviceId
+  } catch (err) {
+    console.warn('[LivePush] refreshCameraDevices failed:', err)
+  }
+}
+
+const loadCameraPreviewPresets = () => {
+  try {
+    const raw = localStorage.getItem(cameraPreviewStorageKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item) => item?.deviceId)
+      .map((item, index) => ({
+        id: item.id || `preset-${index}`,
+        deviceId: String(item.deviceId),
+        label: String(item.label || `副机位 ${index + 1}`),
+        autoPublish: !!item.autoPublish
+      }))
+  } catch (e) {
+    return []
+  }
+}
+
+const saveCameraPreviewPresets = () => {
+  try {
+    localStorage.setItem(cameraPreviewStorageKey, JSON.stringify(cameraPreviewPresets.value.map((item) => ({
+      id: item.id,
+      deviceId: item.deviceId,
+      label: item.label,
+      autoPublish: !!item.autoPublish
+    }))))
+  } catch (e) {}
+}
+
+const syncPresetOrderByTiles = () => {
+  const tileOrder = cameraPreviewTiles.value.map((item) => item.deviceId)
+  cameraPreviewPresets.value.sort((a, b) => {
+    const ai = tileOrder.indexOf(a.deviceId)
+    const bi = tileOrder.indexOf(b.deviceId)
+    if (ai === -1 && bi === -1) return 0
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+  saveCameraPreviewPresets()
+}
+
+const upsertCameraPreviewPreset = (payload) => {
+  const index = cameraPreviewPresets.value.findIndex((item) => item.deviceId === payload.deviceId)
+  if (index === -1) {
+    cameraPreviewPresets.value.push({
+      id: payload.id || `preset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      deviceId: payload.deviceId,
+      label: payload.label,
+      autoPublish: !!payload.autoPublish
+    })
+  } else {
+    cameraPreviewPresets.value[index] = {
+      ...cameraPreviewPresets.value[index],
+      label: payload.label ?? cameraPreviewPresets.value[index].label,
+      autoPublish: payload.autoPublish ?? cameraPreviewPresets.value[index].autoPublish
+    }
+  }
+  saveCameraPreviewPresets()
+}
+
+const removeCameraPreviewPreset = (deviceId) => {
+  cameraPreviewPresets.value = cameraPreviewPresets.value.filter((item) => item.deviceId !== deviceId)
+  saveCameraPreviewPresets()
+}
+
+const buildCameraConstraints = (deviceId, withAudio = true) => ({
+  audio: withAudio,
+  video: {
+    deviceId: deviceId ? { exact: deviceId } : undefined,
+    width: { ideal: 1280 },
+    height: { ideal: 720 }
+  }
+})
+
+const createCameraStream = async (deviceId, withAudio = true) => {
+  const constraints = buildCameraConstraints(deviceId, withAudio)
+  return navigator.mediaDevices.getUserMedia(constraints)
+}
+
+const stopMediaStream = (stream) => {
+  if (!stream) return
+  try {
+    stream.getTracks().forEach((track) => track.stop())
+  } catch (e) {}
+}
+
+const publishMainCameraStream = async (stream) => {
+  const streamID = 'teacher_' + roomId
+  try {
+    zg.value?.stopPublishingStream?.(streamID)
+  } catch (e) {}
+  try {
+    if (localStream.value) {
+      stopMediaStream(localStream.value)
+      localStream.value = null
+    }
+  } catch (e) {}
+  localStream.value = stream
+  applyMainStreamTrackState(localStream.value)
+  await renderLocalStream(localVideoRef.value, localStream.value)
+  if (isLiving.value && !isScreenSharing.value) {
+    await zg.value.startPublishingStream(streamID, localStream.value)
+  }
+}
+
+const announceFocusedStream = async (streamID, source = 'teacher') => {
+  if (!isLiving.value || !zg.value || !zegoRoomID.value || !streamID) return
+  try {
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({ type: 'stream_focus', streamID, source })
+    )
+  } catch (err) {}
+}
+
+const applyScenePreset = async (preset) => {
+  if (!isLiving.value) {
+    ElMessage.warning('请先开始直播')
+    return
+  }
+
+  const mainStreamID = `teacher_${roomId}`
+  const screenStreamID = `${mainStreamID}_screen`
+
+  if (preset === 'main') {
+    if (isScreenSharing.value) {
+      ElMessage.warning('当前正在屏幕共享，请先停止屏幕共享后切到主讲机位')
+      return
+    }
+    await announceFocusedStream(mainStreamID, 'scene_main')
+    ElMessage.success('已切换到主讲机位')
+    return
+  }
+
+  if (preset === 'screen') {
+    if (!isScreenSharing.value) {
+      ElMessage.warning('当前没有屏幕共享流')
+      return
+    }
+    await announceFocusedStream(screenStreamID, 'scene_screen')
+    ElMessage.success('已切换到屏幕共享')
+    return
+  }
+
+  if (preset === 'preview') {
+    const publishedPreviews = cameraPreviewTiles.value.filter((item) => item.isPublishing)
+    if (!publishedPreviews.length) {
+      ElMessage.warning('请先开启至少一路副机位推流')
+      return
+    }
+    const currentIndex = previewSceneIndex.value % publishedPreviews.length
+    const target = publishedPreviews[currentIndex]
+    previewSceneIndex.value = (currentIndex + 1) % publishedPreviews.length
+    await announceFocusedStream(target.streamID, 'scene_preview')
+    ElMessage.success(`已切换到副机位：${target.label}`)
+  }
+}
+
+const setMainCamera = async (deviceId) => {
+  if (!deviceId) {
+    throw new Error('未指定摄像头设备')
+  }
+  const previousDeviceId = activeCameraDeviceId.value
+  activeCameraDeviceId.value = deviceId
+  try {
+    const stream = await createCameraStream(deviceId, true)
+    await publishMainCameraStream(stream)
+    if (isLiving.value && !isScreenSharing.value) {
+      await announceFocusedStream(`teacher_${roomId}`, 'main_camera')
+    }
+  } catch (err) {
+    activeCameraDeviceId.value = previousDeviceId
+    throw err
+  }
+}
+
+const handleMainCameraChange = async (deviceId) => {
+  if (!deviceId) return
+  try {
+    await setMainCamera(deviceId)
+  } catch (err) {
+    ElMessage.error('切换主摄像头失败：' + parseErrorMessage(err))
+  }
+}
+
+const selectMainCameraFromPreview = async (deviceId) => {
+  try {
+    await setMainCamera(deviceId)
+  } catch (err) {
+    ElMessage.error('切换主摄像头失败：' + parseErrorMessage(err))
+  }
+}
+
+const createCameraPreviewTile = async (deviceId, options = {}) => {
+  const stream = await createCameraStream(deviceId, false)
+  const deviceInfo = cameraDevices.value.find((item) => item.deviceId === deviceId)
+  const id = options.id || `camera-${Date.now()}-${cameraPreviewSeq.value += 1}`
+  const tile = {
+    id,
+    deviceId,
+    label: options.label || deviceInfo?.label || `摄像头 ${cameraPreviewTiles.value.length + 1}`,
+    stream,
+    streamID: `teacher_${roomId}_cam_${id}`,
+    isPublishing: false,
+    publishing: false,
+    autoPublish: !!options.autoPublish
+  }
+  cameraPreviewTiles.value.push(tile)
+  await nextTick()
+  const container = document.getElementById(`camera-preview-${id}`)
+  await renderPreviewStream(container, stream)
+  upsertCameraPreviewPreset({
+    id,
+    deviceId: tile.deviceId,
+    label: tile.label,
+    autoPublish: tile.autoPublish
+  })
+  syncPresetOrderByTiles()
+  return tile
+}
+
+const ensureCameraPreviewTile = async (deviceId, options = {}) => {
+  const existing = cameraPreviewTiles.value.find((item) => item.deviceId === deviceId)
+  if (existing) {
+    if (options.label) existing.label = options.label
+    if (typeof options.autoPublish === 'boolean') {
+      existing.autoPublish = options.autoPublish
+    }
+    upsertCameraPreviewPreset({
+      id: existing.id,
+      deviceId: existing.deviceId,
+      label: existing.label,
+      autoPublish: existing.autoPublish
+    })
+    return existing
+  }
+  return createCameraPreviewTile(deviceId, options)
+}
+
+const addCameraPreview = async () => {
+  if (cameraDevices.value.length === 0) {
+    await refreshCameraDevices()
+  }
+  const targetDeviceId = activeCameraDeviceId.value || cameraDevices.value[0]?.deviceId
+  if (!targetDeviceId) {
+    ElMessage.warning('未检测到可用摄像头')
+    return
+  }
+  if (cameraPreviewTiles.value.some((item) => item.deviceId === targetDeviceId)) {
+    ElMessage.info('该摄像头已在预览列表中')
+    return
+  }
+
+  try {
+    await createCameraPreviewTile(targetDeviceId)
+  } catch (err) {
+    ElMessage.error('添加摄像头预览失败：' + parseErrorMessage(err))
+  }
+}
+
+const startPreviewPublishing = async (tile) => {
+  if (!tile) return
+  await zg.value.startPublishingStream(tile.streamID, tile.stream)
+  tile.isPublishing = true
+}
+
+const stopPreviewPublishing = async (tile) => {
+  if (!tile?.isPublishing) return
+  try {
+    zg.value?.stopPublishingStream?.(tile.streamID)
+  } catch (e) {}
+  tile.isPublishing = false
+}
+
+const togglePreviewPublishing = async (id) => {
+  const tile = cameraPreviewTiles.value.find((item) => item.id === id)
+  if (!tile) return
+  if (!isLiving.value) {
+    ElMessage.warning('请先开始直播后再推副机位')
+    return
+  }
+  if (!zg.value) {
+    ElMessage.warning('推流引擎未初始化')
+    return
+  }
+  if (tile.publishing) return
+
+  tile.publishing = true
+  try {
+    if (tile.isPublishing) {
+      await stopPreviewPublishing(tile)
+      ElMessage.success(`${tile.label} 已停止推流`)
+    } else {
+      await startPreviewPublishing(tile)
+      ElMessage.success(`${tile.label} 已开始副机位推流`)
+    }
+  } catch (err) {
+    ElMessage.error('副机位推流操作失败：' + parseErrorMessage(err))
+  } finally {
+    tile.publishing = false
+  }
+}
+
+const setPreviewAutoPublish = (id, value) => {
+  const tile = cameraPreviewTiles.value.find((item) => item.id === id)
+  if (!tile) return
+  tile.autoPublish = !!value
+  upsertCameraPreviewPreset({
+    id: tile.id,
+    deviceId: tile.deviceId,
+    label: tile.label,
+    autoPublish: tile.autoPublish
+  })
+}
+
+const renameCameraPreview = (id) => {
+  const tile = cameraPreviewTiles.value.find((item) => item.id === id)
+  if (!tile) return
+  const nextLabel = window.prompt('请输入副机位名称', tile.label)
+  if (!nextLabel) return
+  tile.label = String(nextLabel).trim() || tile.label
+  upsertCameraPreviewPreset({
+    id: tile.id,
+    deviceId: tile.deviceId,
+    label: tile.label,
+    autoPublish: tile.autoPublish
+  })
+}
+
+const moveCameraPreview = (id, direction) => {
+  const index = cameraPreviewTiles.value.findIndex((item) => item.id === id)
+  if (index < 0) return
+  const targetIndex = index + direction
+  if (targetIndex < 0 || targetIndex >= cameraPreviewTiles.value.length) return
+  const copy = [...cameraPreviewTiles.value]
+  const [item] = copy.splice(index, 1)
+  copy.splice(targetIndex, 0, item)
+  cameraPreviewTiles.value = copy
+  if (previewSceneIndex.value >= cameraPreviewTiles.value.length) {
+    previewSceneIndex.value = 0
+  }
+  syncPresetOrderByTiles()
+}
+
+const restoreCameraPreviewTiles = async () => {
+  if (!cameraPreviewPresets.value.length) return
+  for (const preset of cameraPreviewPresets.value) {
+    const exists = cameraDevices.value.some((device) => device.deviceId === preset.deviceId)
+    if (!exists) continue
+    try {
+      await ensureCameraPreviewTile(preset.deviceId, {
+        id: preset.id,
+        label: preset.label,
+        autoPublish: preset.autoPublish
+      })
+    } catch (err) {
+      console.warn('[LivePush] restoreCameraPreviewTiles failed:', err)
+    }
+  }
+  syncPresetOrderByTiles()
+}
+
+const restoreAutoPublishCameraStreams = async () => {
+  if (!isLiving.value || !zg.value) return
+  for (const tile of cameraPreviewTiles.value) {
+    if (!tile.autoPublish || tile.isPublishing || tile.publishing) continue
+    tile.publishing = true
+    try {
+      await startPreviewPublishing(tile)
+    } catch (err) {
+      console.warn('[LivePush] auto publish preview failed:', err)
+    } finally {
+      tile.publishing = false
+    }
+  }
+}
+
+const removeCameraPreview = async (id) => {
+  const index = cameraPreviewTiles.value.findIndex((item) => item.id === id)
+  if (index === -1) return
+  const target = cameraPreviewTiles.value[index]
+  if (target?.isPublishing) {
+    await stopPreviewPublishing(target)
+  }
+  const [removed] = cameraPreviewTiles.value.splice(index, 1)
+  if (previewSceneIndex.value >= cameraPreviewTiles.value.length) {
+    previewSceneIndex.value = 0
+  }
+  stopMediaStream(removed?.stream)
+  removeCameraPreviewPreset(removed?.deviceId)
+}
+
+const resetLayout = async () => {
+  layoutFreeMode.value = false
+  showVideoPanel.value = true
+  showInteractionPanel.value = true
+  interactionCollapsed.value = false
+  rightPanelWidth.value = defaultDockedRightPanelWidth
+  floatingVideoState.x = 24
+  floatingVideoState.y = 24
+  floatingVideoState.width = 360
+  floatingVideoState.height = 260
+  floatingInteractionState.x = 0
+  floatingInteractionState.y = 16
+  floatingInteractionState.width = 360
+  floatingInteractionState.height = 520
+  try {
+    localStorage.removeItem(layoutStorageKey)
+  } catch (e) {}
+  await nextTick()
+  scheduleWhiteboardLayoutRefresh()
+}
+
+const getVideoPanelStyle = () => ({
+  left: `${floatingVideoState.x}px`,
+  top: `${floatingVideoState.y}px`,
+  width: `${floatingVideoState.width}px`,
+  height: `${floatingVideoState.height}px`
+})
+
+const getInteractionPanelStyle = () => ({
+  ...(layoutFreeMode.value
+    ? {
+        left: `${floatingInteractionState.x}px`,
+        top: `${floatingInteractionState.y}px`,
+        width: `${floatingInteractionState.width}px`,
+        height: `${floatingInteractionState.height}px`
+      }
+    : {
+        width: `${rightPanelWidth.value}px`
+      })
+})
+
+const toggleInteractionCollapse = () => {
+  interactionCollapsed.value = !interactionCollapsed.value
+  if (!interactionCollapsed.value) {
+    showInteractionPanel.value = true
+  }
+  saveLayoutState()
+  scheduleWhiteboardLayoutRefresh()
+}
+
+const beginPanelDrag = (panel, event) => {
+  if (!layoutFreeMode.value || event.button !== 0) return
+  const targetState = panel === 'video' ? floatingVideoState : floatingInteractionState
+  panelDragState.active = true
+  panelDragState.panel = panel
+  panelDragState.mode = 'drag'
+  panelDragState.startX = event.clientX
+  panelDragState.startY = event.clientY
+  panelDragState.startLeft = targetState.x
+  panelDragState.startTop = targetState.y
+}
+
+const beginPanelResize = (panel, event) => {
+  if (!layoutFreeMode.value || event.button !== 0) return
+  panelDragState.active = true
+  panelDragState.panel = panel
+  panelDragState.mode = 'resize'
+  panelDragState.startX = event.clientX
+  panelDragState.startY = event.clientY
+  if (panel === 'video') {
+    const targetState = floatingVideoState
+    panelDragState.startWidth = targetState.width
+    panelDragState.startHeight = targetState.height
+  } else if (panel === 'interaction') {
+    const targetState = floatingInteractionState
+    panelDragState.startWidth = targetState.width
+    panelDragState.startHeight = targetState.height
+  } else if (panel === 'side') {
+    panelDragState.startWidth = rightPanelWidth.value
+  }
+}
+
+const handlePanelMouseMove = (event) => {
+  if (!panelDragState.active || !layoutFreeMode.value) return
+  const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
+  const { width, height } = getWorkspaceSize()
+  if (!width || !height) return
+
+  const dx = event.clientX - panelDragState.startX
+  const dy = event.clientY - panelDragState.startY
+
+  if (panelDragState.mode === 'drag') {
+    const maxLeft = Math.max(8, width - targetState.width - 8)
+    const maxTop = Math.max(8, height - targetState.height - 8)
+    targetState.x = clamp(panelDragState.startLeft + dx, 8, maxLeft)
+    targetState.y = clamp(panelDragState.startTop + dy, 8, maxTop)
+  }
+
+  if (panelDragState.mode === 'resize') {
+    if (panelDragState.panel === 'side') {
+      rightPanelWidth.value = clamp(panelDragState.startWidth - dx, 280, Math.max(280, Math.floor(width * 0.5)))
+    } else {
+      const minWidth = panelDragState.panel === 'video' ? 280 : 320
+      const minHeight = panelDragState.panel === 'video' ? 180 : 260
+      const maxWidth = Math.max(minWidth, width - targetState.x - 16)
+      const maxHeight = Math.max(minHeight, height - targetState.y - 16)
+      targetState.width = clamp(panelDragState.startWidth + dx, minWidth, maxWidth)
+      targetState.height = clamp(panelDragState.startHeight + dy, minHeight, maxHeight)
+    }
+  }
+  scheduleWhiteboardLayoutRefresh()
+}
+
+const handlePanelMouseUp = () => {
+  if (!panelDragState.active || !layoutFreeMode.value) return
+  const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
+  applyMagneticSnap(targetState)
+  const { width, height } = getWorkspaceSize()
+  if (width && height) {
+    targetState.x = clamp(targetState.x, 8, Math.max(8, width - targetState.width - 8))
+    targetState.y = clamp(targetState.y, 8, Math.max(8, height - targetState.height - 8))
+    if (targetState.x < 24) targetState.x = 8
+    if (targetState.y < 24) targetState.y = 8
+    if (width - (targetState.x + targetState.width) < 24) {
+      targetState.x = Math.max(8, width - targetState.width - 8)
+    }
+    if (height - (targetState.y + targetState.height) < 24) {
+      targetState.y = Math.max(8, height - targetState.height - 8)
+    }
+  }
+  if (panelDragState.panel === 'side') {
+    rightPanelWidth.value = clamp(rightPanelWidth.value, 280, Math.max(280, Math.floor(width * 0.5)))
+  }
+  panelDragState.active = false
+  panelDragState.panel = ''
+  panelDragState.mode = ''
+  saveLayoutState()
+}
+
 const withTimeout = async (promise, timeoutMs, timeoutMessage) => {
   let timer = null
   try {
@@ -265,6 +1113,30 @@ const isWhiteboardUserNotExistError = (err) => {
 const isAlreadyInRoomError = (err) => {
   const msg = String(err?.message || err?.msg || err || '').toLowerCase()
   return msg.includes('already') && msg.includes('room')
+}
+
+const refreshWhiteboardLayout = async () => {
+  if (!whiteboardReady.value && !currentSuperBoardView.value) return
+  await nextTick()
+  await waitForNextPaint()
+
+  const activeSubView = currentSuperBoardView.value || (refreshCurrentSuperBoardView() ? currentSuperBoardView.value : null)
+  activeSubView?.reloadView?.()
+}
+
+const scheduleWhiteboardLayoutRefresh = () => {
+  if (whiteboardLayoutRefreshTimer.value) {
+    clearTimeout(whiteboardLayoutRefreshTimer.value)
+  }
+  whiteboardLayoutRefreshTimer.value = setTimeout(() => {
+    whiteboardLayoutRefreshTimer.value = null
+    refreshWhiteboardLayout()
+  }, 180)
+}
+
+const toggleWhiteboardFull = async () => {
+  isWhiteboardFull.value = !isWhiteboardFull.value
+  await refreshWhiteboardLayout()
 }
 
 const waitRoomConnected = async (timeoutMs = 12000) => {
@@ -293,6 +1165,55 @@ const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => 
     }
   }
 }
+
+watch(isWhiteboardFull, () => {
+  scheduleWhiteboardLayoutRefresh()
+})
+
+watch(layoutFreeMode, (enabled) => {
+  if (enabled) {
+    nextTick(() => initFreeLayoutPositions())
+  }
+  saveLayoutState()
+})
+
+watch(showVideoPanel, () => {
+  saveLayoutState()
+})
+
+watch([layoutFreeMode, showVideoPanel, isWhiteboardFull], async () => {
+  await nextTick()
+  if (layoutFreeMode.value) {
+    initFreeLayoutPositions()
+  }
+  if (showVideoPanel.value && !isWhiteboardFull.value && localStream.value) {
+    await renderLocalStream(localVideoRef.value, localStream.value)
+  }
+  saveLayoutState()
+  scheduleWhiteboardLayoutRefresh()
+})
+
+watch(showInteractionPanel, () => {
+  saveLayoutState()
+})
+
+watch(interactionCollapsed, () => {
+  saveLayoutState()
+})
+
+watch(rightPanelWidth, () => {
+  saveLayoutState()
+})
+
+watch(activeCameraDeviceId, (deviceId) => {
+  try {
+    if (deviceId) {
+      localStorage.setItem(cameraStorageKey, deviceId)
+    } else {
+      localStorage.removeItem(cameraStorageKey)
+    }
+  } catch (e) {}
+})
 
 const resetRoomSessionBeforeStart = async (roomID) => {
   if (!zg.value?.logoutRoom) return
@@ -467,15 +1388,17 @@ const handleStartLive = async () => {
       ElMessage.warning('白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
     }
 
-    localStream.value = await zg.value.createStream({
-      camera: { video: true, audio: true, videoQuality: 2, width: 1280, height: 720 }
-    })
-    
-    await renderLocalStream(localVideoRef.value, localStream.value)
+    await refreshCameraDevices()
+    await setMainCamera(activeCameraDeviceId.value || cameraDevices.value[0]?.deviceId)
 
     const streamID = 'teacher_' + roomId
-    await zg.value.startPublishingStream(streamID, localStream.value)
+    if (localStream.value) {
+      await zg.value.startPublishingStream(streamID, localStream.value)
+    }
     isLiving.value = true
+    await announceFocusedStream(streamID, 'live_start')
+    await restoreCameraPreviewTiles()
+    await restoreAutoPublishCameraStreams()
     ElMessage.success('直播已开始')
   } catch (err) {
     ElMessage.error('开始直播失败: ' + parseErrorMessage(err))
@@ -553,6 +1476,7 @@ const confirmEndLive = async () => {
 
     try {
       if (localStream.value) {
+        stopMediaStream(localStream.value)
         zg.value.destroyStream(localStream.value)
         localStream.value = null
       }
@@ -596,6 +1520,16 @@ const confirmEndLive = async () => {
     whiteboardReady.value = false
     currentSuperBoardView.value = null
     liveIdentity.value = null
+    for (const tile of cameraPreviewTiles.value) {
+      if (tile.isPublishing) {
+        try {
+          zg.value?.stopPublishingStream?.(tile.streamID)
+        } catch (e) {}
+        tile.isPublishing = false
+      }
+      stopMediaStream(tile.stream)
+    }
+    cameraPreviewTiles.value = []
 
     if (stopError) {
       throw stopError
@@ -636,6 +1570,7 @@ const toggleScreenShare = async () => {
     isScreenSharing.value = false
     const streamID = 'teacher_' + roomId
     await zg.value.startPublishingStream(streamID, localStream.value)
+    await announceFocusedStream(streamID, 'screen_share_stop')
   } else {
     try {
       screenStream.value = await zg.value.createStream({
@@ -646,6 +1581,7 @@ const toggleScreenShare = async () => {
       const screenStreamID = streamID + '_screen'
       await zg.value.startPublishingStream(screenStreamID, screenStream.value)
       isScreenSharing.value = true
+      await announceFocusedStream(screenStreamID, 'screen_share_start')
     } catch (err) {
       ElMessage.warning('屏幕共享已取消')
     }
@@ -653,8 +1589,18 @@ const toggleScreenShare = async () => {
 }
 
 const switchCamera = async () => {
-  const devices = await zg.value.enumDevices()
-  ElMessage.info('切换摄像头功能')
+  await refreshCameraDevices()
+  if (cameraDevices.value.length <= 1) {
+    ElMessage.info('当前仅检测到一个摄像头')
+    return
+  }
+  const currentIndex = cameraDevices.value.findIndex((item) => item.deviceId === activeCameraDeviceId.value)
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % cameraDevices.value.length
+  try {
+    await setMainCamera(cameraDevices.value[nextIndex].deviceId)
+  } catch (err) {
+    ElMessage.error('切换主摄像头失败：' + parseErrorMessage(err))
+  }
 }
 
 // ==================== 白板 ====================
@@ -1036,9 +1982,55 @@ onMounted(async () => {
   const res = await getLiveRoomDetail(roomId)
   roomInfo.value = res
   zegoRoomID.value = res.zegoRoomId || 'room_' + roomId
+  cameraPreviewPresets.value = loadCameraPreviewPresets()
+  try {
+    const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
+    if (savedCameraDeviceId) {
+      activeCameraDeviceId.value = savedCameraDeviceId
+    }
+  } catch (e) {}
+  const savedLayout = loadLayoutState()
+  if (savedLayout) {
+    layoutFreeMode.value = !!savedLayout.layoutFreeMode
+    showVideoPanel.value = savedLayout.showVideoPanel !== false
+    showInteractionPanel.value = savedLayout.showInteractionPanel !== false
+    interactionCollapsed.value = !!savedLayout.interactionCollapsed
+    if (savedLayout.rightPanelWidth) {
+      rightPanelWidth.value = savedLayout.rightPanelWidth
+    }
+    if (savedLayout.floatingVideoState) {
+      Object.assign(floatingVideoState, savedLayout.floatingVideoState)
+    }
+    if (savedLayout.floatingInteractionState) {
+      Object.assign(floatingInteractionState, savedLayout.floatingInteractionState)
+    }
+  }
+  initFreeLayoutPositions()
+  await refreshCameraDevices()
+  await restoreCameraPreviewTiles()
+  navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
+  document.addEventListener('mousemove', handlePanelMouseMove)
+  document.addEventListener('mouseup', handlePanelMouseUp)
 })
 
 onBeforeUnmount(() => {
+  if (whiteboardLayoutRefreshTimer.value) {
+    clearTimeout(whiteboardLayoutRefreshTimer.value)
+    whiteboardLayoutRefreshTimer.value = null
+  }
+  cameraPreviewTiles.value.forEach((tile) => {
+    if (tile.isPublishing) {
+      try {
+        zg.value?.stopPublishingStream?.(tile.streamID)
+      } catch (e) {}
+      tile.isPublishing = false
+    }
+    stopMediaStream(tile.stream)
+  })
+  cameraPreviewTiles.value = []
+  navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
+  document.removeEventListener('mousemove', handlePanelMouseMove)
+  document.removeEventListener('mouseup', handlePanelMouseUp)
   if (isLiving.value) {
     confirmEndLive()
   }
@@ -1086,10 +2078,23 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .main-area {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-width: 0;
+}
+
+.main-area.free-layout {
+  position: relative;
 }
 
 .left-panel {
@@ -1099,6 +2104,11 @@ onBeforeUnmount(() => {
   padding: 16px;
   gap: 16px;
   overflow: hidden;
+  min-width: 0;
+}
+
+.main-area.free-layout .left-panel {
+  position: relative;
 }
 
 .video-container {
@@ -1108,6 +2118,40 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   position: relative;
   overflow: hidden;
+}
+
+.video-container.floating-video {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  min-width: 280px;
+  min-height: 180px;
+}
+
+.restore-tab {
+  position: absolute;
+  z-index: 18;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.9);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.restore-video {
+  left: 24px;
+  top: 24px;
+}
+
+.restore-interaction {
+  right: 24px;
+  top: 24px;
 }
 
 .local-video {
@@ -1133,6 +2177,42 @@ onBeforeUnmount(() => {
   border-radius: 24px;
 }
 
+.floating-handle,
+.floating-panel-header {
+  height: 36px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  cursor: move;
+  user-select: none;
+}
+
+.floating-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.floating-controls {
+  bottom: 12px;
+}
+
+.resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: se-resize;
+  z-index: 5;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.28) 50%);
+}
+
 .whiteboard-container {
   flex: 1;
   background: #fff;
@@ -1140,6 +2220,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
   
   &.fullscreen {
     position: fixed;
@@ -1149,6 +2231,8 @@ onBeforeUnmount(() => {
     bottom: 0;
     z-index: 1000;
     border-radius: 0;
+    width: 100vw;
+    height: 100vh;
   }
 }
 
@@ -1181,11 +2265,114 @@ onBeforeUnmount(() => {
 .whiteboard {
   flex: 1;
   position: relative;
+  min-width: 0;
+  min-height: 0;
   
   :deep(canvas) {
     width: 100% !important;
     height: 100% !important;
   }
+}
+
+.camera-gallery {
+  border-radius: 12px;
+  background: #101427;
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.camera-gallery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #b8c5e3;
+}
+
+.camera-gallery-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.camera-scene-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.camera-gallery-count {
+  color: #8aa2d6;
+}
+
+.camera-gallery-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.camera-gallery-item {
+  background: #0b1120;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.camera-gallery-item-head {
+  min-height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 52, 96, 0.42);
+  gap: 8px;
+}
+
+.camera-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.camera-gallery-title {
+  font-size: 12px;
+  color: #d6e1ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-stream-state {
+  font-size: 11px;
+  color: #7a8bb5;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(122, 139, 181, 0.2);
+  white-space: nowrap;
+}
+
+.camera-stream-state.publishing {
+  color: #d7ffe6;
+  background: rgba(25, 173, 86, 0.28);
+}
+
+.camera-preview-video {
+  width: 100%;
+  height: 130px;
+  background: #000;
+}
+
+.camera-preview-video :deep(video) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .right-panel {
@@ -1197,6 +2384,86 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 16px;
   overflow-y: auto;
+}
+
+.right-panel.docked {
+  position: relative;
+  flex: none;
+  width: 340px;
+  min-width: 280px;
+}
+
+.right-panel.collapsed {
+  width: 52px !important;
+  min-width: 52px !important;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dock-panel-header {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: #16213e;
+  color: #fff;
+  border-bottom: 1px solid #0f3460;
+}
+
+.panel-collapsed-rail {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 2px;
+  cursor: pointer;
+  user-select: none;
+  color: #fff;
+  background: linear-gradient(180deg, #16213e 0%, #0f3460 100%);
+}
+
+.interaction-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.right-panel.docked .dock-resize-handle {
+  position: absolute;
+  left: -6px;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: ew-resize;
+  z-index: 40;
+  background: linear-gradient(90deg, transparent 0%, rgba(64, 158, 255, 0.25) 50%, transparent 100%);
+}
+
+.right-panel.floating {
+  position: absolute;
+  z-index: 30;
+  top: 16px;
+  bottom: 16px;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  background: #16213e;
+  padding: 0 12px 24px;
+  gap: 12px;
+}
+
+.right-panel.floating :deep(.panel-card) {
+  margin-top: 12px;
+}
+
+.right-panel.floating .resize-handle {
+  right: 0;
+  bottom: 0;
 }
 
 .panel-card {
