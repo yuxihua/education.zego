@@ -261,6 +261,26 @@ const isWhiteboardUserNotExistError = (err) => {
   return code === 3110002 || msg.includes('用户不存在') || msg.toLowerCase().includes('user not exist')
 }
 
+const isAlreadyInRoomError = (err) => {
+  const msg = String(err?.message || err?.msg || err || '').toLowerCase()
+  return msg.includes('already') && msg.includes('room')
+}
+
+const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => {
+  if (!zg.value?.loginRoom) return
+  try {
+    await withTimeout(
+      zg.value.loginRoom(roomID, token, { userID, userName }),
+      6000,
+      '白板前房间保活登录超时（6秒）'
+    )
+  } catch (err) {
+    if (!isAlreadyInRoomError(err)) {
+      console.warn('[LivePush] ensureRoomLoginForWhiteboard ignored error:', err)
+    }
+  }
+}
+
 // ==================== 初始化 ZEGO ====================
 const initZego = async () => {
   zg.value = ZEGO_CONFIG.server
@@ -597,6 +617,8 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   let lastError = null
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
+      await ensureRoomLoginForWhiteboard(roomID, token, userID, userName)
+
       if (attempt > 0) {
         try {
           zegoSuperBoard.value.destroy?.()
