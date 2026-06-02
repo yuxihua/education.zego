@@ -1734,9 +1734,18 @@ const syncAudienceRoomStatus = async () => {
       isLiving.value = true
       wbStageText.value = wbStageText.value || '白板同步中...'
       clearAudienceRoomStatusRetryTimer()
-      if (!audienceAutoJoinStarted.value && liveIdentity.value) {
+      const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
+      if (!audienceAutoJoinStarted.value && authInfo?.token && authInfo?.userId) {
+        if (!zg.value) {
+          await initZego()
+        }
         audienceAutoJoinStarted.value = true
-        await startAudienceSession(liveIdentity.value)
+        try {
+          await startAudienceSession(authInfo)
+        } catch (err) {
+          audienceAutoJoinStarted.value = false
+          wbStageText.value = '听课连接失败，正在重试...'
+        }
       }
       return
     }
@@ -3077,12 +3086,25 @@ onMounted(async () => {
   await nextTick()
   clampWhiteboardPanelHeight()
   clampWhiteboardPanelWidth()
+  if (isAssistantUser && !zg.value) {
+    try {
+      await initZego()
+    } catch (e) {}
+  }
   try {
     const authInfo = await getZegoAuth()
     canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
     if ((isAssistantUser || !authInfo?.canPublish) && !audienceAutoJoinStarted.value) {
+      if (!zg.value) {
+        await initZego()
+      }
       audienceAutoJoinStarted.value = true
-      await startAudienceSession(authInfo)
+      try {
+        await startAudienceSession(authInfo)
+      } catch (audErr) {
+        audienceAutoJoinStarted.value = false
+        wbStageText.value = '听课连接失败，正在重试...'
+      }
     }
     if (!isAssistantUser && canPublishLive.value && roomAlreadyLiving && !teacherAutoResumeStarted.value) {
       teacherAutoResumeStarted.value = true
@@ -3091,7 +3113,11 @@ onMounted(async () => {
     if (isAssistantUser || !authInfo?.canPublish) {
       syncAudienceRoomStatus()
     }
-  } catch (err) {}
+  } catch (err) {
+    if (!canPublishLive.value) {
+      wbStageText.value = '听课初始化失败，正在重试...'
+    }
+  }
   await refreshCameraDevices()
   await restoreCameraPreviewTiles()
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
