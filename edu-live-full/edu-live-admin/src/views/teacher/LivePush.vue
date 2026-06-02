@@ -477,6 +477,7 @@ const localVideoRef = ref(null)
 const zegoAuthInfo = ref(null)
 const liveIdentity = ref(null)
 const roomState = ref('DISCONNECTED')
+const engineAppID = ref(0)
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
 const whiteboardLayoutRefreshTimer = ref(null)
@@ -1576,6 +1577,7 @@ const initZego = async () => {
   zg.value = ZEGO_CONFIG.server
     ? new ZegoExpressEngine(ZEGO_CONFIG.appID, ZEGO_CONFIG.server)
     : new ZegoExpressEngine(ZEGO_CONFIG.appID)
+  engineAppID.value = Number(ZEGO_CONFIG.appID || 0)
   
   // 监听房间用户变化
   zg.value.on('roomUserUpdate', (roomID, updateType, userList) => {
@@ -1690,8 +1692,17 @@ const getZegoAuth = async () => {
   }
 
   const authInfo = data.data || {}
-  ZEGO_CONFIG.appID = Number(authInfo.appId || 0)
+  const nextAppID = Number(authInfo.appId || 0)
+  ZEGO_CONFIG.appID = nextAppID
   ZEGO_CONFIG.server = authInfo.server || null
+  if (zg.value && engineAppID.value && nextAppID && engineAppID.value !== nextAppID) {
+    try {
+      zg.value.destroyEngine?.()
+    } catch (e) {}
+    zg.value = null
+    engineAppID.value = 0
+    roomState.value = 'DISCONNECTED'
+  }
   zegoAuthInfo.value = authInfo
   return authInfo
 }
@@ -1867,6 +1878,7 @@ const startAudienceSession = async (authInfo) => {
       zg.value?.destroyEngine?.()
     } catch (e) {}
     zg.value = null
+    engineAppID.value = 0
     roomState.value = 'DISCONNECTED'
     await initZego()
 
@@ -3145,11 +3157,6 @@ onMounted(async () => {
     await nextTick()
     clampWhiteboardPanelHeight()
     clampWhiteboardPanelWidth()
-    if (isAssistantUser && !zg.value) {
-      try {
-        await initZego()
-      } catch (e) {}
-    }
     try {
       const authInfo = await getZegoAuth()
       canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
