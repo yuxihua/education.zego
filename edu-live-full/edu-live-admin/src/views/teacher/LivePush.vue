@@ -70,6 +70,7 @@
             <el-button size="small" @click="prevPage" :disabled="currentPage <= 1">上一页</el-button>
             <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
             <el-button size="small" @click="nextPage" :disabled="currentPage >= totalPage">下一页</el-button>
+            <span v-if="wbStageText" class="wb-stage">{{ wbStageText }}</span>
             <el-button size="small" @click="isWhiteboardFull = !isWhiteboardFull">
               {{ isWhiteboardFull ? '退出全屏' : '全屏' }}
             </el-button>
@@ -190,6 +191,7 @@ const currentPage = ref(1)
 const totalPage = ref(1)
 const whiteboardReady = ref(false)
 const whiteboardDomId = `teacher-whiteboard-${roomId}`
+const wbStageText = ref('')
 
 // 连麦
 const handUpList = ref([])
@@ -431,13 +433,21 @@ const switchToCreatedSubView = async (result) => {
     return
   }
 
-  await boardView.switchSuperBoardSubView(uniqueID)
+  await withTimeout(
+    boardView.switchSuperBoardSubView(uniqueID),
+    8000,
+    '切换课件白板超时（8秒）'
+  )
   refreshCurrentSuperBoardView()
 }
 
 const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 45, interval = 1000) => {
   for (let retry = 0; retry < maxRetry; retry += 1) {
-    const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
+    const subViewList = await withTimeout(
+      zegoSuperBoard.value.querySuperBoardSubViewList(),
+      5000,
+      '查询白板子视图超时（5秒）'
+    )
     const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === fileName)
     if (targetSubView?.uniqueID) {
       return targetSubView
@@ -589,11 +599,19 @@ const initWhiteboard = async (roomID, token, userID, userName) => {
   let lastError = null
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
+      const subViewList = await withTimeout(
+        zegoSuperBoard.value.querySuperBoardSubViewList(),
+        5000,
+        '查询白板子视图超时（5秒）'
+      )
       if (Array.isArray(subViewList) && subViewList.length > 0) {
         const target = subViewList[subViewList.length - 1]
         if (target?.uniqueID) {
-          await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(target.uniqueID)
+          await withTimeout(
+            zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(target.uniqueID),
+            8000,
+            '切换白板子视图超时（8秒）'
+          )
           refreshCurrentSuperBoardView()
           whiteboardReady.value = true
           return
@@ -702,9 +720,11 @@ const uploadPPT = async () => {
         showClose: true,
         message: '正在准备白板和课件，请稍候（通常 10-60 秒）...'
       })
+      wbStageText.value = '准备中...'
 
       if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
         ElMessage.info('步骤 1/3：正在准备白板环境...')
+        wbStageText.value = '步骤 1/3：准备白板环境'
         try {
           await withTimeout(
             ensureWhiteboardReadyForUpload(),
@@ -718,6 +738,7 @@ const uploadPPT = async () => {
       }
       
       ElMessage.info('步骤 2/3：PPT 上传中...')
+      wbStageText.value = '步骤 2/3：上传课件'
       // SDK 在不同打包形态下可能拿不到枚举对象，这里使用固定数值更稳定：
       // IMG = 2, DynamicPPTH5 = 6, VectorAndIMG = 3
       const primaryRenderType = isPdf ? 2 : 6
@@ -755,6 +776,7 @@ const uploadPPT = async () => {
       }
 
       ElMessage.info('步骤 3/3：正在创建并切换课件视图...')
+      wbStageText.value = '步骤 3/3：创建并切换课件视图'
 
       let wbResult = null
       try {
@@ -774,11 +796,19 @@ const uploadPPT = async () => {
       }
 
       if (!switched) {
-        const targetSubView = await waitAndFindFileSubView(fileID, file.name)
+        const targetSubView = await withTimeout(
+          waitAndFindFileSubView(fileID, file.name),
+          50000,
+          '等待课件白板生成超时（50秒）'
+        )
         if (!targetSubView?.uniqueID) {
           throw new Error('课件正在转码，暂未生成可展示白板，请稍后再试')
         }
-        await zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID)
+        await withTimeout(
+          zegoSuperBoard.value.getSuperBoardView()?.switchSuperBoardSubView(targetSubView.uniqueID),
+          8000,
+          '切换课件白板超时（8秒）'
+        )
         refreshCurrentSuperBoardView()
         switched = !!currentSuperBoardView.value
       }
@@ -787,8 +817,10 @@ const uploadPPT = async () => {
         throw new Error('已上传课件，但未切换到课件白板')
       }
 
+      wbStageText.value = '课件已显示'
       ElMessage.success('PPT 加载成功')
     } catch (err) {
+      wbStageText.value = '失败：' + parseErrorMessage(err, '未知错误')
       ElMessage.error('PPT 上传失败: ' + parseErrorMessage(err, '请检查白板转码配置'))
       console.error('[LivePush] PPT 上传流程异常:', err)
     } finally {
@@ -1013,6 +1045,15 @@ onBeforeUnmount(() => {
     font-size: 14px;
     min-width: 60px;
     text-align: center;
+  }
+
+  .wb-stage {
+    max-width: 360px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    color: #666;
   }
 }
 
