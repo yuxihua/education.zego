@@ -1424,6 +1424,11 @@ const isAlreadyInRoomError = (err) => {
   return msg.includes('already') && msg.includes('room')
 }
 
+const isLoginRoomLimitError = (err) => {
+  const msg = String(err?.message || err?.msg || err || '').toLowerCase()
+  return msg.includes('login rooms exceeds the upper limit') || (msg.includes('login') && msg.includes('upper limit'))
+}
+
 const refreshWhiteboardLayout = async () => {
   if (!whiteboardReady.value && !currentSuperBoardView.value) return
   await nextTick()
@@ -1461,6 +1466,7 @@ const waitRoomConnected = async (timeoutMs = 12000) => {
 
 const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => {
   if (!zg.value?.loginRoom) return
+  if (String(roomState.value || '').toUpperCase() === 'CONNECTED') return
   try {
     await withTimeout(
       zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
@@ -1816,11 +1822,31 @@ const startAudienceSession = async (authInfo) => {
   await resetRoomSessionBeforeStart(zegoRoomID.value)
   roomState.value = 'DISCONNECTED'
 
-  await withTimeout(
-    zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
-    8000,
-    '登录房间超时（8秒）'
-  )
+  try {
+    await withTimeout(
+      zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+      8000,
+      '登录房间超时（8秒）'
+    )
+  } catch (loginErr) {
+    if (!isLoginRoomLimitError(loginErr)) {
+      throw loginErr
+    }
+
+    // 房间登录上限异常时重建引擎并重试一次，避免页面卡死在听课空白。
+    try {
+      zg.value?.destroyEngine?.()
+    } catch (e) {}
+    zg.value = null
+    roomState.value = 'DISCONNECTED'
+    await initZego()
+
+    await withTimeout(
+      zg.value.loginRoom(zegoRoomID.value, token, { userID, userName }, { userUpdate: true }),
+      8000,
+      '重试登录房间超时（8秒）'
+    )
+  }
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
   try {
@@ -1852,7 +1878,7 @@ const handleStartLive = async () => {
     const isAssistantUser = audienceMode || userStore.userInfo?.role === 'assistant'
     const authInfo = await ensureZegoReady()
     canPublishLive.value = !!authInfo.canPublish && !isAssistantUser
-    if (!authInfo.canPublish) {
+    if (!canPublishLive.value) {
       await startAudienceSession(authInfo)
       return
     }
