@@ -236,6 +236,22 @@ const renderLocalStream = async (container, stream) => {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const withTimeout = async (promise, timeoutMs, timeoutMessage) => {
+  let timer = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(timeoutMessage || '操作超时'))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 const isWhiteboardUserNotExistError = (err) => {
   const code = Number(err?.code || err?.errorCode || 0)
   const msg = String(err?.message || err?.msg || err || '')
@@ -419,7 +435,7 @@ const switchToCreatedSubView = async (result) => {
   refreshCurrentSuperBoardView()
 }
 
-const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 30, interval = 1000) => {
+const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 45, interval = 1000) => {
   for (let retry = 0; retry < maxRetry; retry += 1) {
     const subViewList = await zegoSuperBoard.value.querySuperBoardSubViewList()
     const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === fileName)
@@ -662,6 +678,7 @@ const uploadPPT = async () => {
   input.value = ''
   document.body.appendChild(input)
   input.onchange = async (e) => {
+    let loadingMsg = null
     try {
       const file = e?.target?.files?.[0]
       if (!file) {
@@ -679,17 +696,28 @@ const uploadPPT = async () => {
         return
       }
 
+      loadingMsg = ElMessage({
+        type: 'info',
+        duration: 0,
+        showClose: true,
+        message: '正在准备白板和课件，请稍候（通常 10-60 秒）...'
+      })
+
       if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
-        ElMessage.info('正在准备白板环境...')
+        ElMessage.info('步骤 1/3：正在准备白板环境...')
         try {
-          await ensureWhiteboardReadyForUpload()
+          await withTimeout(
+            ensureWhiteboardReadyForUpload(),
+            20000,
+            '白板初始化超时（20秒），请结束直播后重开再试'
+          )
         } catch (err) {
           ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
           return
         }
       }
       
-      ElMessage.info('PPT 上传中...')
+      ElMessage.info('步骤 2/3：PPT 上传中...')
       // SDK 在不同打包形态下可能拿不到枚举对象，这里使用固定数值更稳定：
       // IMG = 2, DynamicPPTH5 = 6, VectorAndIMG = 3
       const primaryRenderType = isPdf ? 2 : 6
@@ -697,26 +725,44 @@ const uploadPPT = async () => {
       let fileID = ''
 
       try {
-        fileID = await zegoSuperBoard.value.uploadFile(
-          file,
-          primaryRenderType,
-          () => {},
-          { renderImgType: 1 }
+        fileID = await withTimeout(
+          zegoSuperBoard.value.uploadFile(
+            file,
+            primaryRenderType,
+            () => {},
+            { renderImgType: 1 }
+          ),
+          120000,
+          '课件上传或转码启动超时（120秒）'
         )
       } catch (primaryErr) {
         if (isPdf) throw primaryErr
         // 动态PPT不可用时自动回退到通用模式，保证可展示
-        fileID = await zegoSuperBoard.value.uploadFile(
-          file,
-          fallbackRenderType,
-          () => {},
-          { renderImgType: 1 }
+        fileID = await withTimeout(
+          zegoSuperBoard.value.uploadFile(
+            file,
+            fallbackRenderType,
+            () => {},
+            { renderImgType: 1 }
+          ),
+          120000,
+          '课件上传或转码启动超时（120秒）'
         )
       }
 
+      if (!fileID) {
+        throw new Error('上传未返回 fileID，无法创建课件视图')
+      }
+
+      ElMessage.info('步骤 3/3：正在创建并切换课件视图...')
+
       let wbResult = null
       try {
-        wbResult = await zegoSuperBoard.value.createFileView({ fileID })
+        wbResult = await withTimeout(
+          zegoSuperBoard.value.createFileView({ fileID }),
+          30000,
+          '创建课件视图超时（30秒）'
+        )
       } catch (createErr) {
         console.warn('[LivePush] createFileView failed, fallback to query list:', createErr)
       }
@@ -746,6 +792,7 @@ const uploadPPT = async () => {
       ElMessage.error('PPT 上传失败: ' + parseErrorMessage(err, '请检查白板转码配置'))
       console.error('[LivePush] PPT 上传流程异常:', err)
     } finally {
+      loadingMsg?.close?.()
       input.value = ''
       input.remove()
     }
