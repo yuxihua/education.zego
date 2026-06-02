@@ -532,6 +532,7 @@ const parseErrorMessage = (err, fallback = '未知错误') => {
 }
 
 const normalizeRoomID = (value) => String(value || '').trim()
+const getFallbackRoomID = () => normalizeRoomID(`room_${roomId}`)
 
 const ensureRoomIDReady = async () => {
   let roomID = normalizeRoomID(zegoRoomID.value || roomInfo.value?.zegoRoomId)
@@ -546,7 +547,8 @@ const ensureRoomIDReady = async () => {
   }
   roomID = normalizeRoomID(detail?.zegoRoomId)
   if (!roomID) {
-    throw new Error('直播间 roomID 为空，无法初始化直播会话')
+    roomID = getFallbackRoomID()
+    console.warn('[LivePush] roomID missing from room detail, fallback to:', roomID)
   }
   zegoRoomID.value = roomID
   return roomID
@@ -1841,6 +1843,7 @@ const startAudienceSession = async (authInfo) => {
   const userName = authInfo.userName
   const token = authInfo.token
   const roomID = await ensureRoomIDReady()
+  zegoRoomID.value = roomID
   liveIdentity.value = { userId: userID, userName, token }
   isLiving.value = true
   wbStageText.value = '白板同步中...'
@@ -2257,6 +2260,8 @@ const switchCamera = async () => {
 
 // ==================== 白板 ====================
 const initWhiteboard = async (roomID, token, userID, userName, options = {}) => {
+  const targetRoomID = normalizeRoomID(roomID) || (await ensureRoomIDReady())
+  zegoRoomID.value = targetRoomID
   const { viewerOnly = false } = options
   await nextTick()
 
@@ -2273,7 +2278,7 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
   let lastError = null
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      await ensureRoomLoginForWhiteboard(roomID, token, userID, userName)
+      await ensureRoomLoginForWhiteboard(targetRoomID, token, userID, userName)
 
       if (attempt > 0) {
         try {
@@ -2287,7 +2292,7 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
           parentDomID: whiteboardDomId,
           appID: ZEGO_CONFIG.appID,
           token: token,
-          roomID: roomID,
+          roomID: targetRoomID,
           userID: userID,
           userName: userName || userID,
           isTestEnv: false
@@ -2349,15 +2354,15 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
         wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${userID}`
         console.warn('[LivePush] whiteboard user not exist, retrying', {
           attempt: attempt + 1,
-          roomID,
+          roomID: targetRoomID,
           userID,
           err
         })
 
         // 开播前阶段允许强制重建房间会话，提升白板识别用户成功率。
         if (!isLiving.value || !localStream.value) {
-          await resetRoomSessionBeforeStart(roomID)
-          await ensureRoomLoginForWhiteboard(roomID, token, userID, userName)
+          await resetRoomSessionBeforeStart(targetRoomID)
+          await ensureRoomLoginForWhiteboard(targetRoomID, token, userID, userName)
         }
 
         await delay(1500)
