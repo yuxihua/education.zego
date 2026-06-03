@@ -1774,34 +1774,16 @@ const playAudienceStream = async (streamID, options = {}) => {
       audienceMainStreamID.value = ''
     }
 
-    let started = false
-    try {
-      await zg.value.startPlayingStream(streamID, {
-        video: localVideoRef.value,
-        audio: true
-      })
-      started = true
-    } catch (bindErr) {
-      try {
-        const remoteStream = await zg.value.startPlayingStream(streamID)
-        await renderRemoteStream(localVideoRef.value, remoteStream)
-        started = true
-      } catch (fallbackErr) {
-        console.warn('[LivePush] playAudienceStream failed', {
-          streamID,
-          bindError: parseErrorMessage(bindErr),
-          fallbackError: parseErrorMessage(fallbackErr)
-        })
-      }
-    }
-
-    if (!started) {
-      throw new Error('播放老师画面失败')
-    }
+    const remoteStream = await zg.value.startPlayingStream(streamID)
+    await renderRemoteStream(localVideoRef.value, remoteStream)
 
     audienceMainStreamID.value = streamID
     return true
   } catch (e) {
+    console.warn('[LivePush] playAudienceStream failed', {
+      streamID,
+      error: parseErrorMessage(e)
+    })
     if (!silent) {
       ElMessage.info('已进入房间，等待老师开始推流...')
     }
