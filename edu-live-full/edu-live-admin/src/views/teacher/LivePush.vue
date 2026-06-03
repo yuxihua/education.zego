@@ -490,6 +490,7 @@ const audienceWhiteboardSyncing = ref(false)
 const audienceWhiteboardBootstrapping = ref(false)
 const audienceWhiteboardHeartbeatTimer = ref(null)
 const latestTeacherWhiteboardSubViewID = ref('')
+const teacherWhiteboardHeartbeatTimer = ref(null)
 const audienceRoomStatusRetryTimer = ref(null)
 const audienceRoomStatusRetryCount = ref(0)
 const workspaceRef = ref(null)
@@ -971,6 +972,24 @@ const announceWhiteboardSubView = async (uniqueID, source = 'teacher') => {
       JSON.stringify({ type: 'wb_subview_focus', uniqueID, source })
     )
   } catch (err) {}
+}
+
+const clearTeacherWhiteboardHeartbeatTimer = () => {
+  if (teacherWhiteboardHeartbeatTimer.value) {
+    clearInterval(teacherWhiteboardHeartbeatTimer.value)
+    teacherWhiteboardHeartbeatTimer.value = null
+  }
+}
+
+const startTeacherWhiteboardHeartbeat = () => {
+  if (teacherWhiteboardHeartbeatTimer.value) return
+  teacherWhiteboardHeartbeatTimer.value = setInterval(() => {
+    if (!canPublishLive.value || !isLiving.value) return
+    const uniqueID = currentSuperBoardView.value?.getModel?.()?.uniqueID || latestTeacherWhiteboardSubViewID.value
+    if (!uniqueID) return
+    latestTeacherWhiteboardSubViewID.value = String(uniqueID)
+    announceWhiteboardSubView(String(uniqueID), 'heartbeat')
+  }, 3000)
 }
 
 const applyScenePreset = async (preset) => {
@@ -2177,6 +2196,7 @@ const handleStartLive = async () => {
 const teardownSessionWithoutEndingLive = async () => {
   clearAudiencePlayRetryTimer()
   clearAudienceWhiteboardHeartbeatTimer()
+  clearTeacherWhiteboardHeartbeatTimer()
   const streamID = 'teacher_' + roomId
   try {
     if (canPublishLive.value) {
@@ -2280,6 +2300,7 @@ const switchToCreatedSubView = async (result) => {
     latestTeacherWhiteboardSubViewID.value = String(currentUniqueID)
     if (canPublishLive.value) {
       announceWhiteboardSubView(String(currentUniqueID), 'switch_subview')
+      startTeacherWhiteboardHeartbeat()
     }
   }
 }
@@ -2369,6 +2390,7 @@ const confirmEndLive = async () => {
     liveIdentity.value = null
     clearAudienceWhiteboardRetryTimer()
     clearAudienceWhiteboardHeartbeatTimer()
+    clearTeacherWhiteboardHeartbeatTimer()
     audienceWhiteboardSyncing.value = false
     for (const tile of cameraPreviewTiles.value) {
       if (tile.isPublishing) {
@@ -2519,6 +2541,14 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
 
       if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
         whiteboardReady.value = true
+        const currentUniqueID = currentSuperBoardView.value?.getModel?.()?.uniqueID
+        if (currentUniqueID) {
+          latestTeacherWhiteboardSubViewID.value = String(currentUniqueID)
+          if (canPublishLive.value) {
+            announceWhiteboardSubView(String(currentUniqueID), 'init_ready')
+            startTeacherWhiteboardHeartbeat()
+          }
+        }
         return true
       }
 
@@ -2608,6 +2638,9 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       }
 
       whiteboardReady.value = true
+      if (canPublishLive.value) {
+        startTeacherWhiteboardHeartbeat()
+      }
       return true
     } catch (err) {
       lastError = err
@@ -3468,6 +3501,7 @@ onBeforeUnmount(() => {
   }
   clearAudienceWhiteboardRetryTimer()
   clearAudienceWhiteboardHeartbeatTimer()
+  clearTeacherWhiteboardHeartbeatTimer()
   clearAudienceRoomStatusRetryTimer()
   clearAudiencePlayRetryTimer()
   audienceWhiteboardSyncing.value = false
