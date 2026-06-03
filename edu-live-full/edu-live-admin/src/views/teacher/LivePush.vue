@@ -2215,8 +2215,8 @@ const handleStartLive = async () => {
 
       // 房间连接成功后创建/挂载白板
       await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
-      await initWhiteboard(roomID, token, userID, userName)
-      wbStageText.value = '白板就绪'
+      const wbReady = await initWhiteboard(roomID, token, userID, userName)
+      wbStageText.value = wbReady ? '白板就绪' : (wbStageText.value || '恢复历史白板中...')
     } catch (wbErr) {
       whiteboardReady.value = false
       wbStageText.value = '白板未就绪：' + parseErrorMessage(wbErr)
@@ -2692,12 +2692,12 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       let existingTeacherSubView = null
       let querySucceeded = false
       let hasAnySubView = false
-      for (let queryTry = 0; queryTry < 4; queryTry += 1) {
+      for (let queryTry = 0; queryTry < 2; queryTry += 1) {
         try {
           const subViewList = await withTimeout(
             zegoSuperBoard.value.querySuperBoardSubViewList(),
-            12000,
-            '查询白板子视图超时（12秒）'
+            4000,
+            '查询白板子视图超时（4秒）'
           )
           querySucceeded = true
           hasAnySubView = Array.isArray(subViewList) && subViewList.length > 0
@@ -2732,14 +2732,16 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
           return true
         }
 
-        await delay(900)
+        await delay(400)
       }
 
-      if (preferExistingTeacherBoard && !querySucceeded) {
-        throw new Error('恢复历史白板失败：白板列表查询超时，请稍后重试')
-      }
-      if (preferExistingTeacherBoard && hasAnySubView) {
-        throw new Error('恢复历史白板失败：未找到可切换白板视图，请稍后重试')
+      // 断网重进阶段不阻塞回房流程：优先恢复历史白板，失败则先允许进房，后续由心跳/重试继续恢复。
+      if (preferExistingTeacherBoard) {
+        whiteboardReady.value = false
+        wbStageText.value = !querySucceeded
+          ? '恢复历史白板中（网络波动）...'
+          : (hasAnySubView ? '恢复历史白板中...' : '等待白板同步...')
+        return false
       }
 
       const result = await withTimeout(
