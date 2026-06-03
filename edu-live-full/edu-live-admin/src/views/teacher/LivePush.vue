@@ -398,6 +398,8 @@ const currentRoomLoginUserID = ref('')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
 const audienceStageStreamID = ref('')
+const audienceMainRemoteStream = ref(null)
+const audienceStageRemoteStream = ref(null)
 const audiencePlayRetryTimer = ref(null)
 const audiencePlayRetryCount = ref(0)
 const stageLayoutRefreshTimer = ref(null)
@@ -608,6 +610,7 @@ const clearAudienceStageStream = () => {
     } catch (e) {}
     audienceStageStreamID.value = ''
   }
+  audienceStageRemoteStream.value = null
   clearStageCanvas()
 }
 
@@ -615,11 +618,19 @@ const restoreAudiencePlaybackViews = async () => {
   if (canPublishLive.value || !isLiving.value || !zg.value) return
 
   if (showVideoPanel.value && !isStageFull.value && audienceMainStreamID.value) {
-    await playAudienceStream(audienceMainStreamID.value, { silent: true })
+    if (localVideoRef.value && audienceMainRemoteStream.value) {
+      await renderRemoteStream(localVideoRef.value, audienceMainRemoteStream.value)
+    } else {
+      await playAudienceStream(audienceMainStreamID.value, { silent: true })
+    }
   }
 
   if (audienceStageStreamID.value) {
-    await playAudienceStageStream(audienceStageStreamID.value, { silent: true })
+    if (audienceStageRemoteStream.value) {
+      await renderStageScreenStream(audienceStageRemoteStream.value)
+    } else {
+      await playAudienceStageStream(audienceStageStreamID.value, { silent: true })
+    }
   }
 }
 
@@ -1511,6 +1522,12 @@ watch([layoutFreeMode, showVideoPanel, isStageFull], async () => {
   scheduleStageLayoutRefresh()
 })
 
+watch([localVideoRef, stageScreenHostRef], async () => {
+  if (canPublishLive.value || !isLiving.value) return
+  await nextTick()
+  await restoreAudiencePlaybackViews()
+})
+
 watch(() => cameraPreviewTiles.value.length, async () => {
   await nextTick()
   clampStagePanelHeight()
@@ -1623,6 +1640,7 @@ const initZego = async () => {
             zg.value.stopPlayingStream(stream.streamID)
           } catch (e) {}
           audienceMainStreamID.value = ''
+          audienceMainRemoteStream.value = null
           if (localVideoRef.value) {
             localVideoRef.value.innerHTML = ''
           }
@@ -1740,17 +1758,24 @@ const playAudienceStream = async (streamID, options = {}) => {
   if (!zg.value || !localVideoRef.value || !streamID) return false
   const { silent = false } = options
   try {
+    if (audienceMainStreamID.value && audienceMainStreamID.value === streamID && audienceMainRemoteStream.value) {
+      await renderRemoteStream(localVideoRef.value, audienceMainRemoteStream.value)
+      return true
+    }
+
     if (audienceMainStreamID.value) {
       try {
         zg.value.stopPlayingStream(audienceMainStreamID.value)
       } catch (e) {}
       audienceMainStreamID.value = ''
+      audienceMainRemoteStream.value = null
     }
 
     const remoteStream = await zg.value.startPlayingStream(streamID)
     await renderRemoteStream(localVideoRef.value, remoteStream)
 
     audienceMainStreamID.value = streamID
+    audienceMainRemoteStream.value = remoteStream
     return true
   } catch (e) {
     console.warn('[LivePush] playAudienceStream failed', {
@@ -1768,17 +1793,24 @@ const playAudienceStageStream = async (streamID, options = {}) => {
   if (!zg.value || !stageScreenHostRef.value || !streamID) return false
   const { silent = false } = options
   try {
+    if (audienceStageStreamID.value && audienceStageStreamID.value === streamID && audienceStageRemoteStream.value) {
+      await renderStageScreenStream(audienceStageRemoteStream.value)
+      return true
+    }
+
     if (audienceStageStreamID.value && audienceStageStreamID.value !== streamID) {
       try {
         zg.value.stopPlayingStream(audienceStageStreamID.value)
       } catch (e) {}
       audienceStageStreamID.value = ''
+      audienceStageRemoteStream.value = null
     }
 
     const remoteStream = await zg.value.startPlayingStream(streamID)
     await renderStageScreenStream(remoteStream)
 
     audienceStageStreamID.value = streamID
+    audienceStageRemoteStream.value = remoteStream
     return true
   } catch (e) {
     console.warn('[LivePush] playAudienceStageStream failed', {
@@ -2019,6 +2051,7 @@ const teardownSessionWithoutEndingLive = async () => {
     } else if (audienceMainStreamID.value) {
       zg.value?.stopPlayingStream?.(audienceMainStreamID.value)
       audienceMainStreamID.value = ''
+      audienceMainRemoteStream.value = null
     }
   } catch (e) {}
   if (!canPublishLive.value) {
@@ -2083,6 +2116,7 @@ const confirmEndLive = async () => {
         zg.value.stopPlayingStream(audienceMainStreamID.value)
       } catch (e) {}
       audienceMainStreamID.value = ''
+      audienceMainRemoteStream.value = null
     }
 
     try {
