@@ -282,6 +282,18 @@
             <div v-for="stream in coHostStreams" :key="stream.streamID" class="cohost-item">
               <div :id="'cohost-' + stream.streamID" class="cohost-video"></div>
               <span class="cohost-name">{{ stream.userName }}</span>
+              <span v-if="stream.isAssistant" class="cohost-mic-state" :class="{ on: stream.micEnabled }">
+                {{ stream.micEnabled ? '助教麦克风开启' : '助教麦克风关闭' }}
+              </span>
+              <el-button
+                v-if="stream.isAssistant"
+                link
+                :type="stream.micEnabled ? 'warning' : 'success'"
+                size="small"
+                @click="toggleAssistantMic(stream)"
+              >
+                {{ stream.micEnabled ? '关闭助教麦克风' : '打开助教麦克风' }}
+              </el-button>
               <el-button link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
             </div>
           </div>
@@ -432,9 +444,16 @@ const cameraPreviewStorageKey = `teacher_live_push_camera_previews_${roomId}`
 const snapDistance = 24
 const defaultDockedRightPanelWidth = 280
 const rightPanelWidth = ref(defaultDockedRightPanelWidth)
+const assistantPublishStream = ref(null)
+const assistantPublishStreamProvider = ref('native')
+const assistantPublishStreamID = ref('')
+const assistantMicEnabled = ref(true)
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
+
+const isAssistantAudienceUser = () => audienceMode || userStore.userInfo?.role === 'assistant'
+const buildAssistantStreamID = (userID) => `assistant_${roomId}_${String(userID || '').trim() || 'unknown'}`
 
 const parseErrorMessage = (err, fallback = '未知错误') => {
   if (!err) return fallback
@@ -579,6 +598,7 @@ const clearStageCanvas = () => {
 }
 
 const isScreenShareStreamID = (streamID) => String(streamID || '').endsWith('_screen')
+const isAssistantStreamID = (streamID) => String(streamID || '').startsWith(`assistant_${roomId}_`)
 
 const renderStageScreenStream = async (stream) => {
   if (!stageScreenHostRef.value || !stream) return
@@ -917,6 +937,56 @@ const publishMainCameraStream = async (stream, provider = 'native') => {
   if (isLiving.value && !isScreenSharing.value) {
     await zg.value.startPublishingStream(streamID, localStream.value)
   }
+}
+
+const applyAssistantMicState = (enabled) => {
+  assistantMicEnabled.value = !!enabled
+  if (!assistantPublishStream.value) return
+  try {
+    assistantPublishStream.value.getAudioTracks().forEach((track) => {
+      track.enabled = assistantMicEnabled.value
+    })
+  } catch (e) {}
+}
+
+const startAssistantPublishing = async (authInfo) => {
+  if (canPublishLive.value || !isAssistantAudienceUser() || !zg.value || !isLiving.value) return false
+  if (assistantPublishStream.value && assistantPublishStreamID.value) return true
+
+  const nextStreamID = buildAssistantStreamID(authInfo?.userId || currentRoomLoginUserID.value)
+  try {
+    const stream = await createZegoCameraStream('', true)
+    assistantPublishStream.value = stream
+    assistantPublishStreamProvider.value = 'zego'
+    assistantPublishStreamID.value = nextStreamID
+    applyAssistantMicState(true)
+    await zg.value.startPublishingStream(nextStreamID, stream)
+    return true
+  } catch (err) {
+    console.warn('[LivePush] startAssistantPublishing failed:', err)
+    if (assistantPublishStream.value) {
+      releaseMediaStream(assistantPublishStream.value, assistantPublishStreamProvider.value)
+      assistantPublishStream.value = null
+    }
+    assistantPublishStreamProvider.value = 'native'
+    assistantPublishStreamID.value = ''
+    return false
+  }
+}
+
+const stopAssistantPublishing = async () => {
+  try {
+    if (assistantPublishStreamID.value) {
+      zg.value?.stopPublishingStream?.(assistantPublishStreamID.value)
+    }
+  } catch (e) {}
+  if (assistantPublishStream.value) {
+    releaseMediaStream(assistantPublishStream.value, assistantPublishStreamProvider.value)
+    assistantPublishStream.value = null
+  }
+  assistantPublishStreamProvider.value = 'native'
+  assistantPublishStreamID.value = ''
+  assistantMicEnabled.value = true
 }
 
 const announceFocusedStream = async (streamID, source = 'teacher') => {
@@ -1599,6 +1669,10 @@ const initZego = async () => {
           const teacherStreamPrefix = `teacher_${roomId}`
           const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
           const isTeacherScreenStream = isScreenShareStreamID(stream.streamID)
+          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
+          if (isAssistantStreamID(stream.streamID) && currentUserID && String(stream.userID || '').trim() === currentUserID) {
+            continue
+          }
           if (isTeacherScreenStream) {
             await playAudienceStageStream(stream.streamID, { silent: true })
             continue
@@ -1616,11 +1690,23 @@ const initZego = async () => {
           }
         }
         if (!stream.streamID.includes('screen')) {
-          coHostStreams.value.push({
+          const assistantStream = isAssistantStreamID(stream.streamID)
+          const existingIndex = coHostStreams.value.findIndex((item) => item.streamID === stream.streamID)
+          const streamRecord = {
             streamID: stream.streamID,
             userID: stream.userID,
-            userName: stream.userName || '学生'
-          })
+            userName: stream.userName || (assistantStream ? '助教' : '学生'),
+            isAssistant: assistantStream,
+            micEnabled: assistantStream ? true : false
+          }
+          if (existingIndex === -1) {
+            coHostStreams.value.push(streamRecord)
+          } else {
+            coHostStreams.value[existingIndex] = {
+              ...coHostStreams.value[existingIndex],
+              ...streamRecord
+            }
+          }
           await nextTick()
           zg.value.startPlayingStream(stream.streamID, {
             video: document.getElementById('cohost-' + stream.streamID),
@@ -1687,6 +1773,12 @@ const initZego = async () => {
                 scheduleAudienceMainStreamRetry('stream_focus', 700)
               }
             })
+          }
+        } else if (data.type === 'assistant_mic_control' && !canPublishLive.value && isAssistantAudienceUser()) {
+          const targetUserID = String(data.targetUserID || '').trim()
+          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
+          if (targetUserID && currentUserID && targetUserID === currentUserID) {
+            applyAssistantMicState(data.enabled !== false)
           }
         }
       } catch (e) {}
@@ -1967,6 +2059,7 @@ const startAudienceSession = async (authInfo) => {
   } else {
     clearAudiencePlayRetryTimer()
   }
+  await startAssistantPublishing(authInfo)
   ElMessage.success('已进入听课房间')
 }
 
@@ -2042,6 +2135,7 @@ const handleStartLive = async () => {
 
 const teardownSessionWithoutEndingLive = async () => {
   clearAudiencePlayRetryTimer()
+  await stopAssistantPublishing()
   const streamID = 'teacher_' + roomId
   try {
     if (canPublishLive.value) {
@@ -2105,6 +2199,7 @@ const handleEndLive = () => {
 
 const confirmEndLive = async () => {
   try {
+    await stopAssistantPublishing()
     const streamID = 'teacher_' + roomId
     if (canPublishLive.value) {
       try {
@@ -2308,6 +2403,30 @@ const rejectCoHost = async (student) => {
     JSON.stringify({ type: 'cohost_reject', targetUserID: student.userID })
   )
   handUpList.value = handUpList.value.filter(h => h.userID !== student.userID)
+}
+
+const toggleAssistantMic = async (stream) => {
+  if (!canPublishLive.value || !stream?.isAssistant || !zg.value || !zegoRoomID.value) return
+  const targetUserID = String(stream.userID || '').trim()
+  if (!targetUserID) {
+    ElMessage.warning('未获取到助教身份，暂时无法控制麦克风')
+    return
+  }
+
+  const nextEnabled = !stream.micEnabled
+  await zg.value.sendBroadcastMessage(
+    zegoRoomID.value,
+    JSON.stringify({ type: 'assistant_mic_control', targetUserID, enabled: nextEnabled })
+  )
+
+  const index = coHostStreams.value.findIndex((item) => item.streamID === stream.streamID)
+  if (index !== -1) {
+    coHostStreams.value[index] = {
+      ...coHostStreams.value[index],
+      micEnabled: nextEnabled
+    }
+  }
+  ElMessage.success(nextEnabled ? '已打开助教麦克风' : '已关闭助教麦克风')
 }
 
 const kickCoHost = async (stream) => {
@@ -3015,6 +3134,17 @@ onBeforeUnmount(() => {
   font-size: 12px;
   margin: 4px 0;
   color: #aaa;
+}
+
+.cohost-mic-state {
+  display: block;
+  font-size: 11px;
+  color: #f59e0b;
+  margin-bottom: 4px;
+}
+
+.cohost-mic-state.on {
+  color: #22c55e;
 }
 
 .chat-card {
