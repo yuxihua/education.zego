@@ -1518,6 +1518,13 @@ const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => 
   if (!zg.value?.loginRoom) return
   const normalizedRoomID = normalizeRoomID(roomID)
   const normalizedUserID = String(userID || '').trim()
+  const normalizedToken = String(token || '').trim()
+  if (!normalizedRoomID) {
+    throw new Error('白板前房间号缺失，无法登录')
+  }
+  if (!normalizedUserID || !normalizedToken) {
+    throw new Error('白板前鉴权信息缺失，无法登录')
+  }
   const connected = String(roomState.value || '').toUpperCase() === 'CONNECTED'
   const sameRoomAndUser =
     connected &&
@@ -1526,7 +1533,7 @@ const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => 
   if (sameRoomAndUser) return
   try {
     await withTimeout(
-      zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
+      zg.value.loginRoom(normalizedRoomID, normalizedToken, { userID: normalizedUserID, userName }, { userUpdate: true }),
       6000,
       '白板前房间保活登录超时（6秒）'
     )
@@ -2399,10 +2406,18 @@ const switchCamera = async () => {
 // ==================== 白板 ====================
 const initWhiteboard = async (roomID, token, userID, userName, options = {}) => {
   const targetRoomID = normalizeRoomID(roomID) || (await ensureRoomIDReady())
+  if (!targetRoomID) {
+    throw new Error('白板初始化失败：房间号为空')
+  }
+  const normalizedToken = String(token || '').trim()
+  const normalizedUserID = String(userID || '').trim()
+  if (!normalizedToken || !normalizedUserID) {
+    throw new Error('白板初始化失败：鉴权信息缺失')
+  }
   zegoRoomID.value = targetRoomID
   console.info('[LivePush] initWhiteboard context', {
     roomID: targetRoomID,
-    userID,
+    userID: normalizedUserID,
     viewerOnly: !!options?.viewerOnly,
     roomState: roomState.value,
     appID: ZEGO_CONFIG.appID
@@ -2436,10 +2451,10 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
         zegoSuperBoard.value.init(zg.value, {
           parentDomID: whiteboardDomId,
           appID: ZEGO_CONFIG.appID,
-          token: token,
+          token: normalizedToken,
           roomID: targetRoomID,
-          userID: userID,
-          userName: userName || userID,
+          userID: normalizedUserID,
+          userName: userName || normalizedUserID,
           isTestEnv: false
         }),
         10000,
@@ -3277,7 +3292,11 @@ onMounted(async () => {
   try {
     const res = await getLiveRoomDetail(roomId)
     roomInfo.value = res
-    zegoRoomID.value = normalizeRoomID(res?.zegoRoomId)
+    const mountedRoomID = normalizeRoomID(res?.zegoRoomId) || zegoRoomID.value || getFallbackRoomID()
+    zegoRoomID.value = mountedRoomID
+    if (!normalizeRoomID(res?.zegoRoomId)) {
+      console.warn('[LivePush] mount room detail missing zegoRoomId, keep/fallback roomID:', mountedRoomID)
+    }
     const roomAlreadyLiving = ['living', 'paused'].includes(String(res.status || ''))
     isLiving.value = isAssistantUser ? roomAlreadyLiving : false
     if (!isAssistantUser && roomAlreadyLiving) {
