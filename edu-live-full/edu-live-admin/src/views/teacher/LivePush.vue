@@ -392,6 +392,7 @@ const currentRoomLoginRoomID = ref('')
 const currentRoomLoginUserID = ref('')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
+const audienceStageStreamID = ref('')
 const audiencePlayRetryTimer = ref(null)
 const audiencePlayRetryCount = ref(0)
 const stageLayoutRefreshTimer = ref(null)
@@ -574,6 +575,8 @@ const clearStageCanvas = () => {
   stageCanvasRef.value.innerHTML = ''
 }
 
+const isScreenShareStreamID = (streamID) => String(streamID || '').endsWith('_screen')
+
 const renderStageScreenStream = async (stream) => {
   if (!stageCanvasRef.value || !stream) return
   clearStageCanvas()
@@ -589,6 +592,16 @@ const renderStageScreenStream = async (stream) => {
   try {
     await videoEl.play()
   } catch (e) {}
+}
+
+const clearAudienceStageStream = () => {
+  if (audienceStageStreamID.value) {
+    try {
+      zg.value?.stopPlayingStream?.(audienceStageStreamID.value)
+    } catch (e) {}
+    audienceStageStreamID.value = ''
+  }
+  clearStageCanvas()
 }
 
 const saveLayoutState = () => {
@@ -1545,6 +1558,11 @@ const initZego = async () => {
         if (!canPublishLive.value) {
           const teacherStreamPrefix = `teacher_${roomId}`
           const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
+          const isTeacherScreenStream = isScreenShareStreamID(stream.streamID)
+          if (isTeacherScreenStream) {
+            await playAudienceStageStream(stream.streamID, { silent: true })
+            continue
+          }
           if (!audienceMainStreamID.value && isTeacherStream) {
             const started = await playAudienceStream(stream.streamID, { silent: true })
             if (!started) {
@@ -1572,6 +1590,10 @@ const initZego = async () => {
       }
     } else {
       for (const stream of streamList) {
+        if (!canPublishLive.value && audienceStageStreamID.value && stream.streamID === audienceStageStreamID.value) {
+          clearAudienceStageStream()
+          continue
+        }
         if (!canPublishLive.value && audienceMainStreamID.value && stream.streamID === audienceMainStreamID.value) {
           try {
             zg.value.stopPlayingStream(stream.streamID)
@@ -1615,11 +1637,16 @@ const initZego = async () => {
             ElMessage.info(`${msg.fromUser.userName} 申请连麦`)
           }
         } else if (data.type === 'stream_focus' && !canPublishLive.value && data.streamID) {
-          playAudienceStream(String(data.streamID), { silent: true }).then((ok) => {
-            if (!ok) {
-              scheduleAudienceMainStreamRetry('stream_focus', 700)
-            }
-          })
+          const targetStreamID = String(data.streamID)
+          if (isScreenShareStreamID(targetStreamID)) {
+            playAudienceStageStream(targetStreamID, { silent: true })
+          } else {
+            playAudienceStream(targetStreamID, { silent: true }).then((ok) => {
+              if (!ok) {
+                scheduleAudienceMainStreamRetry('stream_focus', 700)
+              }
+            })
+          }
         }
       } catch (e) {}
     })
@@ -1708,6 +1735,34 @@ const playAudienceStream = async (streamID, options = {}) => {
     })
     if (!silent) {
       ElMessage.info('已进入房间，等待老师开始推流...')
+    }
+    return false
+  }
+}
+
+const playAudienceStageStream = async (streamID, options = {}) => {
+  if (!zg.value || !stageCanvasRef.value || !streamID) return false
+  const { silent = false } = options
+  try {
+    if (audienceStageStreamID.value && audienceStageStreamID.value !== streamID) {
+      try {
+        zg.value.stopPlayingStream(audienceStageStreamID.value)
+      } catch (e) {}
+      audienceStageStreamID.value = ''
+    }
+
+    const remoteStream = await zg.value.startPlayingStream(streamID)
+    await renderStageScreenStream(remoteStream)
+
+    audienceStageStreamID.value = streamID
+    return true
+  } catch (e) {
+    console.warn('[LivePush] playAudienceStageStream failed', {
+      streamID,
+      error: parseErrorMessage(e)
+    })
+    if (!silent) {
+      ElMessage.info('屏幕共享暂未就绪，正在等待老师开启共享...')
     }
     return false
   }
@@ -1942,6 +1997,9 @@ const teardownSessionWithoutEndingLive = async () => {
       audienceMainStreamID.value = ''
     }
   } catch (e) {}
+  if (!canPublishLive.value) {
+    clearAudienceStageStream()
+  }
 
   try {
     coHostStreams.value.forEach((s) => {
@@ -2005,6 +2063,9 @@ const confirmEndLive = async () => {
 
     try {
       if (localStream.value) {
+    if (!canPublishLive.value) {
+      clearAudienceStageStream()
+    }
         releaseMediaStream(localStream.value, localStreamProvider.value)
         localStream.value = null
         localStreamProvider.value = 'native'
