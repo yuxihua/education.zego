@@ -2429,6 +2429,10 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
     throw new Error('白板容器未就绪，请稍后重试')
   }
 
+  try {
+    zegoSuperBoard.value?.off?.('error')
+    zegoSuperBoard.value?.destroy?.()
+  } catch (e) {}
   zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
   zegoSuperBoard.value.off?.('error')
   zegoSuperBoard.value.on?.('error', (error) => {
