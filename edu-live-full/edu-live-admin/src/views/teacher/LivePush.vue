@@ -63,49 +63,9 @@
     <div class="main-area" :class="{ 'free-layout': layoutFreeMode }" ref="workspaceRef">
       <!-- 左侧：视频 + 白板 -->
       <div class="left-panel" ref="leftPanelRef">
-        <!-- 视频区域 -->
-        <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container" ref="videoContainerRef">
-          <div class="local-video" ref="localVideoRef"></div>
-          <div class="video-controls">
-            <el-button 
-              :type="isCameraOn ? 'primary' : 'info'" 
-              circle 
-              @click="toggleCamera"
-            >
-              <el-icon><VideoCamera /></el-icon>
-            </el-button>
-            <el-button 
-              :type="isMicOn ? 'primary' : 'info'" 
-              circle 
-              @click="toggleMic"
-            >
-              <el-icon><Microphone /></el-icon>
-            </el-button>
-            <el-tooltip
-              :content="getScreenShareTooltip()"
-              :disabled="isScreenShareTooltipDisabled()"
-              placement="top"
-            >
-              <span>
-                <el-button 
-                  :type="isScreenSharing ? 'danger' : 'info'" 
-                  :disabled="!canPublishLive || !isLiving"
-                  circle 
-                  @click="toggleScreenShare"
-                >
-                  <el-icon><Monitor /></el-icon>
-                </el-button>
-              </span>
-            </el-tooltip>
-            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
-            <el-button type="info" circle @click="switchCamera">
-              <el-icon><Switch /></el-icon>
-            </el-button>
-          </div>
-        </div>
-
+        <!-- 视频区域（自由布局） -->
         <div
-          v-else-if="layoutFreeMode && showVideoPanel && !isStageFull"
+          v-if="layoutFreeMode && showVideoPanel && !isStageFull"
           class="video-container floating-video"
           :style="getVideoPanelStyle()"
         >
@@ -266,6 +226,46 @@
         </div>
 
         <div v-else class="interaction-body">
+        <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container right-side-video" ref="videoContainerRef">
+          <div class="video-head">主摄像头</div>
+          <div class="local-video" ref="localVideoRef"></div>
+          <div class="video-controls right-video-controls">
+            <el-button
+              :type="isCameraOn ? 'primary' : 'info'"
+              circle
+              @click="toggleCamera"
+            >
+              <el-icon><VideoCamera /></el-icon>
+            </el-button>
+            <el-button
+              :type="isMicOn ? 'primary' : 'info'"
+              circle
+              @click="toggleMic"
+            >
+              <el-icon><Microphone /></el-icon>
+            </el-button>
+            <el-tooltip
+              :content="getScreenShareTooltip()"
+              :disabled="isScreenShareTooltipDisabled()"
+              placement="top"
+            >
+              <span>
+                <el-button
+                  :type="isScreenSharing ? 'danger' : 'info'"
+                  :disabled="!canPublishLive || !isLiving"
+                  circle
+                  @click="toggleScreenShare"
+                >
+                  <el-icon><Monitor /></el-icon>
+                </el-button>
+              </span>
+            </el-tooltip>
+            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
+            <el-button type="info" circle @click="switchCamera">
+              <el-icon><Switch /></el-icon>
+            </el-button>
+          </div>
+        </div>
 
         <!-- 连麦申请 -->
         <el-card class="panel-card" v-if="handUpList.length > 0">
@@ -432,10 +432,11 @@ const stagePanelWidth = ref(0)
 const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
 const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520 })
 const layoutStorageKey = `teacher_live_push_layout_${roomId}`
+const layoutVersion = 2
 const cameraStorageKey = `teacher_live_push_camera_${roomId}`
 const cameraPreviewStorageKey = `teacher_live_push_camera_previews_${roomId}`
 const snapDistance = 24
-const defaultDockedRightPanelWidth = 340
+const defaultDockedRightPanelWidth = 280
 const rightPanelWidth = ref(defaultDockedRightPanelWidth)
 
 // 结束直播弹窗
@@ -637,6 +638,7 @@ const restoreAudiencePlaybackViews = async () => {
 const saveLayoutState = () => {
   try {
     localStorage.setItem(layoutStorageKey, JSON.stringify({
+      layoutVersion,
       layoutFreeMode: layoutFreeMode.value,
       showVideoPanel: showVideoPanel.value,
       showInteractionPanel: showInteractionPanel.value,
@@ -668,11 +670,6 @@ const getStageResizeBounds = () => {
   const sectionGap = 16
   let occupiedHeight = 0
   let gapCount = 0
-
-  if (!layoutFreeMode.value && showVideoPanel.value && !isStageFull.value && videoContainerRef.value) {
-    occupiedHeight += videoContainerRef.value.offsetHeight || 0
-    gapCount += 1
-  }
 
   if (cameraPreviewTiles.value.length > 0 && cameraGalleryRef.value) {
     occupiedHeight += cameraGalleryRef.value.offsetHeight || 0
@@ -724,7 +721,8 @@ const initFreeLayoutPositions = () => {
   const { width, height } = getWorkspaceSize()
   if (!width || !height) return
   const saved = loadLayoutState()
-  if (saved?.floatingVideoState) {
+  const canUseSavedLayout = saved && Number(saved.layoutVersion || 1) >= layoutVersion
+  if (canUseSavedLayout && saved?.floatingVideoState) {
     Object.assign(floatingVideoState, saved.floatingVideoState)
   } else {
   floatingVideoState.x = 24
@@ -732,7 +730,7 @@ const initFreeLayoutPositions = () => {
   floatingVideoState.width = clamp(Math.floor(width * 0.28), 280, 460)
   floatingVideoState.height = clamp(Math.floor(height * 0.28), 200, 320)
   }
-  if (saved?.floatingInteractionState) {
+  if (canUseSavedLayout && saved?.floatingInteractionState) {
     Object.assign(floatingInteractionState, saved.floatingInteractionState)
   } else {
   floatingInteractionState.width = clamp(Math.floor(width * 0.28), 320, 420)
@@ -740,10 +738,10 @@ const initFreeLayoutPositions = () => {
   floatingInteractionState.x = Math.max(24, width - floatingInteractionState.width - 24)
   floatingInteractionState.y = 16
   }
-  if (saved?.rightPanelWidth) {
-    rightPanelWidth.value = clamp(saved.rightPanelWidth, 280, Math.max(280, Math.floor(width * 0.45)))
+  if (canUseSavedLayout && saved?.rightPanelWidth) {
+    rightPanelWidth.value = clamp(saved.rightPanelWidth, 240, Math.max(240, Math.floor(width * 0.42)))
   }
-  if (saved?.interactionCollapsed) {
+  if (canUseSavedLayout && saved?.interactionCollapsed) {
     interactionCollapsed.value = true
   }
 }
@@ -1267,6 +1265,7 @@ const resetLayout = async () => {
   floatingInteractionState.width = 360
   floatingInteractionState.height = 520
   stagePanelHeight.value = 0
+  stagePanelWidth.value = 0
   try {
     localStorage.removeItem(layoutStorageKey)
   } catch (e) {}
@@ -1387,7 +1386,7 @@ const handlePanelMouseMove = (event) => {
 
   if (panelDragState.mode === 'resize') {
     if (panelDragState.panel === 'side') {
-      rightPanelWidth.value = clamp(panelDragState.startWidth - dx, 280, Math.max(280, Math.floor(width * 0.5)))
+      rightPanelWidth.value = clamp(panelDragState.startWidth - dx, 240, Math.max(240, Math.floor(width * 0.42)))
     } else {
       const minWidth = panelDragState.panel === 'video' ? 280 : 320
       const minHeight = panelDragState.panel === 'video' ? 180 : 260
@@ -1425,7 +1424,7 @@ const handlePanelMouseUp = () => {
     }
   }
   if (panelDragState.panel === 'side') {
-    rightPanelWidth.value = clamp(rightPanelWidth.value, 280, Math.max(280, Math.floor(width * 0.5)))
+    rightPanelWidth.value = clamp(rightPanelWidth.value, 240, Math.max(240, Math.floor(width * 0.42)))
   }
   panelDragState.active = false
   panelDragState.panel = ''
@@ -1475,6 +1474,12 @@ const scheduleStageLayoutRefresh = () => {
 const toggleStageFull = async () => {
   isStageFull.value = !isStageFull.value
   await refreshStageLayout()
+  if (canPublishLive.value && isScreenSharing.value && screenStream.value) {
+    await renderStageScreenStream(screenStream.value)
+  }
+  if (!canPublishLive.value) {
+    await restoreAudiencePlaybackViews()
+  }
 }
 
 const waitRoomConnected = async (timeoutMs = 12000) => {
@@ -2370,7 +2375,7 @@ onMounted(async () => {
       }
     } catch (e) {}
     const savedLayout = loadLayoutState()
-    if (savedLayout) {
+    if (savedLayout && Number(savedLayout.layoutVersion || 1) >= layoutVersion) {
       layoutFreeMode.value = !!savedLayout.layoutFreeMode
       showVideoPanel.value = savedLayout.showVideoPanel !== false
       showInteractionPanel.value = savedLayout.showInteractionPanel !== false
@@ -2862,21 +2867,47 @@ onBeforeUnmount(() => {
 }
 
 .right-panel {
-  width: 340px;
+  width: 280px;
   background: #16213e;
   border-left: 1px solid #0f3460;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 16px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .right-panel.docked {
   position: relative;
   flex: none;
-  width: 340px;
-  min-width: 280px;
+  width: 280px;
+  min-width: 240px;
+}
+
+.right-side-video {
+  flex: none;
+  height: 180px;
+  min-height: 160px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0c1226;
+}
+
+.video-head {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 2;
+  color: #cbd5e1;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  padding: 2px 8px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.right-video-controls {
+  gap: 10px;
+  padding: 6px 10px;
 }
 
 .right-panel.collapsed {
@@ -2914,9 +2945,10 @@ onBeforeUnmount(() => {
 .interaction-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .right-panel.docked .dock-resize-handle {
