@@ -6,6 +6,9 @@
         <el-tag type="success" effect="dark" v-if="isLiving && !canPublishLive">● 听课中</el-tag>
         <el-tag type="danger" effect="dark" v-else-if="isLiving">● 直播中</el-tag>
         <el-tag type="info" v-else>未开始</el-tag>
+        <el-tag v-if="canPublishLive && isLiving" :type="isScreenSharing ? 'success' : 'info'" effect="dark">
+          {{ isScreenSharing ? '屏幕共享中' : '未共享屏幕' }}
+        </el-tag>
         <span class="room-title">{{ roomInfo.title }}</span>
         <span class="online-count">
           <el-icon><User /></el-icon> 在线 {{ onlineCount }} 人
@@ -78,13 +81,23 @@
             >
               <el-icon><Microphone /></el-icon>
             </el-button>
-            <el-button 
-              :type="isScreenSharing ? 'danger' : 'info'" 
-              circle 
-              @click="toggleScreenShare"
+            <el-tooltip
+              :content="getScreenShareTooltip()"
+              :disabled="isScreenShareTooltipDisabled()"
+              placement="top"
             >
-              <el-icon><Monitor /></el-icon>
-            </el-button>
+              <span>
+                <el-button 
+                  :type="isScreenSharing ? 'danger' : 'info'" 
+                  :disabled="!canPublishLive || !isLiving"
+                  circle 
+                  @click="toggleScreenShare"
+                >
+                  <el-icon><Monitor /></el-icon>
+                </el-button>
+              </span>
+            </el-tooltip>
+            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
             <el-button type="info" circle @click="switchCamera">
               <el-icon><Switch /></el-icon>
             </el-button>
@@ -110,9 +123,18 @@
             <el-button :type="isMicOn ? 'primary' : 'info'" circle @click="toggleMic">
               <el-icon><Microphone /></el-icon>
             </el-button>
-            <el-button :type="isScreenSharing ? 'danger' : 'info'" circle @click="toggleScreenShare">
-              <el-icon><Monitor /></el-icon>
-            </el-button>
+            <el-tooltip
+              :content="getScreenShareTooltip()"
+              :disabled="isScreenShareTooltipDisabled()"
+              placement="top"
+            >
+              <span>
+                <el-button :type="isScreenSharing ? 'danger' : 'info'" :disabled="!canPublishLive || !isLiving" circle @click="toggleScreenShare">
+                  <el-icon><Monitor /></el-icon>
+                </el-button>
+              </span>
+            </el-tooltip>
+            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
             <el-button type="info" circle @click="switchCamera">
               <el-icon><Switch /></el-icon>
             </el-button>
@@ -2015,21 +2037,66 @@ const toggleMic = () => {
   isMicOn.value = !isMicOn.value
 }
 
+const getScreenShareTooltip = () => {
+  if (isScreenSharing.value) return '点击停止屏幕共享'
+  if (!canPublishLive.value) return '仅老师可开启屏幕共享'
+  if (!isLiving.value) return '请先开始直播后再开启屏幕共享'
+  return ''
+}
+
+const getScreenShareStateText = () => {
+  return isScreenSharing.value ? '共享中' : '未共享'
+}
+
+const isScreenShareTooltipDisabled = () => {
+  return !isScreenSharing.value && canPublishLive.value && isLiving.value
+}
+
 const toggleScreenShare = async () => {
+  if (!canPublishLive.value) {
+    ElMessage.warning('仅老师可开启屏幕共享')
+    return
+  }
+  if (!isLiving.value) {
+    ElMessage.warning('请先开始直播后再开启屏幕共享')
+    return
+  }
+  if (!zg.value) {
+    ElMessage.error('直播引擎未就绪，请稍后重试')
+    return
+  }
+
   if (isScreenSharing.value) {
     const screenStreamID = 'teacher_' + roomId + '_screen'
-    zg.value.stopPublishingStream(screenStreamID)
-    zg.value.destroyStream(screenStream.value)
+    try {
+      zg.value.stopPublishingStream(screenStreamID)
+    } catch (e) {}
+    try {
+      if (screenStream.value) {
+        zg.value.destroyStream(screenStream.value)
+      }
+    } catch (e) {}
     screenStream.value = null
     isScreenSharing.value = false
     const streamID = 'teacher_' + roomId
-    await zg.value.startPublishingStream(streamID, localStream.value)
+    if (localStream.value) {
+      await zg.value.startPublishingStream(streamID, localStream.value)
+    }
     await announceFocusedStream(streamID, 'screen_share_stop')
   } else {
     try {
       screenStream.value = await zg.value.createStream({
         screen: { audio: true, videoQuality: 2, width: 1920, height: 1080, frameRate: 15, bitrate: 1500 }
       })
+      const screenTrack = screenStream.value?.getVideoTracks?.()?.[0]
+      if (screenTrack) {
+        screenTrack.onended = async () => {
+          if (!isScreenSharing.value) return
+          try {
+            await toggleScreenShare()
+          } catch (e) {}
+        }
+      }
       const streamID = 'teacher_' + roomId
       zg.value.stopPublishingStream(streamID)
       const screenStreamID = streamID + '_screen'
@@ -2363,10 +2430,24 @@ onBeforeUnmount(() => {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: 16px;
   background: rgba(0,0,0,0.6);
   padding: 8px 16px;
   border-radius: 24px;
+}
+
+.screen-share-state {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1;
+  min-width: 44px;
+  text-align: center;
+  user-select: none;
+}
+
+.screen-share-state.active {
+  color: #34d399;
 }
 
 .floating-handle,
