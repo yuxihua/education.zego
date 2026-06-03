@@ -1829,6 +1829,15 @@ const initZego = async () => {
           scheduleAudienceWhiteboardSync('stream_focus', 600)
         } else if (data.type === 'wb_subview_focus' && !canPublishLive.value && data.uniqueID) {
           latestTeacherWhiteboardSubViewID.value = String(data.uniqueID)
+          const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
+          const canSwitchNow =
+            whiteboardReady.value &&
+            !!boardView?.switchSuperBoardSubView &&
+            String(roomState.value || '').toUpperCase() === 'CONNECTED'
+          if (!canSwitchNow) {
+            scheduleAudienceWhiteboardSync('wb_subview_focus', 900)
+            return
+          }
           switchToCreatedSubView({ uniqueID: String(data.uniqueID) })
             .then(() => {
               if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
@@ -2562,11 +2571,15 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
   zegoSuperBoard.value.on?.('error', (error) => {
     console.error('[LivePush] SuperBoard error:', error)
   })
+
+  let workingToken = normalizedToken
+  let workingUserID = normalizedUserID
+  let workingUserName = userName || normalizedUserID
   
   let lastError = null
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      await ensureRoomLoginForWhiteboard(targetRoomID, token, userID, userName)
+      await ensureRoomLoginForWhiteboard(targetRoomID, workingToken, workingUserID, workingUserName)
 
       if (attempt > 0) {
         try {
@@ -2579,10 +2592,10 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
         zegoSuperBoard.value.init(zg.value, {
           parentDomID: whiteboardDomId,
           appID: ZEGO_CONFIG.appID,
-          token: normalizedToken,
+          token: workingToken,
           roomID: targetRoomID,
-          userID: normalizedUserID,
-          userName: userName || normalizedUserID,
+          userID: workingUserID,
+          userName: workingUserName,
           isTestEnv: false
         }),
         10000,
@@ -2699,22 +2712,40 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       console.warn('[LivePush] initWhiteboard attempt failed', {
         attempt: attempt + 1,
         roomID: targetRoomID,
-        userID,
+        userID: workingUserID,
         error: parseErrorMessage(err)
       })
       if (isWhiteboardUserNotExistError(err) && attempt < 9) {
-        wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${userID}`
+        wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${workingUserID}`
         console.warn('[LivePush] whiteboard user not exist, retrying', {
           attempt: attempt + 1,
           roomID: targetRoomID,
-          userID,
+          userID: workingUserID,
           err
         })
+
+        try {
+          const refreshedAuth = await getZegoAuth()
+          const refreshedToken = String(refreshedAuth?.token || '').trim()
+          const refreshedUserID = String(refreshedAuth?.userId || '').trim()
+          const refreshedUserName = refreshedAuth?.userName || refreshedUserID
+          if (refreshedToken && refreshedUserID) {
+            workingToken = refreshedToken
+            workingUserID = refreshedUserID
+            workingUserName = refreshedUserName
+            liveIdentity.value = {
+              userId: workingUserID,
+              userName: workingUserName,
+              token: workingToken,
+              roomId: targetRoomID
+            }
+          }
+        } catch (refreshErr) {}
 
         // 开播前阶段允许强制重建房间会话，提升白板识别用户成功率。
         if (!isLiving.value || !localStream.value) {
           await resetRoomSessionBeforeStart(targetRoomID)
-          await ensureRoomLoginForWhiteboard(targetRoomID, token, userID, userName)
+          await ensureRoomLoginForWhiteboard(targetRoomID, workingToken, workingUserID, workingUserName)
         }
 
         await delay(1500)
