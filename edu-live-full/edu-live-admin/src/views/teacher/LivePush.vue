@@ -1748,9 +1748,13 @@ const getZegoAuth = async () => {
   }
 
   const authInfo = data.data || {}
-  const nextAppID = Number(authInfo.appId || 0)
+  const normalizedAuthInfo = {
+    ...authInfo,
+    roomId: normalizeRoomID(authInfo?.roomId || roomID)
+  }
+  const nextAppID = Number(normalizedAuthInfo.appId || 0)
   ZEGO_CONFIG.appID = nextAppID
-  ZEGO_CONFIG.server = authInfo.server || null
+  ZEGO_CONFIG.server = normalizedAuthInfo.server || null
   if (zg.value && engineAppID.value && nextAppID && engineAppID.value !== nextAppID) {
     try {
       zg.value.destroyEngine?.()
@@ -1759,8 +1763,31 @@ const getZegoAuth = async () => {
     engineAppID.value = 0
     roomState.value = 'DISCONNECTED'
   }
-  zegoAuthInfo.value = authInfo
-  return authInfo
+  zegoAuthInfo.value = normalizedAuthInfo
+  return normalizedAuthInfo
+}
+
+const getAuthInfoForRoom = async (roomID = '') => {
+  const targetRoomID = normalizeRoomID(roomID) || (await ensureRoomIDReady())
+  const fromLiveIdentity = liveIdentity.value
+  if (
+    fromLiveIdentity?.token &&
+    fromLiveIdentity?.userId &&
+    normalizeRoomID(fromLiveIdentity?.roomId) === targetRoomID
+  ) {
+    return fromLiveIdentity
+  }
+
+  const fromAuthCache = zegoAuthInfo.value
+  if (
+    fromAuthCache?.token &&
+    fromAuthCache?.userId &&
+    normalizeRoomID(fromAuthCache?.roomId) === targetRoomID
+  ) {
+    return fromAuthCache
+  }
+
+  return getZegoAuth()
 }
 
 const playAudienceStream = async (streamID, options = {}) => {
@@ -1866,6 +1893,9 @@ const syncAudienceRoomStatus = async () => {
     roomInfo.value = res
     const nextRoomID = normalizeRoomID(res?.zegoRoomId)
     if (nextRoomID) {
+      if (normalizeRoomID(liveIdentity.value?.roomId) && normalizeRoomID(liveIdentity.value?.roomId) !== nextRoomID) {
+        liveIdentity.value = null
+      }
       zegoRoomID.value = nextRoomID
     }
     const liveNow = ['living', 'paused'].includes(String(res.status || ''))
@@ -1873,7 +1903,7 @@ const syncAudienceRoomStatus = async () => {
       isLiving.value = true
       wbStageText.value = wbStageText.value || '白板同步中...'
       clearAudienceRoomStatusRetryTimer()
-      const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
+      const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
       if (!audienceAutoJoinStarted.value && authInfo?.token && authInfo?.userId) {
         if (!zg.value) {
           await initZego()
@@ -1925,7 +1955,7 @@ const scheduleAudienceWhiteboardSync = (reason = 'unknown', delayMs = 4000) => {
 
     audienceWhiteboardSyncing.value = true
     try {
-      const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
+      const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
       const token = authInfo?.token
       const userID = authInfo?.userId
       const userName = authInfo?.userName
@@ -1954,7 +1984,7 @@ const startAudienceSession = async (authInfo) => {
   const token = authInfo.token
   const roomID = await ensureRoomIDReady()
   zegoRoomID.value = roomID
-  liveIdentity.value = { userId: userID, userName, token }
+  liveIdentity.value = { userId: userID, userName, token, roomId: roomID }
   isLiving.value = true
   wbStageText.value = '白板同步中...'
   audienceWhiteboardBootstrapping.value = true
@@ -2042,7 +2072,7 @@ const handleStartLive = async () => {
     const userID = authInfo.userId
     const userName = authInfo.userName
     const token = authInfo.token
-    liveIdentity.value = { userId: userID, userName, token }
+    liveIdentity.value = { userId: userID, userName, token, roomId: roomID }
 
     // 清理可能残留的旧会话，再按官方推荐顺序初始化：先 SuperBoard，再登录房间。
     await resetRoomSessionBeforeStart(roomID)
@@ -2562,7 +2592,7 @@ const ensureWhiteboardReadyForUpload = async () => {
     return true
   }
 
-  const authInfo = liveIdentity.value || zegoAuthInfo.value || (await getZegoAuth())
+  const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
   const token = authInfo?.token
   const userID = authInfo?.userId
   const userName = authInfo?.userName
