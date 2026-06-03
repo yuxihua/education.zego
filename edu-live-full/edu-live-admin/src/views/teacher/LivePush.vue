@@ -912,6 +912,20 @@ const applyScenePreset = async (preset) => {
   }
 }
 
+const trySwitchMainCameraInPlace = async (deviceId) => {
+  if (!zg.value?.useVideoDevice) return false
+  if (!localStream.value || localStreamProvider.value !== 'zego') return false
+  try {
+    await zg.value.useVideoDevice(localStream.value, deviceId)
+    applyMainStreamTrackState(localStream.value)
+    await renderLocalStream(localVideoRef.value, localStream.value)
+    return true
+  } catch (err) {
+    console.warn('[LivePush] useVideoDevice failed, fallback to recreate stream:', err)
+    return false
+  }
+}
+
 const setMainCamera = async (deviceId) => {
   if (!deviceId) {
     throw new Error('未指定摄像头设备')
@@ -919,6 +933,14 @@ const setMainCamera = async (deviceId) => {
   const previousDeviceId = activeCameraDeviceId.value
   activeCameraDeviceId.value = deviceId
   try {
+    const switched = await trySwitchMainCameraInPlace(deviceId)
+    if (switched) {
+      if (isLiving.value && !isScreenSharing.value) {
+        await announceFocusedStream(`teacher_${roomId}`, 'main_camera')
+      }
+      return
+    }
+
     // 主摄像头用于正式推流，必须使用 ZEGO 创建的流。
     const stream = await createZegoCameraStream(deviceId, true)
     await publishMainCameraStream(stream, 'zego')
