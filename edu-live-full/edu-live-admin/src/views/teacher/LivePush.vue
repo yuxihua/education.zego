@@ -489,6 +489,7 @@ const audienceWhiteboardRetryTimer = ref(null)
 const audienceWhiteboardSyncing = ref(false)
 const audienceWhiteboardBootstrapping = ref(false)
 const audienceWhiteboardHeartbeatTimer = ref(null)
+const latestTeacherWhiteboardSubViewID = ref('')
 const audienceRoomStatusRetryTimer = ref(null)
 const audienceRoomStatusRetryCount = ref(0)
 const workspaceRef = ref(null)
@@ -958,6 +959,16 @@ const announceFocusedStream = async (streamID, source = 'teacher') => {
     await zg.value.sendBroadcastMessage(
       zegoRoomID.value,
       JSON.stringify({ type: 'stream_focus', streamID, source })
+    )
+  } catch (err) {}
+}
+
+const announceWhiteboardSubView = async (uniqueID, source = 'teacher') => {
+  if (!canPublishLive.value || !isLiving.value || !zg.value || !zegoRoomID.value || !uniqueID) return
+  try {
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({ type: 'wb_subview_focus', uniqueID, source })
     )
   } catch (err) {}
 }
@@ -1725,6 +1736,18 @@ const initZego = async () => {
             }
           })
           scheduleAudienceWhiteboardSync('stream_focus', 600)
+        } else if (data.type === 'wb_subview_focus' && !canPublishLive.value && data.uniqueID) {
+          latestTeacherWhiteboardSubViewID.value = String(data.uniqueID)
+          switchToCreatedSubView({ uniqueID: String(data.uniqueID) })
+            .then(() => {
+              if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+                whiteboardReady.value = true
+                wbStageText.value = '白板已同步'
+              }
+            })
+            .catch(() => {
+              scheduleAudienceWhiteboardSync('wb_subview_focus', 1200)
+            })
         }
       } catch (e) {}
     })
@@ -2249,6 +2272,16 @@ const switchToCreatedSubView = async (result) => {
     '切换课件白板超时（8秒）'
   )
   refreshCurrentSuperBoardView()
+
+  const currentUniqueID =
+    currentSuperBoardView.value?.getModel?.()?.uniqueID ||
+    uniqueID
+  if (currentUniqueID) {
+    latestTeacherWhiteboardSubViewID.value = String(currentUniqueID)
+    if (canPublishLive.value) {
+      announceWhiteboardSubView(String(currentUniqueID), 'switch_subview')
+    }
+  }
 }
 
 const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 45, interval = 1000) => {
@@ -2332,6 +2365,7 @@ const confirmEndLive = async () => {
 
     whiteboardReady.value = false
     currentSuperBoardView.value = null
+    latestTeacherWhiteboardSubViewID.value = ''
     liveIdentity.value = null
     clearAudienceWhiteboardRetryTimer()
     clearAudienceWhiteboardHeartbeatTimer()
@@ -2489,6 +2523,23 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       }
 
       if (viewerOnly) {
+        if (latestTeacherWhiteboardSubViewID.value) {
+          try {
+            await switchToCreatedSubView({ uniqueID: latestTeacherWhiteboardSubViewID.value })
+            if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+              whiteboardReady.value = true
+              return true
+            }
+          } catch (syncErr) {
+            console.warn('[LivePush] switch latest teacher subview failed:', {
+              roomID: targetRoomID,
+              userID,
+              uniqueID: latestTeacherWhiteboardSubViewID.value,
+              error: parseErrorMessage(syncErr)
+            })
+          }
+        }
+
         let firstSubView = null
         for (let queryTry = 0; queryTry < 3; queryTry += 1) {
           try {
@@ -2515,6 +2566,16 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
               whiteboardReady.value = true
               return true
             }
+          }
+
+          if (!firstSubView?.uniqueID && latestTeacherWhiteboardSubViewID.value) {
+            try {
+              await switchToCreatedSubView({ uniqueID: latestTeacherWhiteboardSubViewID.value })
+              if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+                whiteboardReady.value = true
+                return true
+              }
+            } catch (syncErr) {}
           }
 
           if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
