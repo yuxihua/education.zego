@@ -61,7 +61,7 @@
       <!-- 左侧：视频 + 白板 -->
       <div class="left-panel" ref="leftPanelRef">
         <!-- 视频区域 -->
-        <div v-if="!layoutFreeMode && showVideoPanel && !isWhiteboardFull" class="video-container" ref="videoContainerRef">
+        <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container" ref="videoContainerRef">
           <div class="local-video" ref="localVideoRef"></div>
           <div class="video-controls">
             <el-button 
@@ -92,7 +92,7 @@
         </div>
 
         <div
-          v-else-if="layoutFreeMode && showVideoPanel && !isWhiteboardFull"
+          v-else-if="layoutFreeMode && showVideoPanel && !isStageFull"
           class="video-container floating-video"
           :style="getVideoPanelStyle()"
         >
@@ -120,112 +120,33 @@
           <div class="resize-handle" @mousedown.prevent="beginPanelResize('video', $event)"></div>
         </div>
 
-        <!-- 白板区域 -->
+        <!-- 授课展示区 -->
         <div
-          class="whiteboard-container"
-          :class="{ fullscreen: isWhiteboardFull }"
-          :style="getWhiteboardContainerStyle()"
-          ref="whiteboardContainerRef"
+          class="stage-container"
+          :class="{ fullscreen: isStageFull }"
+          :style="getStageContainerStyle()"
+          ref="stageContainerRef"
         >
-          <div class="wb-toolbar">
-            <el-select
-              v-if="!wbClassProtectMode && wbToolbarCompact"
-              v-model="wbToolPicker"
-              :disabled="wbToolbarLocked"
-              size="small"
-              style="width: 106px"
-              @change="selectWbToolFromPicker"
-            >
-              <el-option v-for="item in wbToolPickerOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-            <el-button-group v-if="!wbClassProtectMode && !wbToolbarCompact">
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'selector' ? 'primary' : 'default'" @click="setWbTool('selector')">选择</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'scroll' ? 'primary' : 'default'" @click="setWbOperationMode('scroll')">拖拽</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'pen' ? 'primary' : 'default'" @click="setWbTool('pen')">画笔</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'text' ? 'primary' : 'default'" @click="setWbTool('text')">文字</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'line' ? 'primary' : 'default'" @click="setWbTool('line')">直线</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'rect' ? 'primary' : 'default'" @click="setWbTool('rect')">矩形</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'ellipse' ? 'primary' : 'default'" @click="setWbTool('ellipse')">椭圆</el-button>
-              <el-button size="small" :disabled="wbToolbarLocked" :type="wbOperationMode === 'draw' && wbActiveTool === 'eraser' ? 'primary' : 'default'" @click="setWbTool('eraser')">橡皮</el-button>
-            </el-button-group>
-            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="switchWbPrevTool">上一工具(Tab)</el-button>
-            <el-button v-if="!wbClassProtectMode" size="small" @click="toggleWbToolbarCompact">{{ wbToolbarCompact ? '展开工具' : '精简工具' }}</el-button>
-            <el-button size="small" @click="toggleWbToolbarLock">{{ wbToolbarLocked ? '解锁工具' : '锁定工具' }}</el-button>
-            <el-button size="small" @click="toggleWbClassProtectMode">{{ wbClassProtectMode ? '退出课堂保护' : '课堂保护' }}</el-button>
-            <el-color-picker v-if="!wbClassProtectMode && !wbToolbarCompact" v-model="wbColor" size="small" :disabled="wbToolbarLocked" @change="setWbColor" />
-            <el-select
-              v-if="!wbClassProtectMode && !wbToolbarCompact"
-              v-model="wbBrushSize"
-              :disabled="wbToolbarLocked"
-              size="small"
-              style="width: 96px"
-              @change="setWbBrushSize"
-            >
-              <el-option v-for="size in wbBrushSizeOptions" :key="size" :label="`${size}px`" :value="size" />
-            </el-select>
-            <el-select
-              v-if="!wbClassProtectMode && !wbToolbarCompact"
-              v-model="wbLineStyle"
-              :disabled="wbToolbarLocked"
-              size="small"
-              style="width: 88px"
-              @change="setWbLineStyle"
-            >
-              <el-option label="实线" value="solid" />
-              <el-option label="虚线" value="dashed" />
-            </el-select>
-            <el-switch
-              v-if="!wbClassProtectMode && !wbToolbarCompact"
-              v-model="wbShapeFilled"
-              :disabled="wbToolbarLocked"
-              size="small"
-              inline-prompt
-              active-text="填充"
-              inactive-text="空心"
-              @change="setWbShapeFilled"
-            />
-            <el-select
-              v-if="!wbClassProtectMode && !wbToolbarCompact"
-              v-model="wbAlpha"
-              :disabled="wbToolbarLocked"
-              size="small"
-              style="width: 92px"
-              @change="setWbAlpha"
-            >
-              <el-option
-                v-for="alpha in wbAlphaOptions"
-                :key="alpha"
-                :label="`透明${100 - alpha}%`"
-                :value="alpha"
-              />
-            </el-select>
-            <el-button size="small" :disabled="wbToolbarLocked" @click="undoWb">撤销</el-button>
-            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="redoWb">重做</el-button>
-            <el-button v-if="!wbClassProtectMode" size="small" :disabled="wbToolbarLocked" @click="clearWb">清空</el-button>
-            <span class="wb-shortcut-tip">快捷键: G保护 K锁定 M精简 Tab切回 Ctrl+Z/Y [ / ]</span>
-            <el-button v-if="!wbClassProtectMode" size="small" type="primary" :disabled="!isLiving" @click="uploadPPT">上传 PPT</el-button>
-            <el-button size="small" @click="prevPage" :disabled="currentPage <= 1">上一页</el-button>
-            <span class="page-info">{{ currentPage }} / {{ totalPage }}</span>
-            <el-button size="small" @click="nextPage" :disabled="currentPage >= totalPage">下一页</el-button>
-            <span v-if="wbStageText" class="wb-stage">{{ wbStageText }}</span>
-            <el-button size="small" @click="toggleWhiteboardFull">
-              {{ isWhiteboardFull ? '退出全屏' : '全屏' }}
+          <div class="stage-toolbar">
+            <span v-if="stageStatusText" class="stage-label">{{ stageStatusText }}</span>
+            <el-button size="small" @click="toggleStageFull">
+              {{ isStageFull ? '退出全屏' : '全屏' }}
             </el-button>
           </div>
-          <div class="whiteboard" :id="whiteboardDomId" ref="whiteboardRef"></div>
+          <div class="stage-canvas"></div>
           <div
-            v-if="!isWhiteboardFull"
-            class="wb-splitter wb-splitter-right"
-            title="拖动调整白板宽度"
-            @mousedown.prevent="beginWhiteboardWidthResize"
+            v-if="!isStageFull"
+            class="stage-splitter stage-splitter-right"
+            title="拖动调整展示区宽度"
+            @mousedown.prevent="beginStageWidthResize"
           ></div>
         </div>
 
         <div
-          v-if="!isWhiteboardFull"
-          class="wb-splitter"
-          title="拖动调整白板高度"
-          @mousedown.prevent="beginWhiteboardResize"
+          v-if="!isStageFull"
+          class="stage-splitter"
+          title="拖动调整展示区高度"
+          @mousedown.prevent="beginStageResize"
         ></div>
 
         <div v-if="cameraPreviewTiles.length > 0" class="camera-gallery" :class="{ 'free-layout': layoutFreeMode }" ref="cameraGalleryRef">
@@ -399,8 +320,6 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
-import * as ZegoSuperBoardWeb from 'zego-superboard-web'
-import { ZegoSuperBoardManager } from 'zego-superboard-web'
 import { getLiveRoomDetail, startLive, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
 
 const route = useRoute()
@@ -429,41 +348,8 @@ const onlineCount = ref(0)
 const roomInfo = ref({})
 
 // 白板
-const whiteboardRef = ref(null)
-const zegoSuperBoard = ref(null)
-const currentSuperBoardView = ref(null)
-const isWhiteboardFull = ref(false)
-const wbColor = ref('#000000')
-const wbBrushSize = ref(6)
-const wbBrushSizeOptions = [2, 4, 6, 8, 10, 12, 16, 20]
-const wbLineStyle = ref('solid')
-const wbShapeFilled = ref(false)
-const wbAlpha = ref(100)
-const wbAlphaOptions = [100, 90, 80, 70, 60, 50, 40, 30, 20]
-const wbActiveTool = ref('pen')
-const wbPrevTool = ref('selector')
-const wbOperationMode = ref('draw')
-const wbHotkeyPanActive = ref(false)
-const wbOperationModeBeforePan = ref('draw')
-const wbToolbarCompact = ref(true)
-const wbToolbarLocked = ref(false)
-const wbClassProtectMode = ref(false)
-const wbToolPicker = ref('pen')
-const wbToolPickerOptions = [
-  { label: '选择', value: 'selector' },
-  { label: '拖拽', value: 'scroll' },
-  { label: '画笔', value: 'pen' },
-  { label: '文字', value: 'text' },
-  { label: '直线', value: 'line' },
-  { label: '矩形', value: 'rect' },
-  { label: '椭圆', value: 'ellipse' },
-  { label: '橡皮', value: 'eraser' }
-]
-const currentPage = ref(1)
-const totalPage = ref(1)
-const whiteboardReady = ref(false)
-const whiteboardDomId = `teacher-whiteboard-${roomId}`
-const wbStageText = ref('')
+const isStageFull = ref(false)
+const stageStatusText = ref('')
 
 // 连麦
 const handUpList = ref([])
@@ -484,19 +370,13 @@ const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
 const audiencePlayRetryTimer = ref(null)
 const audiencePlayRetryCount = ref(0)
-const whiteboardLayoutRefreshTimer = ref(null)
-const audienceWhiteboardRetryTimer = ref(null)
-const audienceWhiteboardSyncing = ref(false)
-const audienceWhiteboardBootstrapping = ref(false)
-const audienceWhiteboardHeartbeatTimer = ref(null)
-const latestTeacherWhiteboardSubViewID = ref('')
-const teacherWhiteboardHeartbeatTimer = ref(null)
+const stageLayoutRefreshTimer = ref(null)
 const audienceRoomStatusRetryTimer = ref(null)
 const audienceRoomStatusRetryCount = ref(0)
 const workspaceRef = ref(null)
 const leftPanelRef = ref(null)
 const videoContainerRef = ref(null)
-const whiteboardContainerRef = ref(null)
+const stageContainerRef = ref(null)
 const cameraGalleryRef = ref(null)
 const layoutFreeMode = ref(false)
 const showVideoPanel = ref(true)
@@ -512,9 +392,9 @@ const audienceAutoJoinStarted = ref(false)
 const teacherAutoResumeStarted = ref(false)
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
-const whiteboardResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
-const whiteboardPanelHeight = ref(0)
-const whiteboardPanelWidth = ref(0)
+const stageResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
+const stagePanelHeight = ref(0)
+const stagePanelWidth = ref(0)
 const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
 const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520 })
 const layoutStorageKey = `teacher_live_push_layout_${roomId}`
@@ -640,7 +520,6 @@ const applyMainStreamTrackState = (stream) => {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const waitForNextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
 const applyMagneticSnap = (targetState) => {
@@ -673,8 +552,8 @@ const saveLayoutState = () => {
       showInteractionPanel: showInteractionPanel.value,
       interactionCollapsed: interactionCollapsed.value,
       rightPanelWidth: rightPanelWidth.value,
-      whiteboardPanelHeight: whiteboardPanelHeight.value,
-      whiteboardPanelWidth: whiteboardPanelWidth.value,
+      stagePanelHeight: stagePanelHeight.value,
+      stagePanelWidth: stagePanelWidth.value,
       floatingVideoState: { ...floatingVideoState },
       floatingInteractionState: { ...floatingInteractionState }
     }))
@@ -689,18 +568,18 @@ const getWorkspaceSize = () => {
   }
 }
 
-const getWhiteboardResizeBounds = () => {
+const getStageResizeBounds = () => {
   const leftHeight = leftPanelRef.value?.clientHeight || 0
   const minimum = 260
   if (!leftHeight) {
-    return { min: minimum, max: Math.max(minimum, whiteboardPanelHeight.value || minimum) }
+    return { min: minimum, max: Math.max(minimum, stagePanelHeight.value || minimum) }
   }
 
   const sectionGap = 16
   let occupiedHeight = 0
   let gapCount = 0
 
-  if (!layoutFreeMode.value && showVideoPanel.value && !isWhiteboardFull.value && videoContainerRef.value) {
+  if (!layoutFreeMode.value && showVideoPanel.value && !isStageFull.value && videoContainerRef.value) {
     occupiedHeight += videoContainerRef.value.offsetHeight || 0
     gapCount += 1
   }
@@ -714,36 +593,36 @@ const getWhiteboardResizeBounds = () => {
   return { min: minimum, max }
 }
 
-const getWhiteboardWidthBounds = () => {
+const getStageWidthBounds = () => {
   const leftWidth = leftPanelRef.value?.clientWidth || 0
   const minimum = 640
   if (!leftWidth) {
-    return { min: minimum, max: Math.max(minimum, whiteboardPanelWidth.value || minimum) }
+    return { min: minimum, max: Math.max(minimum, stagePanelWidth.value || minimum) }
   }
   return { min: minimum, max: Math.max(minimum, leftWidth - 16) }
 }
 
-const clampWhiteboardPanelHeight = () => {
-  if (!whiteboardPanelHeight.value || isWhiteboardFull.value) return
-  const bounds = getWhiteboardResizeBounds()
-  whiteboardPanelHeight.value = clamp(whiteboardPanelHeight.value, bounds.min, bounds.max)
+const clampStagePanelHeight = () => {
+  if (!stagePanelHeight.value || isStageFull.value) return
+  const bounds = getStageResizeBounds()
+  stagePanelHeight.value = clamp(stagePanelHeight.value, bounds.min, bounds.max)
 }
 
-const clampWhiteboardPanelWidth = () => {
-  if (!whiteboardPanelWidth.value || isWhiteboardFull.value) return
-  const bounds = getWhiteboardWidthBounds()
-  whiteboardPanelWidth.value = clamp(whiteboardPanelWidth.value, bounds.min, bounds.max)
+const clampStagePanelWidth = () => {
+  if (!stagePanelWidth.value || isStageFull.value) return
+  const bounds = getStageWidthBounds()
+  stagePanelWidth.value = clamp(stagePanelWidth.value, bounds.min, bounds.max)
 }
 
-const getWhiteboardContainerStyle = () => {
+const getStageContainerStyle = () => {
   const style = {}
-  if (!isWhiteboardFull.value) {
-    if (whiteboardPanelHeight.value > 0) {
-      style.height = `${whiteboardPanelHeight.value}px`
+  if (!isStageFull.value) {
+    if (stagePanelHeight.value > 0) {
+      style.height = `${stagePanelHeight.value}px`
       style.flex = 'none'
     }
-    if (whiteboardPanelWidth.value > 0) {
-      style.width = `${whiteboardPanelWidth.value}px`
+    if (stagePanelWidth.value > 0) {
+      style.width = `${stagePanelWidth.value}px`
       style.flex = 'none'
       style.alignSelf = 'flex-start'
     }
@@ -788,7 +667,7 @@ const toggleLayoutMode = async () => {
     rightPanelWidth.value = rightPanelWidth.value || defaultDockedRightPanelWidth
   }
   saveLayoutState()
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 }
 
 const refreshCameraDevices = async () => {
@@ -966,34 +845,6 @@ const announceFocusedStream = async (streamID, source = 'teacher') => {
       JSON.stringify({ type: 'stream_focus', streamID, source })
     )
   } catch (err) {}
-}
-
-const announceWhiteboardSubView = async (uniqueID, source = 'teacher') => {
-  if (!canPublishLive.value || !isLiving.value || !zg.value || !zegoRoomID.value || !uniqueID) return
-  try {
-    await zg.value.sendBroadcastMessage(
-      zegoRoomID.value,
-      JSON.stringify({ type: 'wb_subview_focus', uniqueID, source })
-    )
-  } catch (err) {}
-}
-
-const clearTeacherWhiteboardHeartbeatTimer = () => {
-  if (teacherWhiteboardHeartbeatTimer.value) {
-    clearInterval(teacherWhiteboardHeartbeatTimer.value)
-    teacherWhiteboardHeartbeatTimer.value = null
-  }
-}
-
-const startTeacherWhiteboardHeartbeat = () => {
-  if (teacherWhiteboardHeartbeatTimer.value) return
-  teacherWhiteboardHeartbeatTimer.value = setInterval(() => {
-    if (!canPublishLive.value || !isLiving.value) return
-    const uniqueID = currentSuperBoardView.value?.getModel?.()?.uniqueID || latestTeacherWhiteboardSubViewID.value
-    if (!uniqueID) return
-    latestTeacherWhiteboardSubViewID.value = String(uniqueID)
-    announceWhiteboardSubView(String(uniqueID), 'heartbeat')
-  }, 3000)
 }
 
 const applyScenePreset = async (preset) => {
@@ -1305,12 +1156,12 @@ const resetLayout = async () => {
   floatingInteractionState.y = 16
   floatingInteractionState.width = 360
   floatingInteractionState.height = 520
-  whiteboardPanelHeight.value = 0
+  stagePanelHeight.value = 0
   try {
     localStorage.removeItem(layoutStorageKey)
   } catch (e) {}
   await nextTick()
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 }
 
 const getVideoPanelStyle = () => ({
@@ -1339,7 +1190,7 @@ const toggleInteractionCollapse = () => {
     showInteractionPanel.value = true
   }
   saveLayoutState()
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 }
 
 const beginPanelDrag = (panel, event) => {
@@ -1374,38 +1225,38 @@ const beginPanelResize = (panel, event) => {
   }
 }
 
-const beginWhiteboardResize = (event) => {
-  if (event.button !== 0 || isWhiteboardFull.value) return
-  const targetHeight = whiteboardPanelHeight.value || whiteboardContainerRef.value?.getBoundingClientRect?.().height || 0
+const beginStageResize = (event) => {
+  if (event.button !== 0 || isStageFull.value) return
+  const targetHeight = stagePanelHeight.value || stageContainerRef.value?.getBoundingClientRect?.().height || 0
   if (!targetHeight) return
-  whiteboardResizeState.active = true
-  whiteboardResizeState.mode = 'height'
-  whiteboardResizeState.startY = event.clientY
-  whiteboardResizeState.startHeight = targetHeight
+  stageResizeState.active = true
+  stageResizeState.mode = 'height'
+  stageResizeState.startY = event.clientY
+  stageResizeState.startHeight = targetHeight
 }
 
-const beginWhiteboardWidthResize = (event) => {
-  if (event.button !== 0 || isWhiteboardFull.value) return
-  const targetWidth = whiteboardPanelWidth.value || whiteboardContainerRef.value?.getBoundingClientRect?.().width || 0
+const beginStageWidthResize = (event) => {
+  if (event.button !== 0 || isStageFull.value) return
+  const targetWidth = stagePanelWidth.value || stageContainerRef.value?.getBoundingClientRect?.().width || 0
   if (!targetWidth) return
-  whiteboardResizeState.active = true
-  whiteboardResizeState.mode = 'width'
-  whiteboardResizeState.startX = event.clientX
-  whiteboardResizeState.startWidth = targetWidth
+  stageResizeState.active = true
+  stageResizeState.mode = 'width'
+  stageResizeState.startX = event.clientX
+  stageResizeState.startWidth = targetWidth
 }
 
 const handlePanelMouseMove = (event) => {
-  if (whiteboardResizeState.active) {
-    if (whiteboardResizeState.mode === 'height') {
-      const dy = event.clientY - whiteboardResizeState.startY
-      const bounds = getWhiteboardResizeBounds()
-      whiteboardPanelHeight.value = clamp(whiteboardResizeState.startHeight + dy, bounds.min, bounds.max)
-    } else if (whiteboardResizeState.mode === 'width') {
-      const dx = event.clientX - whiteboardResizeState.startX
-      const bounds = getWhiteboardWidthBounds()
-      whiteboardPanelWidth.value = clamp(whiteboardResizeState.startWidth + dx, bounds.min, bounds.max)
+  if (stageResizeState.active) {
+    if (stageResizeState.mode === 'height') {
+      const dy = event.clientY - stageResizeState.startY
+      const bounds = getStageResizeBounds()
+      stagePanelHeight.value = clamp(stageResizeState.startHeight + dy, bounds.min, bounds.max)
+    } else if (stageResizeState.mode === 'width') {
+      const dx = event.clientX - stageResizeState.startX
+      const bounds = getStageWidthBounds()
+      stagePanelWidth.value = clamp(stageResizeState.startWidth + dx, bounds.min, bounds.max)
     }
-    scheduleWhiteboardLayoutRefresh()
+    scheduleStageLayoutRefresh()
     return
   }
 
@@ -1436,13 +1287,13 @@ const handlePanelMouseMove = (event) => {
       targetState.height = clamp(panelDragState.startHeight + dy, minHeight, maxHeight)
     }
   }
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 }
 
 const handlePanelMouseUp = () => {
-  if (whiteboardResizeState.active) {
-    whiteboardResizeState.active = false
-    whiteboardResizeState.mode = ''
+  if (stageResizeState.active) {
+    stageResizeState.active = false
+    stageResizeState.mode = ''
     saveLayoutState()
     return
   }
@@ -1488,122 +1339,32 @@ const withTimeout = async (promise, timeoutMs, timeoutMessage) => {
   }
 }
 
-const extractErrorInfo = (err) => {
-  if (!err) return { code: 0, message: '' }
-
-  let code = Number(
-    err?.code ||
-    err?.errorCode ||
-    err?.errorData?.code ||
-    err?.err?.code ||
-    0
-  )
-  let message = String(
-    err?.message ||
-    err?.msg ||
-    err?.errorData?.msg ||
-    err?.errorData?.message ||
-    err?.err?.msg ||
-    err?.err?.message ||
-    ''
-  )
-
-  if ((!code || !message) && typeof err === 'string') {
-    try {
-      const parsed = JSON.parse(err)
-      code = code || Number(parsed?.code || parsed?.errorCode || parsed?.errorData?.code || parsed?.err?.code || 0)
-      message = message || String(parsed?.msg || parsed?.message || parsed?.errorData?.msg || parsed?.err?.msg || '')
-    } catch (e) {}
-  }
-
-  if (!message) {
-    message = parseErrorMessage(err, '')
-  }
-
-  return { code, message: String(message || '') }
-}
-
-const isWhiteboardUserNotExistError = (err) => {
-  const { code, message } = extractErrorInfo(err)
-  const lowerMsg = String(message || '').toLowerCase()
-  return (
-    code === 3010002 ||
-    code === 3101002 ||
-    code === 3110002 ||
-    String(message || '').includes('用户不存在') ||
-    lowerMsg.includes('user not exist')
-  )
-}
-
-const isAlreadyInRoomError = (err) => {
-  const msg = String(err?.message || err?.msg || err || '').toLowerCase()
-  return msg.includes('already') && msg.includes('room')
-}
-
 const isLoginRoomLimitError = (err) => {
   const msg = String(err?.message || err?.msg || err || '').toLowerCase()
   return msg.includes('login rooms exceeds the upper limit') || (msg.includes('login') && msg.includes('upper limit'))
 }
 
-const isNetworkTimeoutError = (err) => {
-  const { code, message } = extractErrorInfo(err)
-  const msg = String(message || '').toLowerCase()
-  return code === 3000003 || msg.includes('网络超时') || msg.includes('timeout')
-}
-
-const shouldSilenceWhiteboardUnhandledRejection = (reason) => {
-  const { code, message } = extractErrorInfo(reason)
-  const serialized = (() => {
-    try {
-      return JSON.stringify(reason || '')
-    } catch (e) {
-      return String(reason || '')
-    }
-  })().toLowerCase()
-
-  const isKnownRecoverableCode = [3000003, 3010002, 3101002, 3110002].includes(Number(code || 0))
-  const isKnownRecoverableMessage =
-    String(message || '').includes('用户不存在') ||
-    String(message || '').includes('网络超时') ||
-    String(message || '').toLowerCase().includes('user not exist') ||
-    String(message || '').toLowerCase().includes('timeout')
-  const isWhiteboardPayload = serialized.includes('sdk_type') && serialized.includes('wb')
-
-  return (isKnownRecoverableCode || isKnownRecoverableMessage) && isWhiteboardPayload
-}
-
 const handleUnhandledRejection = (event) => {
-  if (!event) return
-  if (!shouldSilenceWhiteboardUnhandledRejection(event.reason)) return
-  event.preventDefault()
+  return
 }
 
-const refreshWhiteboardLayout = async () => {
-  if (!whiteboardReady.value && !currentSuperBoardView.value) return
+const refreshStageLayout = async () => {
   await nextTick()
-  await waitForNextPaint()
-
-  const activeSubView = currentSuperBoardView.value || (refreshCurrentSuperBoardView() ? currentSuperBoardView.value : null)
-  try {
-    await Promise.resolve(activeSubView?.reloadView?.())
-  } catch (err) {
-    console.warn('[LivePush] whiteboard reload skipped:', parseErrorMessage(err))
-  }
 }
 
-const scheduleWhiteboardLayoutRefresh = () => {
-  if (whiteboardLayoutRefreshTimer.value) {
-    clearTimeout(whiteboardLayoutRefreshTimer.value)
+const scheduleStageLayoutRefresh = () => {
+  if (stageLayoutRefreshTimer.value) {
+    clearTimeout(stageLayoutRefreshTimer.value)
   }
-  whiteboardLayoutRefreshTimer.value = setTimeout(() => {
-    whiteboardLayoutRefreshTimer.value = null
-    refreshWhiteboardLayout()
+  stageLayoutRefreshTimer.value = setTimeout(() => {
+    stageLayoutRefreshTimer.value = null
+    refreshStageLayout()
   }, 180)
 }
 
-const toggleWhiteboardFull = async () => {
-  isWhiteboardFull.value = !isWhiteboardFull.value
-  await refreshWhiteboardLayout()
+const toggleStageFull = async () => {
+  isStageFull.value = !isStageFull.value
+  await refreshStageLayout()
 }
 
 const waitRoomConnected = async (timeoutMs = 12000) => {
@@ -1617,40 +1378,8 @@ const waitRoomConnected = async (timeoutMs = 12000) => {
   throw new Error('房间连接未就绪')
 }
 
-const ensureRoomLoginForWhiteboard = async (roomID, token, userID, userName) => {
-  if (!zg.value?.loginRoom) return
-  const normalizedRoomID = normalizeRoomID(roomID)
-  const normalizedUserID = String(userID || '').trim()
-  const normalizedToken = String(token || '').trim()
-  if (!normalizedRoomID) {
-    throw new Error('白板前房间号缺失，无法登录')
-  }
-  if (!normalizedUserID || !normalizedToken) {
-    throw new Error('白板前鉴权信息缺失，无法登录')
-  }
-  const connected = String(roomState.value || '').toUpperCase() === 'CONNECTED'
-  const sameRoomAndUser =
-    connected &&
-    currentRoomLoginRoomID.value === normalizedRoomID &&
-    currentRoomLoginUserID.value === normalizedUserID
-  if (sameRoomAndUser) return
-  try {
-    await withTimeout(
-      zg.value.loginRoom(normalizedRoomID, normalizedToken, { userID: normalizedUserID, userName }, { userUpdate: true }),
-      6000,
-      '白板前房间保活登录超时（6秒）'
-    )
-    markCurrentRoomLogin(normalizedRoomID, normalizedUserID)
-    await withTimeout(waitRoomConnected(8000), 9000, '白板前房间连接未就绪')
-  } catch (err) {
-    if (!isAlreadyInRoomError(err)) {
-      console.warn('[LivePush] ensureRoomLoginForWhiteboard ignored error:', err)
-    }
-  }
-}
-
-watch(isWhiteboardFull, () => {
-  scheduleWhiteboardLayoutRefresh()
+watch(isStageFull, () => {
+  scheduleStageLayoutRefresh()
 })
 
 watch(layoutFreeMode, (enabled) => {
@@ -1664,26 +1393,26 @@ watch(showVideoPanel, () => {
   saveLayoutState()
 })
 
-watch([layoutFreeMode, showVideoPanel, isWhiteboardFull], async () => {
+watch([layoutFreeMode, showVideoPanel, isStageFull], async () => {
   await nextTick()
   if (layoutFreeMode.value) {
     initFreeLayoutPositions()
   }
-  clampWhiteboardPanelHeight()
-  clampWhiteboardPanelWidth()
-  if (showVideoPanel.value && !isWhiteboardFull.value && localStream.value) {
+  clampStagePanelHeight()
+  clampStagePanelWidth()
+  if (showVideoPanel.value && !isStageFull.value && localStream.value) {
     await renderLocalStream(localVideoRef.value, localStream.value)
   }
   saveLayoutState()
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 })
 
 watch(() => cameraPreviewTiles.value.length, async () => {
   await nextTick()
-  clampWhiteboardPanelHeight()
-  clampWhiteboardPanelWidth()
+  clampStagePanelHeight()
+  clampStagePanelWidth()
   saveLayoutState()
-  scheduleWhiteboardLayoutRefresh()
+  scheduleStageLayoutRefresh()
 })
 
 watch(showInteractionPanel, () => {
@@ -1754,12 +1483,10 @@ const initZego = async () => {
             if (!started) {
               scheduleAudienceMainStreamRetry('room_stream_add', 800)
             }
-            scheduleAudienceWhiteboardSync('teacher_stream_add', 800)
             continue
           }
           if (audienceMainStreamID.value && stream.streamID === audienceMainStreamID.value) {
             await playAudienceStream(stream.streamID, { silent: true })
-            scheduleAudienceWhiteboardSync('focused_stream_readd', 800)
             continue
           }
         }
@@ -1826,28 +1553,6 @@ const initZego = async () => {
               scheduleAudienceMainStreamRetry('stream_focus', 700)
             }
           })
-          scheduleAudienceWhiteboardSync('stream_focus', 600)
-        } else if (data.type === 'wb_subview_focus' && !canPublishLive.value && data.uniqueID) {
-          latestTeacherWhiteboardSubViewID.value = String(data.uniqueID)
-          const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
-          const canSwitchNow =
-            whiteboardReady.value &&
-            !!boardView?.switchSuperBoardSubView &&
-            String(roomState.value || '').toUpperCase() === 'CONNECTED'
-          if (!canSwitchNow) {
-            scheduleAudienceWhiteboardSync('wb_subview_focus', 900)
-            return
-          }
-          switchToCreatedSubView({ uniqueID: String(data.uniqueID) })
-            .then(() => {
-              if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-                whiteboardReady.value = true
-                wbStageText.value = '白板已同步'
-              }
-            })
-            .catch(() => {
-              scheduleAudienceWhiteboardSync('wb_subview_focus', 1200)
-            })
         }
       } catch (e) {}
     })
@@ -1978,29 +1683,6 @@ const scheduleAudienceMainStreamRetry = (reason = 'unknown', delayMs = 1200) => 
   }, Math.max(200, Number(delayMs) || 0))
 }
 
-const clearAudienceWhiteboardRetryTimer = () => {
-  if (audienceWhiteboardRetryTimer.value) {
-    clearTimeout(audienceWhiteboardRetryTimer.value)
-    audienceWhiteboardRetryTimer.value = null
-  }
-}
-
-const clearAudienceWhiteboardHeartbeatTimer = () => {
-  if (audienceWhiteboardHeartbeatTimer.value) {
-    clearInterval(audienceWhiteboardHeartbeatTimer.value)
-    audienceWhiteboardHeartbeatTimer.value = null
-  }
-}
-
-const startAudienceWhiteboardHeartbeat = () => {
-  if (audienceWhiteboardHeartbeatTimer.value) return
-  audienceWhiteboardHeartbeatTimer.value = setInterval(() => {
-    if (canPublishLive.value || !isLiving.value) return
-    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
-    scheduleAudienceWhiteboardSync('heartbeat', 300)
-  }, 15000)
-}
-
 const clearAudienceRoomStatusRetryTimer = () => {
   if (audienceRoomStatusRetryTimer.value) {
     clearTimeout(audienceRoomStatusRetryTimer.value)
@@ -2024,7 +1706,7 @@ const syncAudienceRoomStatus = async () => {
     const liveNow = ['living', 'paused'].includes(String(res.status || ''))
     if (liveNow) {
       isLiving.value = true
-      wbStageText.value = wbStageText.value || '白板同步中...'
+      stageStatusText.value = stageStatusText.value || '已切换为屏幕共享授课模式'
       clearAudienceRoomStatusRetryTimer()
       const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
       if (!audienceAutoJoinStarted.value && authInfo?.token && authInfo?.userId) {
@@ -2036,7 +1718,7 @@ const syncAudienceRoomStatus = async () => {
           await startAudienceSession(authInfo)
         } catch (err) {
           audienceAutoJoinStarted.value = false
-          wbStageText.value = '听课连接失败，正在重试...'
+          stageStatusText.value = '听课连接失败，正在重试...'
         }
       }
       return
@@ -2059,48 +1741,6 @@ const syncAudienceRoomStatus = async () => {
   }
 }
 
-const shouldSyncAudienceWhiteboard = () => {
-  return !canPublishLive.value && isLiving.value && !!zg.value && !!zegoRoomID.value && !audienceWhiteboardBootstrapping.value
-}
-
-const scheduleAudienceWhiteboardSync = (reason = 'unknown', delayMs = 4000) => {
-  if (!shouldSyncAudienceWhiteboard()) return
-  if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
-
-  if (audienceWhiteboardRetryTimer.value) {
-    clearTimeout(audienceWhiteboardRetryTimer.value)
-  }
-
-  audienceWhiteboardRetryTimer.value = setTimeout(async () => {
-    audienceWhiteboardRetryTimer.value = null
-    if (!shouldSyncAudienceWhiteboard() || audienceWhiteboardSyncing.value) return
-    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
-
-    audienceWhiteboardSyncing.value = true
-    try {
-      const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
-      const token = authInfo?.token
-      const userID = authInfo?.userId
-      const userName = authInfo?.userName
-      if (!token || !userID) {
-        throw new Error('白板鉴权信息缺失')
-      }
-
-      await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
-      if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
-        wbStageText.value = '白板已同步'
-      } else {
-        wbStageText.value = '等待老师共享白板...'
-      }
-    } catch (err) {
-      wbStageText.value = '等待老师共享白板...'
-      scheduleAudienceWhiteboardSync(reason, isNetworkTimeoutError(err) ? 10000 : 4500)
-    } finally {
-      audienceWhiteboardSyncing.value = false
-    }
-  }, Math.max(300, Number(delayMs) || 0))
-}
-
 const startAudienceSession = async (authInfo) => {
   const userID = authInfo.userId
   const userName = authInfo.userName
@@ -2109,8 +1749,7 @@ const startAudienceSession = async (authInfo) => {
   zegoRoomID.value = roomID
   liveIdentity.value = { userId: userID, userName, token, roomId: roomID }
   isLiving.value = true
-  wbStageText.value = '白板同步中...'
-  audienceWhiteboardBootstrapping.value = true
+  stageStatusText.value = '已切换为屏幕共享授课模式，请等待老师开启屏幕共享'
 
   await resetRoomSessionBeforeStart(roomID)
   roomState.value = 'DISCONNECTED'
@@ -2146,22 +1785,6 @@ const startAudienceSession = async (authInfo) => {
 
   await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
   await playAudienceMainStream()
-  try {
-    await initWhiteboard(roomID, token, userID, userName, { viewerOnly: true })
-    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
-      wbStageText.value = '白板已同步'
-    } else {
-      wbStageText.value = '等待老师共享白板...'
-      scheduleAudienceWhiteboardSync('audience_session_start', 1500)
-    }
-  } catch (err) {
-    wbStageText.value = '等待老师共享白板...'
-    scheduleAudienceWhiteboardSync('audience_session_start', 1500)
-  } finally {
-    audienceWhiteboardBootstrapping.value = false
-  }
-  scheduleAudienceWhiteboardSync('audience_after_play', 1000)
-  startAudienceWhiteboardHeartbeat()
   if (!audienceMainStreamID.value) {
     scheduleAudienceMainStreamRetry('audience_session_start', 900)
   } else {
@@ -2197,32 +1820,18 @@ const handleStartLive = async () => {
     const token = authInfo.token
     liveIdentity.value = { userId: userID, userName, token, roomId: roomID }
 
-    // 清理可能残留的旧会话，统一走 loginRoom + initWhiteboard 的单路径初始化。
+    // 清理可能残留的旧会话，统一走 loginRoom 的单路径初始化。
     await resetRoomSessionBeforeStart(roomID)
     roomState.value = 'DISCONNECTED'
+    stageStatusText.value = '已切换为屏幕共享授课模式'
 
-    try {
-      whiteboardReady.value = false
-      currentSuperBoardView.value = null
-      wbStageText.value = '白板初始化中...'
-
-      await withTimeout(
-        zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
-        8000,
-        '登录房间超时（8秒）'
-      )
-      markCurrentRoomLogin(roomID, userID)
-
-      // 房间连接成功后创建/挂载白板
-      await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
-      const wbReady = await initWhiteboard(roomID, token, userID, userName)
-      wbStageText.value = wbReady ? '白板就绪' : (wbStageText.value || '恢复历史白板中...')
-    } catch (wbErr) {
-      whiteboardReady.value = false
-      wbStageText.value = '白板未就绪：' + parseErrorMessage(wbErr)
-      const wbCode = wbErr?.code || wbErr?.errorCode
-      ElMessage.warning('白板初始化失败' + (wbCode ? `（${wbCode}）` : '') + '：' + parseErrorMessage(wbErr))
-    }
+    await withTimeout(
+      zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
+      8000,
+      '登录房间超时（8秒）'
+    )
+    markCurrentRoomLogin(roomID, userID)
+    await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪')
 
     await refreshCameraDevices()
     await setMainCamera(activeCameraDeviceId.value || cameraDevices.value[0]?.deviceId)
@@ -2256,8 +1865,6 @@ const handleStartLive = async () => {
 
 const teardownSessionWithoutEndingLive = async () => {
   clearAudiencePlayRetryTimer()
-  clearAudienceWhiteboardHeartbeatTimer()
-  clearTeacherWhiteboardHeartbeatTimer()
   const streamID = 'teacher_' + roomId
   try {
     if (canPublishLive.value) {
@@ -2307,79 +1914,6 @@ const teardownSessionWithoutEndingLive = async () => {
   try {
     await zg.value?.logoutRoom?.(zegoRoomID.value)
   } catch (e) {}
-
-  try {
-    zegoSuperBoard.value?.destroy?.()
-  } catch (e) {}
-}
-
-const refreshCurrentSuperBoardView = () => {
-  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
-  const activeSubView = boardView?.getCurrentSuperBoardSubView?.()
-  if (!activeSubView) return false
-
-  currentSuperBoardView.value = activeSubView
-  totalPage.value = activeSubView.getPageCount?.() || 1
-  currentPage.value = activeSubView.getCurrentPage?.() || 1
-  return true
-}
-
-const switchToCreatedSubView = async (result) => {
-  // 兼容不同 SDK 返回结构：可能直接带 fileView/whiteboardView，也可能仅返回 uniqueID。
-  const directView = result?.fileView || result?.whiteboardView || null
-  const directUniqueID = directView?.getModel?.()?.uniqueID || null
-  const uniqueID = directUniqueID || result?.uniqueID || result?.model?.uniqueID || null
-
-  if (directView) {
-    currentSuperBoardView.value = directView
-    totalPage.value = directView.getPageCount?.() || 1
-    currentPage.value = directView.getCurrentPage?.() || 1
-  }
-
-  if (!uniqueID) {
-    refreshCurrentSuperBoardView()
-    return
-  }
-
-  const boardView = zegoSuperBoard.value?.getSuperBoardView?.()
-  if (!boardView?.switchSuperBoardSubView) {
-    refreshCurrentSuperBoardView()
-    return
-  }
-
-  await withTimeout(
-    boardView.switchSuperBoardSubView(uniqueID),
-    8000,
-    '切换课件白板超时（8秒）'
-  )
-  refreshCurrentSuperBoardView()
-
-  const currentUniqueID =
-    currentSuperBoardView.value?.getModel?.()?.uniqueID ||
-    uniqueID
-  if (currentUniqueID) {
-    latestTeacherWhiteboardSubViewID.value = String(currentUniqueID)
-    if (canPublishLive.value) {
-      announceWhiteboardSubView(String(currentUniqueID), 'switch_subview')
-      startTeacherWhiteboardHeartbeat()
-    }
-  }
-}
-
-const waitAndFindFileSubView = async (fileID, fileName, maxRetry = 45, interval = 1000) => {
-  for (let retry = 0; retry < maxRetry; retry += 1) {
-    const subViewList = await withTimeout(
-      zegoSuperBoard.value.querySuperBoardSubViewList(),
-      5000,
-      '查询白板子视图超时（5秒）'
-    )
-    const targetSubView = subViewList.find((item) => item.fileID === fileID || item.name === fileName)
-    if (targetSubView?.uniqueID) {
-      return targetSubView
-    }
-    await delay(interval)
-  }
-  return null
 }
 
 const handleEndLive = () => {
@@ -2439,20 +1973,7 @@ const confirmEndLive = async () => {
       roomState.value = 'DISCONNECTED'
     } catch (e) {}
 
-    try {
-      if (zegoSuperBoard.value) {
-        zegoSuperBoard.value.destroy()
-      }
-    } catch (e) {}
-
-    whiteboardReady.value = false
-    currentSuperBoardView.value = null
-    latestTeacherWhiteboardSubViewID.value = ''
     liveIdentity.value = null
-    clearAudienceWhiteboardRetryTimer()
-    clearAudienceWhiteboardHeartbeatTimer()
-    clearTeacherWhiteboardHeartbeatTimer()
-    audienceWhiteboardSyncing.value = false
     for (const tile of cameraPreviewTiles.value) {
       if (tile.isPublishing) {
         try {
@@ -2536,955 +2057,6 @@ const switchCamera = async () => {
   }
 }
 
-// ==================== 白板 ====================
-const initWhiteboard = async (roomID, token, userID, userName, options = {}) => {
-  const targetRoomID = normalizeRoomID(roomID) || (await ensureRoomIDReady())
-  if (!targetRoomID) {
-    throw new Error('白板初始化失败：房间号为空')
-  }
-  const normalizedToken = String(token || '').trim()
-  const normalizedUserID = String(userID || '').trim()
-  if (!normalizedToken || !normalizedUserID) {
-    throw new Error('白板初始化失败：鉴权信息缺失')
-  }
-  zegoRoomID.value = targetRoomID
-  console.info('[LivePush] initWhiteboard context', {
-    roomID: targetRoomID,
-    userID: normalizedUserID,
-    viewerOnly: !!options?.viewerOnly,
-    roomState: roomState.value,
-    appID: ZEGO_CONFIG.appID
-  })
-  const { viewerOnly = false } = options
-  await nextTick()
-
-  if (!whiteboardRef.value || !whiteboardRef.value.offsetWidth || !whiteboardRef.value.offsetHeight) {
-    throw new Error('白板容器未就绪，请稍后重试')
-  }
-
-  try {
-    zegoSuperBoard.value?.off?.('error')
-    zegoSuperBoard.value?.destroy?.()
-  } catch (e) {}
-  zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
-  zegoSuperBoard.value.off?.('error')
-  zegoSuperBoard.value.on?.('error', (error) => {
-    console.error('[LivePush] SuperBoard error:', error)
-  })
-
-  let workingToken = normalizedToken
-  let workingUserID = normalizedUserID
-  let workingUserName = userName || normalizedUserID
-  
-  let lastError = null
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    try {
-      await ensureRoomLoginForWhiteboard(targetRoomID, workingToken, workingUserID, workingUserName)
-
-      if (attempt > 0) {
-        try {
-          zegoSuperBoard.value.destroy?.()
-        } catch (e) {}
-        await delay(500)
-      }
-
-      await withTimeout(
-        zegoSuperBoard.value.init(zg.value, {
-          parentDomID: whiteboardDomId,
-          appID: ZEGO_CONFIG.appID,
-          token: workingToken,
-          roomID: targetRoomID,
-          userID: workingUserID,
-          userName: workingUserName,
-          isTestEnv: false
-        }),
-        10000,
-        '白板服务初始化超时（10秒）'
-      )
-
-      await delay(300)
-
-      if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-        whiteboardReady.value = true
-        const currentUniqueID = currentSuperBoardView.value?.getModel?.()?.uniqueID
-        if (currentUniqueID) {
-          latestTeacherWhiteboardSubViewID.value = String(currentUniqueID)
-          if (canPublishLive.value) {
-            announceWhiteboardSubView(String(currentUniqueID), 'init_ready')
-            startTeacherWhiteboardHeartbeat()
-          }
-        }
-        return true
-      }
-
-      if (viewerOnly) {
-        if (latestTeacherWhiteboardSubViewID.value) {
-          try {
-            await switchToCreatedSubView({ uniqueID: latestTeacherWhiteboardSubViewID.value })
-            if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-              whiteboardReady.value = true
-              return true
-            }
-          } catch (syncErr) {
-            console.warn('[LivePush] switch latest teacher subview failed:', {
-              roomID: targetRoomID,
-              userID,
-              uniqueID: latestTeacherWhiteboardSubViewID.value,
-              error: parseErrorMessage(syncErr)
-            })
-          }
-        }
-
-        let firstSubView = null
-        for (let queryTry = 0; queryTry < 3; queryTry += 1) {
-          try {
-            const subViewList = await withTimeout(
-              zegoSuperBoard.value.querySuperBoardSubViewList(),
-              12000,
-              '查询白板子视图超时（12秒）'
-            )
-            firstSubView = Array.isArray(subViewList)
-              ? subViewList.find((item) => item?.uniqueID)
-              : null
-          } catch (queryErr) {
-            console.warn('[LivePush] querySuperBoardSubViewList failed:', {
-              roomID: targetRoomID,
-              userID,
-              queryTry: queryTry + 1,
-              error: parseErrorMessage(queryErr)
-            })
-          }
-
-          if (firstSubView?.uniqueID) {
-            await switchToCreatedSubView({ uniqueID: firstSubView.uniqueID })
-            if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-              whiteboardReady.value = true
-              return true
-            }
-          }
-
-          if (!firstSubView?.uniqueID && latestTeacherWhiteboardSubViewID.value) {
-            try {
-              await switchToCreatedSubView({ uniqueID: latestTeacherWhiteboardSubViewID.value })
-              if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-                whiteboardReady.value = true
-                return true
-              }
-            } catch (syncErr) {}
-          }
-
-          if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-            whiteboardReady.value = true
-            return true
-          }
-
-          await delay(1200)
-        }
-
-        whiteboardReady.value = false
-        return false
-      }
-
-      // 老师断网重进时优先恢复已有白板，避免误创建新白板导致看起来“内容被清空”。
-      const preferExistingTeacherBoard =
-        canPublishLive.value &&
-        ['living', 'paused'].includes(String(roomInfo.value?.status || ''))
-      let existingTeacherSubView = null
-      let querySucceeded = false
-      let hasAnySubView = false
-      for (let queryTry = 0; queryTry < 2; queryTry += 1) {
-        try {
-          const subViewList = await withTimeout(
-            zegoSuperBoard.value.querySuperBoardSubViewList(),
-            4000,
-            '查询白板子视图超时（4秒）'
-          )
-          querySucceeded = true
-          hasAnySubView = Array.isArray(subViewList) && subViewList.length > 0
-          existingTeacherSubView = Array.isArray(subViewList)
-            ? subViewList.find((item) => item?.uniqueID)
-            : null
-        } catch (queryErr) {
-          console.warn('[LivePush] teacher querySuperBoardSubViewList failed:', {
-            roomID: targetRoomID,
-            userID: workingUserID,
-            queryTry: queryTry + 1,
-            error: parseErrorMessage(queryErr)
-          })
-        }
-
-        if (existingTeacherSubView?.uniqueID) {
-          await switchToCreatedSubView({ uniqueID: existingTeacherSubView.uniqueID })
-          if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-            whiteboardReady.value = true
-            if (canPublishLive.value) {
-              startTeacherWhiteboardHeartbeat()
-            }
-            return true
-          }
-        }
-
-        if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
-          whiteboardReady.value = true
-          if (canPublishLive.value) {
-            startTeacherWhiteboardHeartbeat()
-          }
-          return true
-        }
-
-        await delay(400)
-      }
-
-      // 断网重进阶段不阻塞回房流程：优先恢复历史白板，失败则先允许进房，后续由心跳/重试继续恢复。
-      if (preferExistingTeacherBoard) {
-        whiteboardReady.value = false
-        wbStageText.value = !querySucceeded
-          ? '恢复历史白板中（网络波动）...'
-          : (hasAnySubView ? '恢复历史白板中...' : '等待白板同步...')
-        return false
-      }
-
-      const result = await withTimeout(
-        zegoSuperBoard.value.createWhiteboardView({
-          name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
-        }),
-        12000,
-        '创建基础白板超时（12秒）'
-      )
-
-      await switchToCreatedSubView(result)
-      if (!currentSuperBoardView.value) {
-        refreshCurrentSuperBoardView()
-      }
-
-      if (!currentSuperBoardView.value) {
-        throw new Error('基础白板创建后未激活')
-      }
-
-      whiteboardReady.value = true
-      if (canPublishLive.value) {
-        startTeacherWhiteboardHeartbeat()
-      }
-      return true
-    } catch (err) {
-      lastError = err
-      console.warn('[LivePush] initWhiteboard attempt failed', {
-        attempt: attempt + 1,
-        roomID: targetRoomID,
-        userID: workingUserID,
-        error: parseErrorMessage(err)
-      })
-      if (isWhiteboardUserNotExistError(err) && attempt < 9) {
-        wbStageText.value = `白板用户同步中...(${attempt + 1}/10) user=${workingUserID}`
-        console.warn('[LivePush] whiteboard user not exist, retrying', {
-          attempt: attempt + 1,
-          roomID: targetRoomID,
-          userID: workingUserID,
-          err
-        })
-
-        try {
-          const refreshedAuth = await getZegoAuth()
-          const refreshedToken = String(refreshedAuth?.token || '').trim()
-          const refreshedUserID = String(refreshedAuth?.userId || '').trim()
-          const refreshedUserName = refreshedAuth?.userName || refreshedUserID
-          if (refreshedToken && refreshedUserID) {
-            workingToken = refreshedToken
-            workingUserID = refreshedUserID
-            workingUserName = refreshedUserName
-            liveIdentity.value = {
-              userId: workingUserID,
-              userName: workingUserName,
-              token: workingToken,
-              roomId: targetRoomID
-            }
-          }
-        } catch (refreshErr) {}
-
-        // 开播前阶段允许强制重建房间会话，提升白板识别用户成功率。
-        if (!isLiving.value || !localStream.value) {
-          await resetRoomSessionBeforeStart(targetRoomID)
-          await ensureRoomLoginForWhiteboard(targetRoomID, workingToken, workingUserID, workingUserName)
-        }
-
-        await delay(1500)
-        continue
-      }
-
-      if (attempt < 9) {
-        await delay(500)
-        continue
-      }
-
-      break
-    }
-  }
-
-  throw lastError || new Error('白板初始化失败')
-}
-
-const ensureWhiteboardReadyForUpload = async () => {
-  if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
-    return true
-  }
-
-  const authInfo = await getAuthInfoForRoom(zegoRoomID.value)
-  const token = authInfo?.token
-  const userID = authInfo?.userId
-  const userName = authInfo?.userName
-
-  if (!token || !userID) {
-    throw new Error('白板鉴权信息缺失，请重新开始直播')
-  }
-
-  whiteboardReady.value = false
-  currentSuperBoardView.value = null
-  await initWhiteboard(zegoRoomID.value, token, userID, userName)
-
-  if (!currentSuperBoardView.value) {
-    refreshCurrentSuperBoardView()
-  }
-
-  if (!whiteboardReady.value) {
-    throw new Error('白板初始化未完成')
-  }
-
-  return true
-}
-
-const setWbTool = (tool) => {
-  if (wbToolbarLocked.value || wbClassProtectMode.value) {
-    ElMessage.warning('工具栏已锁定，按 K 可解锁')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-
-  const toolEnum = ZegoSuperBoardWeb?.ZegoSuperBoardTool || {}
-  const fallbackToolEnum = {
-    Pen: 1,
-    Text: 2,
-    Line: 4,
-    Rect: 8,
-    Ellipse: 16,
-    Selector: 32,
-    Eraser: 64
-  }
-  const toolMap = {
-    selector: Number.isFinite(toolEnum.Selector) ? toolEnum.Selector : fallbackToolEnum.Selector,
-    pen: Number.isFinite(toolEnum.Pen) ? toolEnum.Pen : fallbackToolEnum.Pen,
-    text: Number.isFinite(toolEnum.Text) ? toolEnum.Text : fallbackToolEnum.Text,
-    line: Number.isFinite(toolEnum.Line) ? toolEnum.Line : fallbackToolEnum.Line,
-    rect: Number.isFinite(toolEnum.Rect) ? toolEnum.Rect : fallbackToolEnum.Rect,
-    ellipse: Number.isFinite(toolEnum.Ellipse) ? toolEnum.Ellipse : fallbackToolEnum.Ellipse,
-    eraser: Number.isFinite(toolEnum.Eraser) ? toolEnum.Eraser : fallbackToolEnum.Eraser
-  }
-  const targetTool = Number.isFinite(toolMap[tool]) ? toolMap[tool] : null
-  if (targetTool === null) {
-    ElMessage.warning('当前白板不支持该工具')
-    return
-  }
-
-  try {
-    // 进入绘制模式后，工具切换才会生效。
-    const modeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardOperationMode || {}
-    const drawMode = Number.isFinite(modeEnum.Draw) ? modeEnum.Draw : 4
-    zegoSuperBoard.value.setOperationMode?.(drawMode)
-    wbOperationMode.value = 'draw'
-    const ok = zegoSuperBoard.value.setToolType?.(targetTool)
-    if (ok === false) {
-      ElMessage.warning('当前白板不支持该工具')
-    } else {
-      if (tool !== wbActiveTool.value) {
-        wbPrevTool.value = wbActiveTool.value
-      }
-      wbActiveTool.value = tool
-      wbToolPicker.value = tool
-      // 工具变化后重应用绘图风格，保证图形工具参数不丢失。
-      applyWbDrawStyle({ silent: true })
-    }
-  } catch (e) {
-    ElMessage.warning('当前白板不支持该工具')
-  }
-}
-
-const trySetWbProperty = (candidates) => {
-  const board = zegoSuperBoard.value
-  if (!board) return null
-  let hadMethod = false
-  for (const item of candidates) {
-    const method = board?.[item.name]
-    if (typeof method !== 'function') continue
-    hadMethod = true
-    try {
-      const result = method.call(board, ...(item.args || []))
-      if (result !== false) return true
-    } catch (e) {}
-  }
-  return hadMethod ? false : null
-}
-
-const setWbLineStyle = (style, options = {}) => {
-  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
-    if (!options.silent) ElMessage.warning('当前模式不允许修改线型')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    if (!options.silent) ElMessage.warning('白板未就绪')
-    return
-  }
-
-  const normalizedStyle = style === 'dashed' ? 'dashed' : 'solid'
-  wbLineStyle.value = normalizedStyle
-  const lineStyleEnum = ZegoSuperBoardWeb?.ZegoSuperBoardLineStyle || {}
-  const enumValue = normalizedStyle === 'dashed'
-    ? [lineStyleEnum.Dash, lineStyleEnum.Dashed].find((value) => Number.isFinite(value))
-    : lineStyleEnum.Solid
-
-  const result = trySetWbProperty([
-    { name: 'setLineStyle', args: [enumValue] },
-    { name: 'setLineStyle', args: [normalizedStyle] },
-    { name: 'setBrushLineStyle', args: [enumValue] },
-    { name: 'setBrushLineStyle', args: [normalizedStyle] },
-    { name: 'setPenLineStyle', args: [enumValue] },
-    { name: 'setPenLineStyle', args: [normalizedStyle] },
-    { name: 'setBrushDashed', args: [normalizedStyle === 'dashed'] },
-    { name: 'setDashed', args: [normalizedStyle === 'dashed'] }
-  ])
-
-  if (result === false && !options.silent) {
-    ElMessage.warning('当前白板不支持线型设置')
-  }
-}
-
-const setWbShapeFilled = (filled, options = {}) => {
-  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
-    if (!options.silent) ElMessage.warning('当前模式不允许修改填充')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    if (!options.silent) ElMessage.warning('白板未就绪')
-    return
-  }
-
-  const normalizedFilled = !!filled
-  wbShapeFilled.value = normalizedFilled
-  const fillModeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardFillMode || {}
-  const enumValue = normalizedFilled
-    ? [fillModeEnum.Fill, fillModeEnum.Filled].find((value) => Number.isFinite(value))
-    : [fillModeEnum.Hollow, fillModeEnum.Stroke].find((value) => Number.isFinite(value))
-
-  const result = trySetWbProperty([
-    { name: 'setFillMode', args: [enumValue] },
-    { name: 'setShapeFillMode', args: [enumValue] },
-    { name: 'setShapeFilled', args: [normalizedFilled] },
-    { name: 'setGraphicFilled', args: [normalizedFilled] },
-    { name: 'setBrushFilled', args: [normalizedFilled] }
-  ])
-
-  if (result === false && !options.silent) {
-    ElMessage.warning('当前白板不支持填充设置')
-  }
-}
-
-const setWbAlpha = (alpha, options = {}) => {
-  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
-    if (!options.silent) ElMessage.warning('当前模式不允许修改透明度')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    if (!options.silent) ElMessage.warning('白板未就绪')
-    return
-  }
-
-  const normalizedAlpha = Math.max(1, Math.min(100, Number(alpha) || 100))
-  wbAlpha.value = normalizedAlpha
-  const alphaRate = normalizedAlpha / 100
-
-  const result = trySetWbProperty([
-    { name: 'setBrushAlpha', args: [alphaRate] },
-    { name: 'setBrushAlpha', args: [normalizedAlpha] },
-    { name: 'setBrushOpacity', args: [alphaRate] },
-    { name: 'setBrushOpacity', args: [normalizedAlpha] },
-    { name: 'setPenAlpha', args: [alphaRate] },
-    { name: 'setPenAlpha', args: [normalizedAlpha] },
-    { name: 'setPenOpacity', args: [alphaRate] },
-    { name: 'setPenOpacity', args: [normalizedAlpha] },
-    { name: 'setGraphicAlpha', args: [alphaRate] },
-    { name: 'setGraphicOpacity', args: [alphaRate] }
-  ])
-
-  if (result === false && !options.silent) {
-    ElMessage.warning('当前白板不支持透明度设置')
-  }
-}
-
-const applyWbDrawStyle = (options = {}) => {
-  setWbLineStyle(wbLineStyle.value, options)
-  setWbShapeFilled(wbShapeFilled.value, options)
-  setWbAlpha(wbAlpha.value, options)
-}
-
-const setWbOperationMode = (mode, options = {}) => {
-  if (!options.force && (wbToolbarLocked.value || wbClassProtectMode.value)) {
-    if (!options.silent) ElMessage.warning('工具栏已锁定，按 K 可解锁')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    if (!options.silent) ElMessage.warning('白板未就绪')
-    return
-  }
-  const modeEnum = ZegoSuperBoardWeb?.ZegoSuperBoardOperationMode || {}
-  const modeMap = {
-    none: Number.isFinite(modeEnum.None) ? modeEnum.None : 1,
-    scroll: Number.isFinite(modeEnum.Scroll) ? modeEnum.Scroll : 2,
-    draw: Number.isFinite(modeEnum.Draw) ? modeEnum.Draw : 4,
-    zoom: Number.isFinite(modeEnum.Zoom) ? modeEnum.Zoom : 8
-  }
-  const targetMode = modeMap[mode]
-  if (!Number.isFinite(targetMode)) return
-  try {
-    zegoSuperBoard.value.setOperationMode?.(targetMode)
-    wbOperationMode.value = mode
-    wbToolPicker.value = mode === 'scroll' ? 'scroll' : wbActiveTool.value
-  } catch (e) {}
-}
-
-const selectWbToolFromPicker = (tool) => {
-  if (tool === 'scroll') {
-    setWbOperationMode('scroll')
-    return
-  }
-  setWbTool(tool)
-}
-
-const switchWbPrevTool = () => {
-  const previousTool = wbPrevTool.value || 'selector'
-  if (previousTool === wbActiveTool.value) return
-  setWbTool(previousTool)
-}
-
-const toggleWbToolbarCompact = () => {
-  wbToolbarCompact.value = !wbToolbarCompact.value
-}
-
-const toggleWbToolbarLock = () => {
-  wbToolbarLocked.value = !wbToolbarLocked.value
-  if (wbToolbarLocked.value) {
-    ElMessage.info('白板工具栏已锁定（按 K 可解锁）')
-  } else {
-    ElMessage.success('白板工具栏已解锁')
-  }
-}
-
-const toggleWbClassProtectMode = () => {
-  wbClassProtectMode.value = !wbClassProtectMode.value
-  if (wbClassProtectMode.value) {
-    wbToolbarLocked.value = true
-    wbToolbarCompact.value = true
-    ElMessage.info('已进入课堂保护模式（按 G 可退出）')
-  } else {
-    wbToolbarLocked.value = false
-    ElMessage.success('已退出课堂保护模式')
-  }
-}
-
-const setWbColor = (color) => {
-  if (wbToolbarLocked.value || wbClassProtectMode.value) {
-    ElMessage.warning('当前模式不允许修改颜色')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-
-  try {
-    const ok = zegoSuperBoard.value.setBrushColor?.(color)
-    if (ok === false) {
-      ElMessage.warning('当前白板不支持颜色设置')
-    }
-  } catch (e) {}
-}
-
-const setWbBrushSize = (size) => {
-  if (wbToolbarLocked.value || wbClassProtectMode.value) {
-    ElMessage.warning('当前模式不允许修改线宽')
-    return
-  }
-  if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView())) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-  const target = Number(size)
-  if (!Number.isFinite(target) || target <= 0) return
-  wbBrushSize.value = target
-  try {
-    const ok = zegoSuperBoard.value.setBrushSize?.(target)
-    if (ok === false) {
-      ElMessage.warning('当前白板不支持线宽设置')
-    }
-  } catch (e) {}
-}
-
-const undoWb = () => {
-  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-  try {
-    currentSuperBoardView.value?.undo?.()
-  } catch (e) {
-    ElMessage.warning('当前白板不支持撤销')
-  }
-}
-
-const redoWb = () => {
-  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-  try {
-    currentSuperBoardView.value?.redo?.()
-  } catch (e) {
-    ElMessage.warning('当前白板不支持重做')
-  }
-}
-
-const handleWbShortcutKeydown = (event) => {
-  const target = event.target
-  const tagName = String(target?.tagName || '').toLowerCase()
-  const editable = !!target?.isContentEditable || ['input', 'textarea', 'select'].includes(tagName)
-  if (editable) return
-
-  const key = String(event.key || '').toLowerCase()
-  const ctrlOrMeta = event.ctrlKey || event.metaKey
-
-  if (!ctrlOrMeta && !event.altKey && key === 'k') {
-    event.preventDefault()
-    toggleWbToolbarLock()
-    return
-  }
-
-  if (!ctrlOrMeta && !event.altKey && key === 'm') {
-    event.preventDefault()
-    toggleWbToolbarCompact()
-    return
-  }
-
-  if (!ctrlOrMeta && !event.altKey && key === 'g') {
-    event.preventDefault()
-    toggleWbClassProtectMode()
-    return
-  }
-
-  if (wbClassProtectMode.value) {
-    if (ctrlOrMeta && key === 'z') {
-      event.preventDefault()
-      undoWb()
-      return
-    }
-    return
-  }
-
-  if (wbToolbarLocked.value) {
-    return
-  }
-
-  if (!ctrlOrMeta && !event.altKey && key === ' ') {
-    event.preventDefault()
-    if (!wbHotkeyPanActive.value && !event.repeat) {
-      wbOperationModeBeforePan.value = wbOperationMode.value
-      wbHotkeyPanActive.value = true
-      setWbOperationMode('scroll', { silent: true, force: true })
-    }
-    return
-  }
-
-  if (!ctrlOrMeta && !event.altKey && key === 'tab') {
-    event.preventDefault()
-    switchWbPrevTool()
-    return
-  }
-
-  if (ctrlOrMeta && key === 'z') {
-    event.preventDefault()
-    if (event.shiftKey) {
-      redoWb()
-    } else {
-      undoWb()
-    }
-    return
-  }
-
-  if (ctrlOrMeta && key === 'y') {
-    event.preventDefault()
-    redoWb()
-    return
-  }
-
-  if (ctrlOrMeta || event.altKey) {
-    return
-  }
-
-  const toolHotkeyMap = {
-    v: 'selector',
-    p: 'pen',
-    b: 'pen',
-    t: 'text',
-    l: 'line',
-    r: 'rect',
-    o: 'ellipse',
-    e: 'eraser'
-  }
-
-  const targetTool = toolHotkeyMap[key]
-  if (targetTool) {
-    event.preventDefault()
-    setWbTool(targetTool)
-    return
-  }
-
-  if (key === 'h') {
-    event.preventDefault()
-    setWbOperationMode('scroll')
-    return
-  }
-
-  if (key === 'f') {
-    event.preventDefault()
-    setWbShapeFilled(!wbShapeFilled.value)
-    return
-  }
-
-  if (key === 'd') {
-    event.preventDefault()
-    setWbLineStyle(wbLineStyle.value === 'solid' ? 'dashed' : 'solid')
-    return
-  }
-
-  if (key === '[' || key === ']') {
-    const currentIndex = wbBrushSizeOptions.indexOf(wbBrushSize.value)
-    const safeIndex = currentIndex < 0 ? wbBrushSizeOptions.indexOf(6) : currentIndex
-    const nextIndex = key === '['
-      ? Math.max(0, safeIndex - 1)
-      : Math.min(wbBrushSizeOptions.length - 1, safeIndex + 1)
-    const nextSize = wbBrushSizeOptions[nextIndex]
-    if (nextSize !== wbBrushSize.value) {
-      event.preventDefault()
-      setWbBrushSize(nextSize)
-    }
-  }
-}
-
-const handleWbShortcutKeyup = (event) => {
-  const key = String(event.key || '').toLowerCase()
-  if (key !== ' ') return
-  if (!wbHotkeyPanActive.value) return
-  event.preventDefault()
-  wbHotkeyPanActive.value = false
-  setWbOperationMode(wbOperationModeBeforePan.value || 'draw', { silent: true, force: true })
-}
-
-const clearWb = () => {
-  if (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) {
-    ElMessage.warning('白板未就绪')
-    return
-  }
-  const subView = currentSuperBoardView.value
-
-  try {
-    if (subView?.clearCurrentPage) {
-      subView.clearCurrentPage()
-      return
-    }
-  } catch (e) {}
-
-  try {
-    if (subView?.clearAllPage) {
-      subView.clearAllPage()
-      return
-    }
-  } catch (e) {}
-
-  ElMessage.warning('当前白板不支持清空操作')
-}
-
-const uploadPPT = async () => {
-  if (!isLiving.value) {
-    ElMessage.warning('请先开始直播后再上传 PPT')
-    return
-  }
-
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.ppt,.pptx,.pdf'
-  input.style.display = 'none'
-  input.value = ''
-  document.body.appendChild(input)
-  input.onchange = async (e) => {
-    let loadingMsg = null
-    try {
-      const file = e?.target?.files?.[0]
-      if (!file) {
-        ElMessage.info('未选择文件')
-        return
-      }
-
-      ElMessage.info(`已选择文件：${file.name}`)
-
-      const lowerName = String(file.name || '').toLowerCase()
-      const isPdf = lowerName.endsWith('.pdf')
-      const isPpt = lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')
-      if (!isPdf && !isPpt) {
-        ElMessage.warning('仅支持 .ppt / .pptx / .pdf 文件')
-        return
-      }
-
-      loadingMsg = ElMessage({
-        type: 'info',
-        duration: 0,
-        showClose: true,
-        message: '正在准备白板和课件，请稍候（通常 10-60 秒）...'
-      })
-      wbStageText.value = '准备中...'
-
-      if (!zegoSuperBoard.value || (!currentSuperBoardView.value && !refreshCurrentSuperBoardView()) || !whiteboardReady.value) {
-        ElMessage.info('步骤 1/3：正在准备白板环境...')
-        wbStageText.value = '步骤 1/3：准备白板环境'
-        try {
-          await withTimeout(
-            ensureWhiteboardReadyForUpload(),
-            20000,
-            '白板初始化超时（20秒），请结束直播后重开再试'
-          )
-        } catch (err) {
-          ElMessage.warning('白板尚未就绪：' + parseErrorMessage(err))
-          return
-        }
-      }
-      
-      ElMessage.info('步骤 2/3：PPT 上传中...')
-      wbStageText.value = '步骤 2/3：上传课件'
-      // SDK 在不同打包形态下可能拿不到枚举对象，这里使用固定数值更稳定：
-      // IMG = 2, DynamicPPTH5 = 6, VectorAndIMG = 3
-      const primaryRenderType = isPdf ? 2 : 6
-      const fallbackRenderType = 3
-      let fileID = ''
-
-      try {
-        fileID = await withTimeout(
-          zegoSuperBoard.value.uploadFile(
-            file,
-            primaryRenderType,
-            () => {},
-            { renderImgType: 1 }
-          ),
-          120000,
-          '课件上传或转码启动超时（120秒）'
-        )
-      } catch (primaryErr) {
-        if (isPdf) throw primaryErr
-        // 动态PPT不可用时自动回退到通用模式，保证可展示
-        fileID = await withTimeout(
-          zegoSuperBoard.value.uploadFile(
-            file,
-            fallbackRenderType,
-            () => {},
-            { renderImgType: 1 }
-          ),
-          120000,
-          '课件上传或转码启动超时（120秒）'
-        )
-      }
-
-      if (!fileID) {
-        throw new Error('上传未返回 fileID，无法创建课件视图')
-      }
-
-      ElMessage.info('步骤 3/3：正在创建并切换课件视图...')
-      wbStageText.value = '步骤 3/3：创建并切换课件视图'
-
-      let wbResult = null
-      let createFileViewError = null
-      try {
-        wbResult = await withTimeout(
-          zegoSuperBoard.value.createFileView({ fileID }),
-          30000,
-          '创建课件视图超时（30秒）'
-        )
-      } catch (createErr) {
-        createFileViewError = createErr
-        console.warn('[LivePush] createFileView failed, will try current active subview:', createErr)
-      }
-
-      let switched = false
-      if (wbResult) {
-        await switchToCreatedSubView(wbResult)
-        switched = !!(currentSuperBoardView.value || refreshCurrentSuperBoardView())
-      }
-
-      if (!switched) {
-        await delay(300)
-        switched = !!(currentSuperBoardView.value || refreshCurrentSuperBoardView())
-      }
-
-      if (!switched && createFileViewError) {
-        throw new Error('创建课件视图失败：' + parseErrorMessage(createFileViewError))
-      }
-
-      if (!switched) {
-        const active = zegoSuperBoard.value?.getSuperBoardView?.()?.getCurrentSuperBoardSubView?.()
-        if (active) {
-          currentSuperBoardView.value = active
-          totalPage.value = active.getPageCount?.() || 1
-          currentPage.value = active.getCurrentPage?.() || 1
-          switched = true
-        }
-      }
-
-      if (!switched) {
-        throw new Error('已上传课件，但未切换到课件白板')
-      }
-
-      wbStageText.value = '课件已显示'
-      ElMessage.success('PPT 加载成功')
-    } catch (err) {
-      wbStageText.value = '失败：' + parseErrorMessage(err, '未知错误')
-      ElMessage.error('PPT 上传失败: ' + parseErrorMessage(err, '请检查白板转码配置'))
-      console.error('[LivePush] PPT 上传流程异常:', err)
-    } finally {
-      loadingMsg?.close?.()
-      input.value = ''
-      input.remove()
-    }
-  }
-  input.addEventListener('cancel', () => {
-    input.value = ''
-    input.remove()
-  })
-  setTimeout(() => {
-    if (document.body.contains(input)) {
-      input.value = ''
-      input.remove()
-    }
-  }, 60000)
-  // 必须保持同步触发，避免浏览器因异步流程拦截文件选择弹窗
-  input.click()
-}
-
-const prevPage = () => {
-  if (!currentSuperBoardView.value || currentPage.value <= 1) return
-  currentSuperBoardView.value.flipToPage(--currentPage.value)
-}
-
-const nextPage = () => {
-  if (!currentSuperBoardView.value || currentPage.value >= totalPage.value) return
-  currentSuperBoardView.value.flipToPage(++currentPage.value)
-}
-
 // ==================== 连麦管理 ====================
 const acceptCoHost = async (student) => {
   await approveCohostApi(roomId, { userId: student.userID })
@@ -3555,9 +2127,7 @@ onMounted(async () => {
     }
     const roomAlreadyLiving = ['living', 'paused'].includes(String(res.status || ''))
     isLiving.value = isAssistantUser ? roomAlreadyLiving : false
-    if (!isAssistantUser && roomAlreadyLiving) {
-      wbStageText.value = '检测到未结束直播，正在恢复会话...'
-    }
+    stageStatusText.value = '已切换为屏幕共享授课模式'
     cameraPreviewPresets.value = loadCameraPreviewPresets()
     try {
       const savedCameraDeviceId = localStorage.getItem(cameraStorageKey)
@@ -3574,11 +2144,13 @@ onMounted(async () => {
       if (savedLayout.rightPanelWidth) {
         rightPanelWidth.value = savedLayout.rightPanelWidth
       }
-      if (savedLayout.whiteboardPanelHeight) {
-        whiteboardPanelHeight.value = Number(savedLayout.whiteboardPanelHeight) || 0
+      const savedStagePanelHeight = savedLayout.stagePanelHeight ?? savedLayout.whiteboardPanelHeight
+      if (savedStagePanelHeight) {
+        stagePanelHeight.value = Number(savedStagePanelHeight) || 0
       }
-      if (savedLayout.whiteboardPanelWidth) {
-        whiteboardPanelWidth.value = Number(savedLayout.whiteboardPanelWidth) || 0
+      const savedStagePanelWidth = savedLayout.stagePanelWidth ?? savedLayout.whiteboardPanelWidth
+      if (savedStagePanelWidth) {
+        stagePanelWidth.value = Number(savedStagePanelWidth) || 0
       }
       if (savedLayout.floatingVideoState) {
         Object.assign(floatingVideoState, savedLayout.floatingVideoState)
@@ -3589,8 +2161,8 @@ onMounted(async () => {
     }
     initFreeLayoutPositions()
     await nextTick()
-    clampWhiteboardPanelHeight()
-    clampWhiteboardPanelWidth()
+    clampStagePanelHeight()
+    clampStagePanelWidth()
     try {
       const authInfo = await getZegoAuth()
       canPublishLive.value = !!authInfo?.canPublish && !isAssistantUser
@@ -3603,7 +2175,7 @@ onMounted(async () => {
           await startAudienceSession(authInfo)
         } catch (audErr) {
           audienceAutoJoinStarted.value = false
-          wbStageText.value = '听课连接失败，正在重试...'
+          stageStatusText.value = '听课连接失败，正在重试...'
           console.error('[LivePush] audience session start failed:', audErr)
         }
       }
@@ -3617,7 +2189,7 @@ onMounted(async () => {
     } catch (err) {
       if (isAssistantUser) {
         canPublishLive.value = false
-        wbStageText.value = '听课初始化失败，正在重试...'
+        stageStatusText.value = '听课初始化失败，正在重试...'
         syncAudienceRoomStatus()
       }
       console.error('[LivePush] auth/init failed:', err)
@@ -3628,26 +2200,20 @@ onMounted(async () => {
     window.addEventListener('unhandledrejection', handleUnhandledRejection)
     document.addEventListener('mousemove', handlePanelMouseMove)
     document.addEventListener('mouseup', handlePanelMouseUp)
-    document.addEventListener('keydown', handleWbShortcutKeydown)
-    document.addEventListener('keyup', handleWbShortcutKeyup)
   } catch (mountErr) {
     console.error('[LivePush] mount failed:', mountErr)
-    wbStageText.value = '页面初始化失败：' + parseErrorMessage(mountErr)
+    stageStatusText.value = '页面初始化失败：' + parseErrorMessage(mountErr)
     ElMessage.error('直播页面初始化失败：' + parseErrorMessage(mountErr))
   }
 })
 
 onBeforeUnmount(() => {
-  if (whiteboardLayoutRefreshTimer.value) {
-    clearTimeout(whiteboardLayoutRefreshTimer.value)
-    whiteboardLayoutRefreshTimer.value = null
+  if (stageLayoutRefreshTimer.value) {
+    clearTimeout(stageLayoutRefreshTimer.value)
+    stageLayoutRefreshTimer.value = null
   }
-  clearAudienceWhiteboardRetryTimer()
-  clearAudienceWhiteboardHeartbeatTimer()
-  clearTeacherWhiteboardHeartbeatTimer()
   clearAudienceRoomStatusRetryTimer()
   clearAudiencePlayRetryTimer()
-  audienceWhiteboardSyncing.value = false
   cameraPreviewTiles.value.forEach((tile) => {
     if (tile.isPublishing) {
       try {
@@ -3662,8 +2228,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('unhandledrejection', handleUnhandledRejection)
   document.removeEventListener('mousemove', handlePanelMouseMove)
   document.removeEventListener('mouseup', handlePanelMouseUp)
-  document.removeEventListener('keydown', handleWbShortcutKeydown)
-  document.removeEventListener('keyup', handleWbShortcutKeyup)
   teardownSessionWithoutEndingLive()
 })
 </script>
@@ -3841,7 +2405,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.28) 50%);
 }
 
-.whiteboard-container {
+.stage-container {
   flex: 1;
   background: #fff;
   border-radius: 12px;
@@ -3865,7 +2429,7 @@ onBeforeUnmount(() => {
   }
 }
 
-.wb-splitter {
+.stage-splitter {
   height: 10px;
   margin: -6px 8px -2px;
   border-radius: 999px;
@@ -3874,7 +2438,7 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
-.wb-splitter-right {
+.stage-splitter-right {
   position: absolute;
   top: 44px;
   right: 0;
@@ -3886,7 +2450,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, transparent 0%, rgba(64, 158, 255, 0.25) 50%, transparent 100%);
 }
 
-.wb-toolbar {
+.stage-toolbar {
   min-height: 44px;
   background: #f5f5f5;
   display: flex;
@@ -3898,15 +2462,8 @@ onBeforeUnmount(() => {
   overflow-y: hidden;
   white-space: nowrap;
   scrollbar-width: thin;
-  
-  .page-info {
-    color: #333;
-    font-size: 14px;
-    min-width: 60px;
-    text-align: center;
-  }
 
-  .wb-stage {
+  .stage-label {
     max-width: 360px;
     white-space: nowrap;
     overflow: hidden;
@@ -3914,16 +2471,9 @@ onBeforeUnmount(() => {
     font-size: 12px;
     color: #666;
   }
-
-  .wb-shortcut-tip {
-    font-size: 12px;
-    color: #888;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
 }
 
-.whiteboard {
+.stage-canvas {
   flex: 1;
   position: relative;
   min-width: 0;
