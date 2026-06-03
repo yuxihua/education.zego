@@ -109,13 +109,7 @@
           :style="getStageContainerStyle()"
           ref="stageContainerRef"
         >
-          <div class="stage-toolbar">
-            <span v-if="stageStatusText" class="stage-label">{{ stageStatusText }}</span>
-            <el-button size="small" @click="toggleStageFull">
-              {{ isStageFull ? '退出全屏' : '全屏' }}
-            </el-button>
-          </div>
-          <div class="stage-canvas" ref="stageCanvasRef">
+          <div class="stage-canvas" ref="stageCanvasRef" @dblclick="toggleStageFull">
             <div class="stage-screen-host" ref="stageScreenHostRef"></div>
             <div v-if="!hasStageScreenContent" class="stage-screen-placeholder">屏幕共享画面将显示在此区域</div>
           </div>
@@ -2693,37 +2687,14 @@ onBeforeUnmount(() => {
 
 .stage-splitter-right {
   position: absolute;
-  top: 44px;
+  top: 0;
   right: 0;
   width: 10px;
-  height: calc(100% - 44px);
+  height: 100%;
   margin: 0;
   cursor: ew-resize;
   z-index: 6;
   background: linear-gradient(180deg, transparent 0%, rgba(64, 158, 255, 0.25) 50%, transparent 100%);
-}
-
-.stage-toolbar {
-  min-height: 44px;
-  background: #f5f5f5;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  border-bottom: 1px solid #ddd;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  scrollbar-width: thin;
-
-  .stage-label {
-    max-width: 360px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 12px;
-    color: #666;
-  }
 }
 
 .stage-canvas {
