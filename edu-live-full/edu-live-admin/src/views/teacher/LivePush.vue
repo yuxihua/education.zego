@@ -2248,9 +2248,6 @@ const toggleScreenShare = async () => {
     isScreenSharing.value = false
     clearStageCanvas()
     const streamID = 'teacher_' + roomId
-    if (localStream.value) {
-      await zg.value.startPublishingStream(streamID, localStream.value)
-    }
     await announceFocusedStream(streamID, 'screen_share_stop')
   } else {
     try {
@@ -2268,7 +2265,6 @@ const toggleScreenShare = async () => {
         }
       }
       const streamID = 'teacher_' + roomId
-      zg.value.stopPublishingStream(streamID)
       const screenStreamID = streamID + '_screen'
       await zg.value.startPublishingStream(screenStreamID, screenStream.value)
       isScreenSharing.value = true
