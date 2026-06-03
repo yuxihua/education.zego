@@ -919,9 +919,9 @@ const setMainCamera = async (deviceId) => {
   const previousDeviceId = activeCameraDeviceId.value
   activeCameraDeviceId.value = deviceId
   try {
-    // 主摄像头切换优先使用原生 getUserMedia，确保按 deviceId 精确切换设备。
-    const { stream, provider } = await createCameraStream(deviceId, true, false)
-    await publishMainCameraStream(stream, provider)
+    // 主摄像头用于正式推流，必须使用 ZEGO 创建的流。
+    const stream = await createZegoCameraStream(deviceId, true)
+    await publishMainCameraStream(stream, 'zego')
     if (isLiving.value && !isScreenSharing.value) {
       await announceFocusedStream(`teacher_${roomId}`, 'main_camera')
     }
