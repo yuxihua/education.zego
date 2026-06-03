@@ -2116,7 +2116,7 @@ const handleStartLive = async () => {
     const token = authInfo.token
     liveIdentity.value = { userId: userID, userName, token, roomId: roomID }
 
-    // 清理可能残留的旧会话，再按官方推荐顺序初始化：先 SuperBoard，再登录房间。
+    // 清理可能残留的旧会话，统一走 loginRoom + initWhiteboard 的单路径初始化。
     await resetRoomSessionBeforeStart(roomID)
     roomState.value = 'DISCONNECTED'
 
@@ -2124,27 +2124,7 @@ const handleStartLive = async () => {
       whiteboardReady.value = false
       currentSuperBoardView.value = null
       wbStageText.value = '白板初始化中...'
-      // 1) 先初始化 SuperBoard SDK
-      zegoSuperBoard.value = ZegoSuperBoardManager.getInstance()
-      zegoSuperBoard.value.off?.('error')
-      zegoSuperBoard.value.on?.('error', (error) => {
-        console.error('[LivePush] SuperBoard error:', error)
-      })
-      await withTimeout(
-        zegoSuperBoard.value.init(zg.value, {
-          parentDomID: whiteboardDomId,
-          appID: ZEGO_CONFIG.appID,
-          token,
-          roomID,
-          userID,
-          userName: userName || userID,
-          isTestEnv: false
-        }),
-        10000,
-        '白板服务初始化超时（10秒）'
-      )
 
-      // 2) 再登录房间
       await withTimeout(
         zg.value.loginRoom(roomID, token, { userID, userName }, { userUpdate: true }),
         8000,
@@ -2152,7 +2132,7 @@ const handleStartLive = async () => {
       )
       markCurrentRoomLogin(roomID, userID)
 
-      // 3) 连接成功后创建/挂载白板
+      // 房间连接成功后创建/挂载白板
       await withTimeout(waitRoomConnected(12000), 13000, '房间连接未就绪，无法创建白板')
       await initWhiteboard(roomID, token, userID, userName)
       wbStageText.value = '白板就绪'
