@@ -487,6 +487,7 @@ const audiencePlayRetryCount = ref(0)
 const whiteboardLayoutRefreshTimer = ref(null)
 const audienceWhiteboardRetryTimer = ref(null)
 const audienceWhiteboardSyncing = ref(false)
+const audienceWhiteboardBootstrapping = ref(false)
 const audienceWhiteboardHeartbeatTimer = ref(null)
 const audienceRoomStatusRetryTimer = ref(null)
 const audienceRoomStatusRetryCount = ref(0)
@@ -1924,7 +1925,7 @@ const syncAudienceRoomStatus = async () => {
 }
 
 const shouldSyncAudienceWhiteboard = () => {
-  return !canPublishLive.value && isLiving.value && !!zg.value && !!zegoRoomID.value
+  return !canPublishLive.value && isLiving.value && !!zg.value && !!zegoRoomID.value && !audienceWhiteboardBootstrapping.value
 }
 
 const scheduleAudienceWhiteboardSync = (reason = 'unknown', delayMs = 4000) => {
@@ -1974,6 +1975,7 @@ const startAudienceSession = async (authInfo) => {
   liveIdentity.value = { userId: userID, userName, token }
   isLiving.value = true
   wbStageText.value = '白板同步中...'
+  audienceWhiteboardBootstrapping.value = true
 
   await resetRoomSessionBeforeStart(roomID)
   roomState.value = 'DISCONNECTED'
@@ -2020,6 +2022,8 @@ const startAudienceSession = async (authInfo) => {
   } catch (err) {
     wbStageText.value = '等待老师共享白板...'
     scheduleAudienceWhiteboardSync('audience_session_start', 1500)
+  } finally {
+    audienceWhiteboardBootstrapping.value = false
   }
   scheduleAudienceWhiteboardSync('audience_after_play', 1000)
   startAudienceWhiteboardHeartbeat()
