@@ -155,7 +155,9 @@
               {{ isStageFull ? '退出全屏' : '全屏' }}
             </el-button>
           </div>
-          <div class="stage-canvas"></div>
+          <div class="stage-canvas" ref="stageCanvasRef">
+            <div v-if="!isScreenSharing" class="stage-screen-placeholder">屏幕共享画面将显示在此区域</div>
+          </div>
           <div
             v-if="!isStageFull"
             class="stage-splitter stage-splitter-right"
@@ -399,6 +401,7 @@ const workspaceRef = ref(null)
 const leftPanelRef = ref(null)
 const videoContainerRef = ref(null)
 const stageContainerRef = ref(null)
+const stageCanvasRef = ref(null)
 const cameraGalleryRef = ref(null)
 const layoutFreeMode = ref(false)
 const showVideoPanel = ref(true)
@@ -564,6 +567,28 @@ const loadLayoutState = () => {
   } catch (e) {
     return null
   }
+}
+
+const clearStageCanvas = () => {
+  if (!stageCanvasRef.value) return
+  stageCanvasRef.value.innerHTML = ''
+}
+
+const renderStageScreenStream = async (stream) => {
+  if (!stageCanvasRef.value || !stream) return
+  clearStageCanvas()
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = true
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'contain'
+  stageCanvasRef.value.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
 }
 
 const saveLayoutState = () => {
@@ -1933,6 +1958,8 @@ const teardownSessionWithoutEndingLive = async () => {
       screenStream.value = null
     }
   } catch (e) {}
+  isScreenSharing.value = false
+  clearStageCanvas()
 
   try {
     if (localStream.value) {
@@ -1991,6 +2018,8 @@ const confirmEndLive = async () => {
         screenStream.value = null
       }
     } catch (e) {}
+    isScreenSharing.value = false
+    clearStageCanvas()
 
     try {
       coHostStreams.value.forEach(s => {
@@ -2098,6 +2127,7 @@ const toggleScreenShare = async () => {
     } catch (e) {}
     screenStream.value = null
     isScreenSharing.value = false
+    clearStageCanvas()
     const streamID = 'teacher_' + roomId
     if (localStream.value) {
       await zg.value.startPublishingStream(streamID, localStream.value)
@@ -2108,6 +2138,7 @@ const toggleScreenShare = async () => {
       screenStream.value = await zg.value.createStream({
         screen: { audio: true, videoQuality: 2, width: 1920, height: 1080, frameRate: 15, bitrate: 1500 }
       })
+      await renderStageScreenStream(screenStream.value)
       const screenTrack = screenStream.value?.getVideoTracks?.()?.[0]
       if (screenTrack) {
         screenTrack.onended = async () => {
@@ -2124,6 +2155,7 @@ const toggleScreenShare = async () => {
       isScreenSharing.value = true
       await announceFocusedStream(screenStreamID, 'screen_share_start')
     } catch (err) {
+      clearStageCanvas()
       ElMessage.warning('屏幕共享已取消')
     }
   }
@@ -2577,8 +2609,25 @@ onBeforeUnmount(() => {
 .stage-canvas {
   flex: 1;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f172a;
   min-width: 0;
   min-height: 0;
+
+  .stage-screen-placeholder {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 14px;
+    user-select: none;
+  }
+
+  :deep(video) {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain;
+    background: #000;
+  }
   
   :deep(canvas) {
     width: 100% !important;
