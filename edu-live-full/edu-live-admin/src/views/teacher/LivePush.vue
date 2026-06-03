@@ -157,7 +157,7 @@
           </div>
           <div class="stage-canvas" ref="stageCanvasRef">
             <div class="stage-screen-host" ref="stageScreenHostRef"></div>
-            <div v-if="!isScreenSharing" class="stage-screen-placeholder">屏幕共享画面将显示在此区域</div>
+            <div v-if="!hasStageScreenContent" class="stage-screen-placeholder">屏幕共享画面将显示在此区域</div>
           </div>
           <div
             v-if="!isStageFull"
@@ -340,7 +340,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -375,6 +375,10 @@ const roomInfo = ref({})
 // 白板
 const isStageFull = ref(false)
 const stageStatusText = ref('')
+const hasStageScreenContent = computed(() => {
+  if (canPublishLive.value) return isScreenSharing.value
+  return Boolean(audienceStageStreamID.value)
+})
 
 // 连麦
 const handUpList = ref([])
@@ -605,6 +609,18 @@ const clearAudienceStageStream = () => {
     audienceStageStreamID.value = ''
   }
   clearStageCanvas()
+}
+
+const restoreAudiencePlaybackViews = async () => {
+  if (canPublishLive.value || !isLiving.value || !zg.value) return
+
+  if (showVideoPanel.value && !isStageFull.value && audienceMainStreamID.value) {
+    await playAudienceStream(audienceMainStreamID.value, { silent: true })
+  }
+
+  if (audienceStageStreamID.value) {
+    await playAudienceStageStream(audienceStageStreamID.value, { silent: true })
+  }
 }
 
 const saveLayoutState = () => {
@@ -1486,6 +1502,11 @@ watch([layoutFreeMode, showVideoPanel, isStageFull], async () => {
   if (showVideoPanel.value && !isStageFull.value && localStream.value) {
     await renderLocalStream(localVideoRef.value, localStream.value)
   }
+
+  if (!canPublishLive.value) {
+    await restoreAudiencePlaybackViews()
+  }
+
   saveLayoutState()
   scheduleStageLayoutRefresh()
 })
@@ -1744,7 +1765,7 @@ const playAudienceStream = async (streamID, options = {}) => {
 }
 
 const playAudienceStageStream = async (streamID, options = {}) => {
-  if (!zg.value || !stageCanvasRef.value || !streamID) return false
+  if (!zg.value || !stageScreenHostRef.value || !streamID) return false
   const { silent = false } = options
   try {
     if (audienceStageStreamID.value && audienceStageStreamID.value !== streamID) {
