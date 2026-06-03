@@ -156,6 +156,7 @@
             </el-button>
           </div>
           <div class="stage-canvas" ref="stageCanvasRef">
+            <div class="stage-screen-host" ref="stageScreenHostRef"></div>
             <div v-if="!isScreenSharing" class="stage-screen-placeholder">屏幕共享画面将显示在此区域</div>
           </div>
           <div
@@ -403,6 +404,7 @@ const leftPanelRef = ref(null)
 const videoContainerRef = ref(null)
 const stageContainerRef = ref(null)
 const stageCanvasRef = ref(null)
+const stageScreenHostRef = ref(null)
 const cameraGalleryRef = ref(null)
 const layoutFreeMode = ref(false)
 const showVideoPanel = ref(true)
@@ -571,14 +573,14 @@ const loadLayoutState = () => {
 }
 
 const clearStageCanvas = () => {
-  if (!stageCanvasRef.value) return
-  stageCanvasRef.value.innerHTML = ''
+  if (!stageScreenHostRef.value) return
+  stageScreenHostRef.value.innerHTML = ''
 }
 
 const isScreenShareStreamID = (streamID) => String(streamID || '').endsWith('_screen')
 
 const renderStageScreenStream = async (stream) => {
-  if (!stageCanvasRef.value || !stream) return
+  if (!stageScreenHostRef.value || !stream) return
   clearStageCanvas()
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
@@ -588,7 +590,8 @@ const renderStageScreenStream = async (stream) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'contain'
-  stageCanvasRef.value.appendChild(videoEl)
+  videoEl.style.pointerEvents = 'none'
+  stageScreenHostRef.value.appendChild(videoEl)
   try {
     await videoEl.play()
   } catch (e) {}
@@ -2677,10 +2680,19 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
 
+  .stage-screen-host {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+
   .stage-screen-placeholder {
+    position: relative;
+    z-index: 1;
     color: rgba(255, 255, 255, 0.75);
     font-size: 14px;
     user-select: none;
+    pointer-events: none;
   }
 
   :deep(video) {
@@ -2688,6 +2700,7 @@ onBeforeUnmount(() => {
     height: 100% !important;
     object-fit: contain;
     background: #000;
+    pointer-events: none;
   }
   
   :deep(canvas) {
