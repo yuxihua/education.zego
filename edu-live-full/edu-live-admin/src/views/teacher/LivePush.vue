@@ -487,6 +487,7 @@ const audiencePlayRetryCount = ref(0)
 const whiteboardLayoutRefreshTimer = ref(null)
 const audienceWhiteboardRetryTimer = ref(null)
 const audienceWhiteboardSyncing = ref(false)
+const audienceWhiteboardHeartbeatTimer = ref(null)
 const audienceRoomStatusRetryTimer = ref(null)
 const audienceRoomStatusRetryCount = ref(0)
 const workspaceRef = ref(null)
@@ -608,7 +609,8 @@ const renderRemoteStream = async (container, stream) => {
   container.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
-  videoEl.muted = false
+  // 观众端优先保证自动播放成功，避免浏览器自动播放策略导致黑屏。
+  videoEl.muted = true
   videoEl.playsInline = true
   videoEl.srcObject = stream
   videoEl.style.width = '100%'
@@ -1467,6 +1469,12 @@ const isLoginRoomLimitError = (err) => {
   return msg.includes('login rooms exceeds the upper limit') || (msg.includes('login') && msg.includes('upper limit'))
 }
 
+const isNetworkTimeoutError = (err) => {
+  const code = Number(err?.code || err?.errorCode || 0)
+  const msg = String(err?.message || err?.msg || err || '').toLowerCase()
+  return code === 3000003 || msg.includes('网络超时') || msg.includes('timeout')
+}
+
 const refreshWhiteboardLayout = async () => {
   if (!whiteboardReady.value && !currentSuperBoardView.value) return
   await nextTick()
@@ -1766,9 +1774,17 @@ const playAudienceStream = async (streamID, options = {}) => {
       })
       started = true
     } catch (bindErr) {
-      const remoteStream = await zg.value.startPlayingStream(streamID)
-      await renderRemoteStream(localVideoRef.value, remoteStream)
-      started = true
+      try {
+        const remoteStream = await zg.value.startPlayingStream(streamID)
+        await renderRemoteStream(localVideoRef.value, remoteStream)
+        started = true
+      } catch (fallbackErr) {
+        console.warn('[LivePush] playAudienceStream failed', {
+          streamID,
+          bindError: parseErrorMessage(bindErr),
+          fallbackError: parseErrorMessage(fallbackErr)
+        })
+      }
     }
 
     if (!started) {
@@ -1827,6 +1843,22 @@ const clearAudienceWhiteboardRetryTimer = () => {
     clearTimeout(audienceWhiteboardRetryTimer.value)
     audienceWhiteboardRetryTimer.value = null
   }
+}
+
+const clearAudienceWhiteboardHeartbeatTimer = () => {
+  if (audienceWhiteboardHeartbeatTimer.value) {
+    clearInterval(audienceWhiteboardHeartbeatTimer.value)
+    audienceWhiteboardHeartbeatTimer.value = null
+  }
+}
+
+const startAudienceWhiteboardHeartbeat = () => {
+  if (audienceWhiteboardHeartbeatTimer.value) return
+  audienceWhiteboardHeartbeatTimer.value = setInterval(() => {
+    if (canPublishLive.value || !isLiving.value) return
+    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) return
+    scheduleAudienceWhiteboardSync('heartbeat', 300)
+  }, 15000)
 }
 
 const clearAudienceRoomStatusRetryTimer = () => {
@@ -1912,10 +1944,14 @@ const scheduleAudienceWhiteboardSync = (reason = 'unknown', delayMs = 4000) => {
       }
 
       await initWhiteboard(zegoRoomID.value, token, userID, userName, { viewerOnly: true })
-      wbStageText.value = '白板已同步'
+      if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
+        wbStageText.value = '白板已同步'
+      } else {
+        wbStageText.value = '等待老师共享白板...'
+      }
     } catch (err) {
       wbStageText.value = '等待老师共享白板...'
-      scheduleAudienceWhiteboardSync(reason, 4500)
+      scheduleAudienceWhiteboardSync(reason, isNetworkTimeoutError(err) ? 10000 : 4500)
     } finally {
       audienceWhiteboardSyncing.value = false
     }
@@ -1968,12 +2004,18 @@ const startAudienceSession = async (authInfo) => {
   await playAudienceMainStream()
   try {
     await initWhiteboard(roomID, token, userID, userName, { viewerOnly: true })
-    wbStageText.value = '白板已同步'
+    if (whiteboardReady.value && (currentSuperBoardView.value || refreshCurrentSuperBoardView())) {
+      wbStageText.value = '白板已同步'
+    } else {
+      wbStageText.value = '等待老师共享白板...'
+      scheduleAudienceWhiteboardSync('audience_session_start', 1500)
+    }
   } catch (err) {
     wbStageText.value = '等待老师共享白板...'
     scheduleAudienceWhiteboardSync('audience_session_start', 1500)
   }
   scheduleAudienceWhiteboardSync('audience_after_play', 1000)
+  startAudienceWhiteboardHeartbeat()
   if (!audienceMainStreamID.value) {
     scheduleAudienceMainStreamRetry('audience_session_start', 900)
   } else {
@@ -2088,6 +2130,7 @@ const handleStartLive = async () => {
 
 const teardownSessionWithoutEndingLive = async () => {
   clearAudiencePlayRetryTimer()
+  clearAudienceWhiteboardHeartbeatTimer()
   const streamID = 'teacher_' + roomId
   try {
     if (canPublishLive.value) {
@@ -2268,6 +2311,7 @@ const confirmEndLive = async () => {
     currentSuperBoardView.value = null
     liveIdentity.value = null
     clearAudienceWhiteboardRetryTimer()
+    clearAudienceWhiteboardHeartbeatTimer()
     audienceWhiteboardSyncing.value = false
     for (const tile of cameraPreviewTiles.value) {
       if (tile.isPublishing) {
@@ -2406,7 +2450,7 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
 
       if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
         whiteboardReady.value = true
-        return
+        return true
       }
 
       if (viewerOnly) {
@@ -2434,19 +2478,20 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
             await switchToCreatedSubView({ uniqueID: firstSubView.uniqueID })
             if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
               whiteboardReady.value = true
-              return
+              return true
             }
           }
 
           if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
             whiteboardReady.value = true
-            return
+            return true
           }
 
           await delay(1200)
         }
 
-        throw new Error('当前暂无老师共享白板')
+        whiteboardReady.value = false
+        return false
       }
 
       const result = await withTimeout(
@@ -2467,7 +2512,7 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
       }
 
       whiteboardReady.value = true
-      return
+      return true
     } catch (err) {
       lastError = err
       console.warn('[LivePush] initWhiteboard attempt failed', {
@@ -3322,6 +3367,7 @@ onBeforeUnmount(() => {
     whiteboardLayoutRefreshTimer.value = null
   }
   clearAudienceWhiteboardRetryTimer()
+  clearAudienceWhiteboardHeartbeatTimer()
   clearAudienceRoomStatusRetryTimer()
   clearAudiencePlayRetryTimer()
   audienceWhiteboardSyncing.value = false
