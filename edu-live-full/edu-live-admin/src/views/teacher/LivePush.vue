@@ -2685,6 +2685,63 @@ const initWhiteboard = async (roomID, token, userID, userName, options = {}) => 
         return false
       }
 
+      // 老师断网重进时优先恢复已有白板，避免误创建新白板导致看起来“内容被清空”。
+      const preferExistingTeacherBoard =
+        canPublishLive.value &&
+        ['living', 'paused'].includes(String(roomInfo.value?.status || ''))
+      let existingTeacherSubView = null
+      let querySucceeded = false
+      let hasAnySubView = false
+      for (let queryTry = 0; queryTry < 4; queryTry += 1) {
+        try {
+          const subViewList = await withTimeout(
+            zegoSuperBoard.value.querySuperBoardSubViewList(),
+            12000,
+            '查询白板子视图超时（12秒）'
+          )
+          querySucceeded = true
+          hasAnySubView = Array.isArray(subViewList) && subViewList.length > 0
+          existingTeacherSubView = Array.isArray(subViewList)
+            ? subViewList.find((item) => item?.uniqueID)
+            : null
+        } catch (queryErr) {
+          console.warn('[LivePush] teacher querySuperBoardSubViewList failed:', {
+            roomID: targetRoomID,
+            userID: workingUserID,
+            queryTry: queryTry + 1,
+            error: parseErrorMessage(queryErr)
+          })
+        }
+
+        if (existingTeacherSubView?.uniqueID) {
+          await switchToCreatedSubView({ uniqueID: existingTeacherSubView.uniqueID })
+          if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+            whiteboardReady.value = true
+            if (canPublishLive.value) {
+              startTeacherWhiteboardHeartbeat()
+            }
+            return true
+          }
+        }
+
+        if (currentSuperBoardView.value || refreshCurrentSuperBoardView()) {
+          whiteboardReady.value = true
+          if (canPublishLive.value) {
+            startTeacherWhiteboardHeartbeat()
+          }
+          return true
+        }
+
+        await delay(900)
+      }
+
+      if (preferExistingTeacherBoard && !querySucceeded) {
+        throw new Error('恢复历史白板失败：白板列表查询超时，请稍后重试')
+      }
+      if (preferExistingTeacherBoard && hasAnySubView) {
+        throw new Error('恢复历史白板失败：未找到可切换白板视图，请稍后重试')
+      }
+
       const result = await withTimeout(
         zegoSuperBoard.value.createWhiteboardView({
           name: '课件白板', perPageWidth: 1600, perPageHeight: 900, pageCount: 5
