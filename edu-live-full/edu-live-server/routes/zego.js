@@ -248,6 +248,9 @@ router.get('/token', auth, asyncHandler(async (req, res) => {
     if (canPublish) {
       // 讲师推流身份固定，避免 SuperBoard 出现“用户不存在”
       userId = `teacher_${req.user.id}`;
+    } else if (req.user.role === 'assistant') {
+      // 助教听课白板对 userId 同步更敏感，固定身份降低“用户不存在”竞态。
+      userId = `assistant_${req.user.id}`;
     } else {
       const baseUserId = `${req.user.role || 'user'}_${req.user.id}`;
       const safeSessionId = String(sessionId || '')
