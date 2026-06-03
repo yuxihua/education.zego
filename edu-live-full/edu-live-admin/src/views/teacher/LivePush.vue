@@ -530,6 +530,10 @@ const endDialogVisible = ref(false)
 const parseErrorMessage = (err, fallback = '未知错误') => {
   if (!err) return fallback
   if (typeof err === 'string') return err
+  if (err?.errorData?.msg) return String(err.errorData.msg)
+  if (err?.errorData?.message) return String(err.errorData.message)
+  if (err?.err?.msg) return String(err.err.msg)
+  if (err?.err?.message) return String(err.err.message)
   if (err.message) return err.message
   if (err.msg) return err.msg
   if (err.error && typeof err.error === 'string') return err.error
@@ -1484,10 +1488,51 @@ const withTimeout = async (promise, timeoutMs, timeoutMessage) => {
   }
 }
 
+const extractErrorInfo = (err) => {
+  if (!err) return { code: 0, message: '' }
+
+  let code = Number(
+    err?.code ||
+    err?.errorCode ||
+    err?.errorData?.code ||
+    err?.err?.code ||
+    0
+  )
+  let message = String(
+    err?.message ||
+    err?.msg ||
+    err?.errorData?.msg ||
+    err?.errorData?.message ||
+    err?.err?.msg ||
+    err?.err?.message ||
+    ''
+  )
+
+  if ((!code || !message) && typeof err === 'string') {
+    try {
+      const parsed = JSON.parse(err)
+      code = code || Number(parsed?.code || parsed?.errorCode || parsed?.errorData?.code || parsed?.err?.code || 0)
+      message = message || String(parsed?.msg || parsed?.message || parsed?.errorData?.msg || parsed?.err?.msg || '')
+    } catch (e) {}
+  }
+
+  if (!message) {
+    message = parseErrorMessage(err, '')
+  }
+
+  return { code, message: String(message || '') }
+}
+
 const isWhiteboardUserNotExistError = (err) => {
-  const code = Number(err?.code || err?.errorCode || 0)
-  const msg = String(err?.message || err?.msg || err || '')
-  return code === 3110002 || msg.includes('用户不存在') || msg.toLowerCase().includes('user not exist')
+  const { code, message } = extractErrorInfo(err)
+  const lowerMsg = String(message || '').toLowerCase()
+  return (
+    code === 3010002 ||
+    code === 3101002 ||
+    code === 3110002 ||
+    String(message || '').includes('用户不存在') ||
+    lowerMsg.includes('user not exist')
+  )
 }
 
 const isAlreadyInRoomError = (err) => {
@@ -1501,9 +1546,36 @@ const isLoginRoomLimitError = (err) => {
 }
 
 const isNetworkTimeoutError = (err) => {
-  const code = Number(err?.code || err?.errorCode || 0)
-  const msg = String(err?.message || err?.msg || err || '').toLowerCase()
+  const { code, message } = extractErrorInfo(err)
+  const msg = String(message || '').toLowerCase()
   return code === 3000003 || msg.includes('网络超时') || msg.includes('timeout')
+}
+
+const shouldSilenceWhiteboardUnhandledRejection = (reason) => {
+  const { code, message } = extractErrorInfo(reason)
+  const serialized = (() => {
+    try {
+      return JSON.stringify(reason || '')
+    } catch (e) {
+      return String(reason || '')
+    }
+  })().toLowerCase()
+
+  const isKnownRecoverableCode = [3000003, 3010002, 3101002, 3110002].includes(Number(code || 0))
+  const isKnownRecoverableMessage =
+    String(message || '').includes('用户不存在') ||
+    String(message || '').includes('网络超时') ||
+    String(message || '').toLowerCase().includes('user not exist') ||
+    String(message || '').toLowerCase().includes('timeout')
+  const isWhiteboardPayload = serialized.includes('sdk_type') && serialized.includes('wb')
+
+  return (isKnownRecoverableCode || isKnownRecoverableMessage) && isWhiteboardPayload
+}
+
+const handleUnhandledRejection = (event) => {
+  if (!event) return
+  if (!shouldSilenceWhiteboardUnhandledRejection(event.reason)) return
+  event.preventDefault()
 }
 
 const refreshWhiteboardLayout = async () => {
@@ -3463,6 +3535,7 @@ onMounted(async () => {
     await refreshCameraDevices()
     await restoreCameraPreviewTiles()
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
     document.addEventListener('mousemove', handlePanelMouseMove)
     document.addEventListener('mouseup', handlePanelMouseUp)
     document.addEventListener('keydown', handleWbShortcutKeydown)
@@ -3496,6 +3569,7 @@ onBeforeUnmount(() => {
   })
   cameraPreviewTiles.value = []
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
+  window.removeEventListener('unhandledrejection', handleUnhandledRejection)
   document.removeEventListener('mousemove', handlePanelMouseMove)
   document.removeEventListener('mouseup', handlePanelMouseUp)
   document.removeEventListener('keydown', handleWbShortcutKeydown)
