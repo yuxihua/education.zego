@@ -1192,12 +1192,18 @@ const renderAssistantSelfPreview = async () => {
   await renderCohostStream(container, assistantPublishStream.value, true)
 }
 
-const renderAssistantCohostPreview = async () => {
+const renderAssistantCohostPreview = async (forceReload = false) => {
   if (!canPublishLive.value || !isLiving.value || !zg.value || !assistantCohostStream.value?.streamID) return
   const streamID = String(assistantCohostStream.value.streamID)
   await nextTick()
   const container = document.getElementById('cohost-' + streamID)
   if (!container) return
+  if (forceReload) {
+    try {
+      zg.value.stopPlayingStream(streamID)
+    } catch (e) {}
+    cohostRemoteStreamMap.delete(streamID)
+  }
   let remoteStream = cohostRemoteStreamMap.get(streamID)
   if (!remoteStream) {
     try {
@@ -2789,7 +2795,7 @@ const initZego = async () => {
               micEnabled: coHostStreams.value[index].micEnabled !== false,
               micLevel: coHostStreams.value[index].micLevel || 0
             }
-            renderAssistantCohostPreview().catch((err) => {
+            renderAssistantCohostPreview(true).catch((err) => {
               console.warn('[LivePush] rerender assistant cohost preview failed:', err)
             })
           }
@@ -3926,6 +3932,18 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   padding: 8px;
+  min-height: 0;
+}
+
+.assistant-floating-panel > div:not(.floating-handle):not(.resize-handle) {
+  flex: 1;
+  min-height: 0;
+}
+
+.assistant-floating-video,
+.assistant-floating-placeholder {
+  width: 100%;
+  height: 100%;
   min-height: 0;
 }
 
