@@ -313,6 +313,7 @@
                 <div v-else class="assistant-placeholder">{{ assistantAudiencePlaceholderText }}</div>
               </template>
             </div>
+            <div class="assistant-status-line">{{ assistantStatusLine }}</div>
           </el-card>
 
           <!-- 连麦学生 -->
@@ -433,6 +434,21 @@ const assistantAudiencePlaceholderText = computed(() => {
   if (!isLiving.value) return '听课未开始'
   if (assistantPublishError.value) return assistantPublishError.value
   return '正在启动助教摄像头...'
+})
+const assistantStatusLine = computed(() => {
+  if (canPublishLive.value) {
+    if (!isLiving.value) return '状态：直播未开始'
+    if (assistantCohostStream.value) return '状态：助教已接入'
+    return '状态：等待助教推流'
+  }
+
+  if (!isAssistantAudienceUser()) return '状态：当前为听课视角'
+  if (!isLiving.value) return '状态：听课未开始'
+  if (showAssistantSelfPreview.value) {
+    return `状态：助教推流中（${assistantMicEnabled.value ? '麦克风开启' : '麦克风关闭'}）`
+  }
+  if (assistantPublishError.value) return `状态：${assistantPublishError.value}`
+  return '状态：正在启动助教摄像头'
 })
 
 // 连麦
@@ -3404,6 +3420,13 @@ onBeforeUnmount(() => {
   justify-content: center;
   text-align: center;
   padding: 0 10px;
+}
+
+.assistant-status-line {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #8fa4d1;
 }
 
 .cohost-item {
