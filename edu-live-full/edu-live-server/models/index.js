@@ -27,8 +27,8 @@ const RolePermission = require('./RolePermission');
 User.hasMany(Course, { foreignKey: 'institutionId', as: 'courses' });
 Course.belongsTo(User, { foreignKey: 'institutionId', as: 'institution' });
 
-// 课程 - 直播间：一对一
-Course.hasOne(LiveRoom, { foreignKey: 'courseId', as: 'liveRoom' });
+// 课程 - 直播间：一对多
+Course.hasMany(LiveRoom, { foreignKey: 'courseId', as: 'liveRooms' });
 LiveRoom.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
 
 // 机构 - 教室：一对多

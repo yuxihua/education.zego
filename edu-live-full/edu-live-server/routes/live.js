@@ -34,6 +34,7 @@ function buildStudentRoomPayload(room) {
   return {
     id: raw.id,
     courseId: raw.courseId,
+    courseLiveRoomCount: raw.courseLiveRoomCount || 0,
     title: raw.title,
     status: raw.status,
     anchorId: raw.anchorId,
@@ -225,6 +226,9 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
     return success(res, null, '该课程暂未创建直播间');
   }
 
+  const courseLiveRoomCount = await LiveRoom.count({ where: { courseId } });
+  room.courseLiveRoomCount = courseLiveRoomCount;
+
   const access = await checkStudentCourseAccess(req, res, courseId, {
     allowNoPurchase: isRoomPurchaseExempt(room)
   });
@@ -273,12 +277,6 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
     return fail(res, '课程不存在', 404, 404);
   }
   if (!checkCourseInstitutionAccess(req, res, course)) return;
-
-  // 检查是否已创建
-  const existRoom = await LiveRoom.findOne({ where: { courseId } });
-  if (existRoom) {
-    return fail(res, '该课程已有直播间', 409, 409);
-  }
 
   let anchorId = req.user.id;
   let anchorName = req.user.nickname || req.user.username;

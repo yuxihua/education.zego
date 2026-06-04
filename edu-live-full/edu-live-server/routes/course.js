@@ -84,7 +84,12 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
   const course = await Course.findByPk(id, {
     include: [
-      { model: LiveRoom, as: 'liveRoom' }
+      {
+        model: LiveRoom,
+        as: 'liveRooms',
+        separate: true,
+        order: [['createdAt', 'DESC']]
+      }
     ]
   });
 
@@ -92,7 +97,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
     return fail(res, '课程不存在', 404, 404);
   }
 
-  success(res, course);
+  const rawCourse = course.toJSON();
+  rawCourse.liveRoom = rawCourse.liveRooms?.[0] || null;
+  rawCourse.liveRoomCount = rawCourse.liveRooms?.length || 0;
+
+  success(res, rawCourse);
 }));
 
 /**

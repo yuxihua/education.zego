@@ -69,6 +69,7 @@
           <el-select v-model="form.courseId" placeholder="选择课程">
             <el-option v-for="c in courseList" :key="c.id" :label="c.title" :value="c.id" />
           </el-select>
+          <div class="form-tip">同一课程可创建多个直播间，学生端默认进入最新一场。</div>
         </el-form-item>
         <el-form-item label="讲师" prop="teacherId">
           <el-select v-model="form.teacherId" placeholder="选择讲师">

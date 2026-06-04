@@ -26,6 +26,14 @@
                   </div>
                 </template>
 
+                <el-alert
+                  v-if="(roomInfo.courseLiveRoomCount || 0) > 1"
+                  style="margin-bottom: 12px"
+                  type="info"
+                  :closable="false"
+                  :title="`该课程共有 ${roomInfo.courseLiveRoomCount} 个直播间，当前默认进入最新一场。`"
+                />
+
                 <div v-if="showRealtimePlayer" class="video-wrapper realtime-wrapper">
                   <div ref="remoteVideoRef" class="realtime-player"></div>
                 </div>
