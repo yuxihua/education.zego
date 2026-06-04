@@ -253,69 +253,62 @@
         <div class="floating-handle" @mousedown.prevent="beginPanelDrag('assistant', $event)">
           <span>助教摄像头</span>
         </div>
-        <div class="assistant-slot assistant-slot-floating">
-          <template v-if="canPublishLive">
-            <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
-              <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                <div class="cohost-video-host"></div>
-                <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
-                <div class="cohost-toolbar">
-                  <div class="mic-button-wrap">
-                    <el-button
-                      circle
-                      size="small"
-                      :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
-                      @click="toggleAssistantMic(assistantCohostStream)"
-                    >
-                      <el-icon><Microphone /></el-icon>
-                    </el-button>
-                    <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
-                      <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
-                    </span>
-                  </div>
-                  <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
-                    <el-icon><Close /></el-icon>
-                  </el-button>
-                </div>
-                <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+        <div v-if="canPublishLive">
+          <div v-if="assistantCohostStream" :id="'cohost-' + assistantCohostStream.streamID" class="local-video main-camera-video assistant-floating-video">
+            <div class="main-video-host"></div>
+            <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
+            <div class="cohost-toolbar">
+              <div class="mic-button-wrap">
+                <el-button
+                  circle
+                  size="small"
+                  :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
+                  @click="toggleAssistantMic(assistantCohostStream)"
+                >
+                  <el-icon><Microphone /></el-icon>
+                </el-button>
+                <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
+                  <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
+                </span>
               </div>
+              <el-button circle size="small" type="info" @click="switchAssistantCamera(assistantCohostStream)">
+                <el-icon><Switch /></el-icon>
+              </el-button>
+              <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
+                <el-icon><Close /></el-icon>
+              </el-button>
             </div>
-            <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-              {{ assistantTeacherPlaceholderText }}
-              <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
-            </div>
-          </template>
-          <template v-else>
-            <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
-              <div id="assistant-self-preview" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                <div class="cohost-video-host"></div>
-                <span class="cohost-badge">我的摄像头</span>
-                <div class="cohost-toolbar">
-                  <div class="mic-button-wrap">
-                    <el-button
-                      circle
-                      size="small"
-                      :type="assistantMicEnabled ? 'primary' : 'info'"
-                      @click="toggleAssistantSelfMic"
-                    >
-                      <el-icon><Microphone /></el-icon>
-                    </el-button>
-                    <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
-                      <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
-                    </span>
-                  </div>
-                  <el-button circle size="small" type="info" @click="switchAssistantCamera">
-                    <el-icon><Switch /></el-icon>
-                  </el-button>
-                </div>
-                <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+          </div>
+          <div v-else class="assistant-placeholder assistant-floating-placeholder">
+            {{ assistantTeacherPlaceholderText }}
+          </div>
+        </div>
+        <div v-else>
+          <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" id="assistant-self-preview" class="local-video main-camera-video assistant-floating-video">
+            <div class="main-video-host"></div>
+            <span class="cohost-badge">我的摄像头</span>
+            <div class="cohost-toolbar">
+              <div class="mic-button-wrap">
+                <el-button
+                  circle
+                  size="small"
+                  :type="assistantMicEnabled ? 'primary' : 'info'"
+                  @click="toggleAssistantSelfMic"
+                >
+                  <el-icon><Microphone /></el-icon>
+                </el-button>
+                <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
+                  <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
+                </span>
               </div>
+              <el-button circle size="small" type="info" @click="switchAssistantCamera">
+                <el-icon><Switch /></el-icon>
+              </el-button>
             </div>
-            <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-              {{ assistantAudiencePlaceholderText }}
-              <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
-            </div>
-          </template>
+          </div>
+          <div v-else class="assistant-placeholder assistant-floating-placeholder">
+            {{ assistantAudiencePlaceholderText }}
+          </div>
         </div>
         <div class="resize-handle" @mousedown.prevent="beginPanelResize('assistant', $event)"></div>
       </div>
@@ -430,6 +423,9 @@
                           <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
                         </span>
                       </div>
+                      <el-button circle size="small" type="info" @click="switchAssistantCamera(assistantCohostStream)">
+                        <el-icon><Switch /></el-icon>
+                      </el-button>
                       <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
                         <el-icon><Close /></el-icon>
                       </el-button>
@@ -1172,7 +1168,7 @@ const renderRemoteStream = async (container, stream, muted = false) => {
 
 const renderCohostStream = async (container, stream, muted = false) => {
   if (!container || !stream) return
-  const host = container.querySelector?.('.cohost-video-host') || container
+  const host = container.querySelector?.('.cohost-video-host, .main-video-host') || container
   host.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
@@ -2757,6 +2753,16 @@ const initZego = async () => {
               } catch (e) {}
             }
           }
+        } else if (data.type === 'assistant_camera_control' && !canPublishLive.value && isAssistantAudienceUser()) {
+          const targetUserID = String(data.targetUserID || '').trim()
+          const targetStreamID = String(data.targetStreamID || '').trim()
+          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
+          const currentStreamID = String(assistantPublishStreamID.value || '').trim()
+          const matchedByStreamID = targetStreamID && currentStreamID && targetStreamID === currentStreamID
+          const matchedByUserID = targetUserID && currentUserID && targetUserID === currentUserID
+          if (matchedByStreamID || matchedByUserID) {
+            await switchAssistantCamera()
+          }
         } else if (data.type === 'assistant_mic_state' && canPublishLive.value && data.streamID) {
           const targetStreamID = String(data.streamID)
           const index = coHostStreams.value.findIndex((item) => item.streamID === targetStreamID)
@@ -3384,8 +3390,22 @@ const switchCamera = async () => {
   }
 }
 
-const switchAssistantCamera = async () => {
-  if (canPublishLive.value || !isAssistantAudienceUser()) return
+const switchAssistantCamera = async (stream = null) => {
+  if (canPublishLive.value) {
+    if (!stream?.isAssistant || !zg.value || !zegoRoomID.value) return
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({
+        type: 'assistant_camera_control',
+        targetUserID: String(stream.userID || '').trim() || undefined,
+        targetStreamID: String(stream.streamID || '').trim() || undefined
+      })
+    )
+    ElMessage.success('已发送切换助教摄像头指令')
+    return
+  }
+
+  if (!isAssistantAudienceUser()) return
   await refreshCameraDevices()
   if (cameraDevices.value.length <= 1) {
     ElMessage.info('当前仅检测到一个摄像头')
