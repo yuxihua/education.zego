@@ -76,6 +76,7 @@
             </div>
           </div>
           <div class="local-video main-camera-video" ref="localVideoRef">
+            <div class="main-video-host"></div>
             <span class="cohost-badge">主摄像头</span>
             <div class="cohost-toolbar">
               <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
@@ -223,6 +224,7 @@
         <div v-else class="interaction-body">
           <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container right-side-video" ref="videoContainerRef">
             <div class="local-video main-camera-video" ref="localVideoRef">
+              <div class="main-video-host"></div>
               <span class="cohost-badge">主摄像头</span>
               <div class="cohost-toolbar">
                 <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
@@ -573,7 +575,8 @@ const ensureRoomIDReady = async () => {
 
 const renderLocalStream = async (container, stream) => {
   if (!container || !stream) return
-  container.innerHTML = ''
+  const host = container.querySelector?.('.main-video-host') || container
+  host.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
   videoEl.muted = true
@@ -582,7 +585,7 @@ const renderLocalStream = async (container, stream) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'cover'
-  container.appendChild(videoEl)
+  host.appendChild(videoEl)
   try {
     await videoEl.play()
   } catch (e) {}
@@ -607,7 +610,8 @@ const renderPreviewStream = async (container, stream) => {
 
 const renderRemoteStream = async (container, stream) => {
   if (!container || !stream) return
-  container.innerHTML = ''
+  const host = container.querySelector?.('.main-video-host') || container
+  host.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
   // 观众端优先保证自动播放成功，避免浏览器自动播放策略导致黑屏。
@@ -617,7 +621,7 @@ const renderRemoteStream = async (container, stream) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'cover'
-  container.appendChild(videoEl)
+  host.appendChild(videoEl)
   try {
     await videoEl.play()
   } catch (e) {}
@@ -2911,6 +2915,20 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   position: relative;
+
+  .main-video-host {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .main-video-host :deep(video),
+  .main-video-host video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
   
   :deep(video) {
     width: 100%;
