@@ -557,6 +557,23 @@ const renderRemoteStream = async (container, stream) => {
   } catch (e) {}
 }
 
+const renderCohostStream = async (container, stream, muted = true) => {
+  if (!container || !stream) return
+  container.innerHTML = ''
+  const videoEl = document.createElement('video')
+  videoEl.autoplay = true
+  videoEl.muted = !!muted
+  videoEl.playsInline = true
+  videoEl.srcObject = stream
+  videoEl.style.width = '100%'
+  videoEl.style.height = '100%'
+  videoEl.style.objectFit = 'cover'
+  container.appendChild(videoEl)
+  try {
+    await videoEl.play()
+  } catch (e) {}
+}
+
 const applyMainStreamTrackState = (stream) => {
   if (!stream) return
   stream.getVideoTracks().forEach((track) => {
@@ -1669,10 +1686,6 @@ const initZego = async () => {
           const teacherStreamPrefix = `teacher_${roomId}`
           const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
           const isTeacherScreenStream = isScreenShareStreamID(stream.streamID)
-          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
-          if (isAssistantStreamID(stream.streamID) && currentUserID && String(stream.userID || '').trim() === currentUserID) {
-            continue
-          }
           if (isTeacherScreenStream) {
             await playAudienceStageStream(stream.streamID, { silent: true })
             continue
@@ -1690,12 +1703,14 @@ const initZego = async () => {
           }
         }
         if (!stream.streamID.includes('screen')) {
+          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
           const assistantStream = isAssistantStreamID(stream.streamID)
+          const isCurrentUserStream = currentUserID && String(stream.userID || '').trim() === currentUserID
           const existingIndex = coHostStreams.value.findIndex((item) => item.streamID === stream.streamID)
           const streamRecord = {
             streamID: stream.streamID,
             userID: stream.userID,
-            userName: stream.userName || (assistantStream ? '助教' : '学生'),
+            userName: isCurrentUserStream ? '我的摄像头' : (stream.userName || (assistantStream ? '助教' : '学生')),
             isAssistant: assistantStream,
             micEnabled: assistantStream ? true : false
           }
@@ -1708,10 +1723,16 @@ const initZego = async () => {
             }
           }
           await nextTick()
-          zg.value.startPlayingStream(stream.streamID, {
-            video: document.getElementById('cohost-' + stream.streamID),
-            audio: true
-          })
+          try {
+            const remoteStream = await zg.value.startPlayingStream(stream.streamID)
+            const videoContainer = document.getElementById('cohost-' + stream.streamID)
+            await renderCohostStream(videoContainer, remoteStream, true)
+          } catch (playErr) {
+            console.warn('[LivePush] play cohost stream failed', {
+              streamID: stream.streamID,
+              error: parseErrorMessage(playErr)
+            })
+          }
         }
       }
     } else {
