@@ -269,43 +269,61 @@
             </div>
           </el-card>
 
-          <!-- 连中学生视频 -->
-          <el-card class="panel-card" v-if="coHostStreams.length > 0 || showAssistantSelfPreview">
+          <!-- 助教摄像头（固定独立区域） -->
+          <el-card class="panel-card assistant-card" v-if="isLiving">
+            <template #header><span>助教摄像头</span></template>
+            <div class="assistant-slot">
+              <template v-if="canPublishLive">
+                <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
+                  <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video">
+                    <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
+                    <div class="cohost-toolbar">
+                      <el-button
+                        circle
+                        size="small"
+                        :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
+                        @click="toggleAssistantMic(assistantCohostStream)"
+                      >
+                        <el-icon><Microphone /></el-icon>
+                      </el-button>
+                      <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
+                        <el-icon><Close /></el-icon>
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="assistant-placeholder">{{ assistantTeacherPlaceholderText }}</div>
+              </template>
+              <template v-else>
+                <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
+                  <div id="assistant-self-preview" class="cohost-video assistant-video">
+                    <span class="cohost-badge">我的摄像头</span>
+                    <div class="cohost-toolbar">
+                      <el-button
+                        circle
+                        size="small"
+                        :type="assistantMicEnabled ? 'primary' : 'info'"
+                        @click="toggleAssistantSelfMic"
+                      >
+                        <el-icon><Microphone /></el-icon>
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="assistant-placeholder">{{ assistantAudiencePlaceholderText }}</div>
+              </template>
+            </div>
+          </el-card>
+
+          <!-- 连麦学生 -->
+          <el-card class="panel-card" v-if="studentCoHostStreams.length > 0">
             <template #header><span>连麦学生</span></template>
             <div class="cohost-grid">
-              <div v-if="showAssistantSelfPreview" class="cohost-item self">
-                <div id="assistant-self-preview" class="cohost-video">
-                  <span class="cohost-badge">我的摄像头</span>
-                  <div class="cohost-toolbar">
-                    <el-button
-                      circle
-                      size="small"
-                      :type="assistantMicEnabled ? 'primary' : 'info'"
-                      @click="toggleAssistantSelfMic"
-                    >
-                      <el-icon><Microphone /></el-icon>
-                    </el-button>
-                  </div>
-                </div>
-              </div>
-              <div v-for="stream in coHostStreams" :key="stream.streamID" class="cohost-item">
+              <div v-for="stream in studentCoHostStreams" :key="stream.streamID" class="cohost-item">
                 <div :id="'cohost-' + stream.streamID" class="cohost-video">
                   <span class="cohost-badge">{{ stream.userName }}</span>
-                  <div v-if="stream.isAssistant" class="cohost-toolbar">
-                    <el-button
-                      circle
-                      size="small"
-                      :type="stream.micEnabled ? 'primary' : 'info'"
-                      @click="toggleAssistantMic(stream)"
-                    >
-                      <el-icon><Microphone /></el-icon>
-                    </el-button>
-                    <el-button circle size="small" type="danger" @click="kickCoHost(stream)">
-                      <el-icon><Close /></el-icon>
-                    </el-button>
-                  </div>
                 </div>
-                <el-button v-if="!stream.isAssistant" link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
+                <el-button link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
               </div>
             </div>
           </el-card>
@@ -400,6 +418,22 @@ const hasStageScreenContent = computed(() => {
 const showAssistantSelfPreview = computed(() => {
   return !canPublishLive.value && isAssistantAudienceUser() && Boolean(assistantPublishStream.value)
 })
+const assistantCohostStream = computed(() => {
+  return coHostStreams.value.find((item) => item.isAssistant) || null
+})
+const studentCoHostStreams = computed(() => {
+  return coHostStreams.value.filter((item) => !item.isAssistant)
+})
+const assistantTeacherPlaceholderText = computed(() => {
+  if (!isLiving.value) return '直播未开始'
+  return '助教暂未接入摄像头'
+})
+const assistantAudiencePlaceholderText = computed(() => {
+  if (!isAssistantAudienceUser()) return '仅助教端显示本地摄像头预览'
+  if (!isLiving.value) return '听课未开始'
+  if (assistantPublishError.value) return assistantPublishError.value
+  return '正在启动助教摄像头...'
+})
 
 // 连麦
 const handUpList = ref([])
@@ -455,6 +489,7 @@ const assistantPublishStream = ref(null)
 const assistantPublishStreamProvider = ref('native')
 const assistantPublishStreamID = ref('')
 const assistantMicEnabled = ref(true)
+const assistantPublishError = ref('')
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -983,22 +1018,29 @@ const applyAssistantMicState = (enabled) => {
 const startAssistantPublishing = async (authInfo) => {
   if (canPublishLive.value || !isAssistantAudienceUser() || !zg.value || !isLiving.value) return false
   if (assistantPublishStream.value && assistantPublishStreamID.value) {
+    assistantPublishError.value = ''
     await renderAssistantSelfPreview()
     return true
   }
 
   const nextStreamID = buildAssistantStreamID(authInfo?.userId || currentRoomLoginUserID.value)
+  assistantPublishError.value = ''
   try {
-    const stream = await createZegoCameraStream('', true)
+    // Prefer ZEGO camera stream, but gracefully fallback to native stream
+    // so assistant preview/publish still works on browsers with createStream quirks.
+    const { stream, provider } = await createCameraStream('', true, true)
     assistantPublishStream.value = stream
-    assistantPublishStreamProvider.value = 'zego'
+    assistantPublishStreamProvider.value = provider
     assistantPublishStreamID.value = nextStreamID
     applyAssistantMicState(true)
     await zg.value.startPublishingStream(nextStreamID, stream)
     await renderAssistantSelfPreview()
+    assistantPublishError.value = ''
     return true
   } catch (err) {
     console.warn('[LivePush] startAssistantPublishing failed:', err)
+    assistantPublishError.value = parseErrorMessage(err, '助教摄像头启动失败，请检查摄像头权限后重试')
+    ElMessage.warning(assistantPublishError.value)
     if (assistantPublishStream.value) {
       releaseMediaStream(assistantPublishStream.value, assistantPublishStreamProvider.value)
       assistantPublishStream.value = null
@@ -1022,6 +1064,7 @@ const stopAssistantPublishing = async () => {
   assistantPublishStreamProvider.value = 'native'
   assistantPublishStreamID.value = ''
   assistantMicEnabled.value = true
+  assistantPublishError.value = ''
 }
 
 const announceFocusedStream = async (streamID, source = 'teacher') => {
@@ -3335,6 +3378,32 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 2px;
+}
+
+.assistant-slot {
+  min-height: 148px;
+}
+
+.assistant-item {
+  margin: 0;
+}
+
+.assistant-video {
+  height: 188px;
+}
+
+.assistant-placeholder {
+  min-height: 148px;
+  border: 1px dashed var(--surface-border-strong);
+  border-radius: var(--panel-radius);
+  background: rgba(15, 23, 42, 0.55);
+  color: #9db0d8;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 10px;
 }
 
 .cohost-item {
