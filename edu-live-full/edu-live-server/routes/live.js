@@ -386,7 +386,7 @@ router.post('/room/:id/start', auth, requireRole(['admin', 'superadmin', 'teache
  * @POST /api/live/room/:id/stop
  * 结束直播
  */
-router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'assistant', 'teacher']), asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const room = await LiveRoom.findByPk(id, {
@@ -397,7 +397,8 @@ router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'teacher
   }
   if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
-  if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
+  const canAdminStop = ['superadmin', 'admin', 'assistant'].includes(req.user.role);
+  if (room.anchorId !== req.user.id && !canAdminStop) {
     return fail(res, '无权操作', 403, 403);
   }
 

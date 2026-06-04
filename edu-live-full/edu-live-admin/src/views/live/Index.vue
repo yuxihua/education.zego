@@ -36,7 +36,7 @@
           <template #default="{ row }">
             <el-button link type="primary" @click="goDetail(row)">详情</el-button>
             <el-button v-if="row.status !== 'ended'" link type="success" @click="handleTeacherEnter(row)">{{ userStore.userInfo?.role === 'assistant' ? '助教进入直播' : '老师进入直播' }}</el-button>
-            <el-button v-if="row.status === 'living'" link type="danger" @click="handleEnd(row)">结束直播</el-button>
+            <el-button v-if="canStopLive && row.status === 'living'" link type="danger" @click="handleEnd(row)">结束直播</el-button>
             <el-button link type="primary" @click="handleReplay(row)">回放管理</el-button>
           </template>
         </el-table-column>
@@ -114,6 +114,7 @@ const rules = {
 }
 const courseList = ref([])
 const teacherList = ref([])
+const canStopLive = ['superadmin', 'admin', 'assistant'].includes(userStore.userInfo?.role)
 
 const getCreateInstitutionParams = () => {
   if (!userStore.isPlatformAdmin) return {}
