@@ -64,6 +64,7 @@ export const getLiveStats = async (id) => {
 }
 
 export const endLive = (id) => request.post(`/live/room/${id}/stop`)
+export const deleteLiveRoomPpt = (roomId, pptId) => request.delete(`/live/room/${roomId}/ppt/${pptId}`)
 export const approveCohost = (id, data) => request.post(`/live/room/${id}/cohost/approve`, data)
 export const rejectCohost = (id, data) => request.post(`/live/room/${id}/cohost/reject`, data)
 export const kickCohost = (id, data) => request.post(`/live/room/${id}/cohost/kick`, data)

@@ -441,6 +441,42 @@ router.post('/room/:id/pause', auth, requireRole(['admin', 'superadmin', 'teache
 }));
 
 /**
+ * @DELETE /api/live/room/:roomId/ppt/:pptId
+ * 删除直播间课件
+ */
+router.delete('/room/:roomId/ppt/:pptId', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { roomId, pptId } = req.params;
+
+  const room = await LiveRoom.findByPk(roomId, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId'] }]
+  });
+  if (!room) {
+    return fail(res, '直播间不存在', 404, 404);
+  }
+  if (!checkCourseInstitutionAccess(req, res, room.course)) return;
+
+  if (room.anchorId !== req.user.id && !['superadmin', 'admin', 'assistant'].includes(req.user.role)) {
+    return fail(res, '无权操作', 403, 403);
+  }
+
+  const ppt = await PPTFile.findOne({ where: { id: pptId, roomId } });
+  if (!ppt) {
+    return fail(res, '课件不存在', 404, 404);
+  }
+
+  await ppt.destroy();
+
+  await writeOperationLog(req, {
+    action: '删除课件',
+    path: `/api/live/room/${roomId}/ppt/${pptId}`,
+    payload: { roomId, pptId, filename: ppt.filename, fileUrl: ppt.fileUrl },
+    message: '课件已删除'
+  });
+
+  success(res, null, '课件已删除');
+}));
+
+/**
  * @POST /api/live/room/:id/resume
  * 恢复直播
  */
