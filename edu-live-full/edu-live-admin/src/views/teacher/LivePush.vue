@@ -245,6 +245,84 @@
         显示交流窗
       </div>
 
+      <div
+        v-if="layoutFreeMode && isLiving"
+        class="assistant-floating-panel"
+        :style="getAssistantPanelStyle()"
+      >
+        <div class="floating-panel-header" @mousedown.prevent="beginPanelDrag('assistant', $event)">
+          <span>助教摄像头</span>
+        </div>
+        <el-card class="panel-card assistant-card assistant-floating-card">
+          <div class="assistant-slot">
+            <template v-if="canPublishLive">
+              <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
+                <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                  <div class="cohost-video-host"></div>
+                  <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
+                  <div class="cohost-toolbar">
+                    <div class="mic-button-wrap">
+                      <el-button
+                        circle
+                        size="small"
+                        :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
+                        @click="toggleAssistantMic(assistantCohostStream)"
+                      >
+                        <el-icon><Microphone /></el-icon>
+                      </el-button>
+                      <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
+                        <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
+                      </span>
+                    </div>
+                    <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
+                      <el-icon><Close /></el-icon>
+                    </el-button>
+                  </div>
+                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                </div>
+              </div>
+              <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                {{ assistantTeacherPlaceholderText }}
+                <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+              </div>
+            </template>
+            <template v-else>
+              <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
+                <div id="assistant-self-preview" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                  <div class="cohost-video-host"></div>
+                  <span class="cohost-badge">我的摄像头</span>
+                  <div class="cohost-toolbar">
+                    <div class="mic-button-wrap">
+                      <el-button
+                        circle
+                        size="small"
+                        :type="assistantMicEnabled ? 'primary' : 'info'"
+                        @click="toggleAssistantSelfMic"
+                      >
+                        <el-icon><Microphone /></el-icon>
+                      </el-button>
+                      <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
+                        <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
+                      </span>
+                    </div>
+                    <el-button circle size="small" type="info" @click="switchAssistantCamera">
+                      <el-icon><Switch /></el-icon>
+                    </el-button>
+                  </div>
+                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                </div>
+              </div>
+              <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                {{ assistantAudiencePlaceholderText }}
+                <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+              </div>
+            </template>
+          </div>
+          <div class="assistant-status-line">{{ assistantStatusLine }}</div>
+        </el-card>
+        <div class="resize-handle" @mousedown.prevent="beginPanelResize('assistant', $event)"></div>
+      </div>
+
       <!-- 右侧：互动面板 -->
       <div
         v-if="showInteractionPanel"
@@ -333,34 +411,43 @@
           </el-card>
 
           <!-- 助教摄像头（固定独立区域） -->
-          <el-card class="panel-card assistant-card" v-if="isLiving">
+          <el-card class="panel-card assistant-card" v-if="isLiving && !layoutFreeMode">
             <template #header><span>助教摄像头</span></template>
             <div class="assistant-slot">
               <template v-if="canPublishLive">
                 <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
-                  <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video">
+                  <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
                     <div class="cohost-video-host"></div>
                     <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
                     <div class="cohost-toolbar">
-                      <el-button
-                        circle
-                        size="small"
-                        :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
-                        @click="toggleAssistantMic(assistantCohostStream)"
-                      >
-                        <el-icon><Microphone /></el-icon>
-                      </el-button>
+                      <div class="mic-button-wrap">
+                        <el-button
+                          circle
+                          size="small"
+                          :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
+                          @click="toggleAssistantMic(assistantCohostStream)"
+                        >
+                          <el-icon><Microphone /></el-icon>
+                        </el-button>
+                        <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
+                          <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
+                        </span>
+                      </div>
                       <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
                         <el-icon><Close /></el-icon>
                       </el-button>
                     </div>
+                    <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
                   </div>
                 </div>
-                <div v-else class="assistant-placeholder">{{ assistantTeacherPlaceholderText }}</div>
+                <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                  {{ assistantTeacherPlaceholderText }}
+                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                </div>
               </template>
               <template v-else>
                 <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
-                  <div id="assistant-self-preview" class="cohost-video assistant-video">
+                  <div id="assistant-self-preview" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
                     <div class="cohost-video-host"></div>
                     <span class="cohost-badge">我的摄像头</span>
                     <div class="cohost-toolbar">
@@ -381,9 +468,13 @@
                         <el-icon><Switch /></el-icon>
                       </el-button>
                     </div>
+                    <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
                   </div>
                 </div>
-                <div v-else class="assistant-placeholder">{{ assistantAudiencePlaceholderText }}</div>
+                <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                  {{ assistantAudiencePlaceholderText }}
+                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                </div>
               </template>
             </div>
             <div class="assistant-status-line">{{ assistantStatusLine }}</div>
@@ -525,13 +616,15 @@ const assistantStatusLine = computed(() => {
   return '状态：正在启动助教摄像头'
 })
 const isCurrentMicEnabled = computed(() => (canPublishLive.value ? isMicOn.value : assistantMicEnabled.value))
-const getMicLevelChipClass = (enabled) => {
+const getMicLevelChipClassByValue = (enabled, level) => {
   if (!enabled) return 'is-muted'
-  const value = Number(micLevelPercent.value) || 0
+  const value = Number(level) || 0
   if (value >= 75) return 'is-high'
   if (value >= 35) return 'is-mid'
   return 'is-low'
 }
+const getMicLevelChipClass = (enabled) => getMicLevelChipClassByValue(enabled, micLevelPercent.value)
+const getRemoteMicLevelChipClass = (enabled, level = 0) => getMicLevelChipClassByValue(enabled, level)
 
 // 连麦
 const handUpList = ref([])
@@ -586,8 +679,13 @@ const teacherAutoResumeStarted = ref(false)
 const interactionCollapsed = ref(false)
 const panelDragState = reactive({ active: false, panel: '', mode: '', startX: 0, startY: 0, startLeft: 0, startTop: 0, startWidth: 0, startHeight: 0 })
 const stageResizeState = reactive({ active: false, mode: '', startX: 0, startY: 0, startWidth: 0, startHeight: 0 })
+const assistantResizeState = reactive({ active: false, startY: 0, startHeight: 0 })
 const stagePanelHeight = ref(0)
 const stagePanelWidth = ref(0)
+const assistantPanelHeight = ref(188)
+const assistantPanelExpanded = ref(false)
+const assistantPanelHeightBeforeExpand = ref(188)
+const assistantFloatingState = reactive({ x: 420, y: 96, width: 360, height: 312 })
 const floatingVideoState = reactive({ x: 24, y: 24, width: 360, height: 260 })
 const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520 })
 const layoutStorageKey = `teacher_live_push_layout_${roomId}`
@@ -608,6 +706,8 @@ const assistantPublishError = ref('')
 const stageLayoutRefreshTimer = ref(null)
 const audioContextRef = ref(null)
 const micLevelAnimationFrame = ref(0)
+const assistantMicLevelBroadcastTimer = ref(null)
+const assistantMicLevelLastSentAt = ref(0)
 const micTestAudioEl = ref(null)
 const micTestBundleRef = ref(null)
 const streamAudioBundleMap = new WeakMap()
@@ -709,6 +809,43 @@ const applyOutputDeviceToCurrentMediaElements = async () => {
   for (const node of mediaNodes) {
     await applyOutputDeviceToMediaEl(node)
   }
+}
+
+const getAssistantLocalMicLevel = () => {
+  if (canPublishLive.value || !isAssistantAudienceUser() || !assistantMicEnabled.value) return 0
+  return clamp(Number(micLevelPercent.value) || 0, 0, 100)
+}
+
+const sendAssistantMicLevel = async (force = false) => {
+  if (canPublishLive.value || !isAssistantAudienceUser() || !zg.value || !zegoRoomID.value || !assistantPublishStreamID.value) return
+  const now = Date.now()
+  if (!force && now - assistantMicLevelLastSentAt.value < 180) return
+  assistantMicLevelLastSentAt.value = now
+  try {
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({
+        type: 'assistant_mic_level',
+        streamID: assistantPublishStreamID.value,
+        enabled: assistantMicEnabled.value,
+        level: getAssistantLocalMicLevel()
+      })
+    )
+  } catch (e) {}
+}
+
+const stopAssistantMicLevelBroadcast = () => {
+  if (!assistantMicLevelBroadcastTimer.value) return
+  clearInterval(assistantMicLevelBroadcastTimer.value)
+  assistantMicLevelBroadcastTimer.value = null
+}
+
+const startAssistantMicLevelBroadcast = () => {
+  stopAssistantMicLevelBroadcast()
+  if (canPublishLive.value || !isAssistantAudienceUser()) return
+  assistantMicLevelBroadcastTimer.value = setInterval(() => {
+    sendAssistantMicLevel(false)
+  }, 220)
 }
 
 const stopMicLevelMonitor = () => {
@@ -1164,10 +1301,38 @@ const saveLayoutState = () => {
       rightPanelWidth: rightPanelWidth.value,
       stagePanelHeight: stagePanelHeight.value,
       stagePanelWidth: stagePanelWidth.value,
+      assistantPanelHeight: assistantPanelHeight.value,
+      assistantFloatingState: { ...assistantFloatingState },
       floatingVideoState: { ...floatingVideoState },
       floatingInteractionState: { ...floatingInteractionState }
     }))
   } catch (e) {}
+}
+
+const getAssistantResizeBounds = () => ({ min: 148, max: 420 })
+
+const clampAssistantPanelHeight = () => {
+  const bounds = getAssistantResizeBounds()
+  assistantPanelHeight.value = clamp(assistantPanelHeight.value || bounds.min, bounds.min, bounds.max)
+}
+
+const getAssistantViewportStyle = () => ({
+  height: `${assistantPanelHeight.value}px`
+})
+
+const toggleAssistantViewportSize = () => {
+  const bounds = getAssistantResizeBounds()
+  if (!assistantPanelExpanded.value) {
+    assistantPanelHeightBeforeExpand.value = assistantPanelHeight.value || bounds.min
+    assistantPanelHeight.value = bounds.max
+    assistantPanelExpanded.value = true
+  } else {
+    assistantPanelHeight.value = assistantPanelHeightBeforeExpand.value || 188
+    clampAssistantPanelHeight()
+    assistantPanelExpanded.value = false
+  }
+  saveLayoutState()
+  scheduleStageLayoutRefresh()
 }
 
 const getWorkspaceSize = () => {
@@ -1235,6 +1400,13 @@ const getStageContainerStyle = () => {
   return style
 }
 
+const getFloatingPanelState = (panel) => {
+  if (panel === 'video') return floatingVideoState
+  if (panel === 'interaction') return floatingInteractionState
+  if (panel === 'assistant') return assistantFloatingState
+  return null
+}
+
 const initFreeLayoutPositions = () => {
   const { width, height } = getWorkspaceSize()
   if (!width || !height) return
@@ -1256,6 +1428,16 @@ const initFreeLayoutPositions = () => {
   floatingInteractionState.x = Math.max(24, width - floatingInteractionState.width - 24)
   floatingInteractionState.y = 16
   }
+  if (canUseSavedLayout && saved?.assistantFloatingState) {
+    Object.assign(assistantFloatingState, saved.assistantFloatingState)
+  } else {
+    assistantFloatingState.width = clamp(Math.floor(width * 0.26), 320, 420)
+    assistantFloatingState.height = clamp(Math.floor(height * 0.4), 260, 420)
+    assistantFloatingState.x = Math.max(24, width - assistantFloatingState.width - 24)
+    assistantFloatingState.y = clamp(Math.floor(height * 0.18), 72, Math.max(72, height - assistantFloatingState.height - 16))
+  }
+  assistantFloatingState.x = clamp(assistantFloatingState.x, 8, Math.max(8, width - assistantFloatingState.width - 8))
+  assistantFloatingState.y = clamp(assistantFloatingState.y, 8, Math.max(8, height - assistantFloatingState.height - 8))
   if (canUseSavedLayout && saved?.rightPanelWidth) {
     rightPanelWidth.value = clamp(saved.rightPanelWidth, 240, Math.max(240, Math.floor(width * 0.42)))
   }
@@ -1527,6 +1709,8 @@ const startAssistantPublishing = async (authInfo) => {
   if (assistantPublishStream.value && assistantPublishStreamID.value) {
     assistantPublishError.value = ''
     await renderAssistantSelfPreview()
+    startAssistantMicLevelBroadcast()
+    sendAssistantMicLevel(true)
     return true
   }
 
@@ -1546,6 +1730,8 @@ const startAssistantPublishing = async (authInfo) => {
     applyAssistantMicState(true)
     await zg.value.startPublishingStream(nextStreamID, stream)
     await renderAssistantSelfPreview()
+    startAssistantMicLevelBroadcast()
+    sendAssistantMicLevel(true)
     assistantPublishError.value = ''
     return true
   } catch (err) {
@@ -1563,6 +1749,8 @@ const startAssistantPublishing = async (authInfo) => {
 }
 
 const stopAssistantPublishing = async () => {
+  stopAssistantMicLevelBroadcast()
+  assistantMicLevelLastSentAt.value = 0
   try {
     if (assistantPublishStreamID.value) {
       zg.value?.stopPublishingStream?.(assistantPublishStreamID.value)
@@ -1978,8 +2166,14 @@ const resetLayout = async () => {
   floatingInteractionState.y = 16
   floatingInteractionState.width = 360
   floatingInteractionState.height = 520
+  assistantFloatingState.x = 420
+  assistantFloatingState.y = 96
+  assistantFloatingState.width = 360
+  assistantFloatingState.height = 312
   stagePanelHeight.value = 0
   stagePanelWidth.value = 0
+  assistantPanelHeight.value = 188
+  assistantPanelExpanded.value = false
   try {
     localStorage.removeItem(layoutStorageKey)
   } catch (e) {}
@@ -2007,6 +2201,21 @@ const getInteractionPanelStyle = () => ({
       })
 })
 
+const getAssistantPanelStyle = () => ({
+  left: `${assistantFloatingState.x}px`,
+  top: `${assistantFloatingState.y}px`,
+  width: `${assistantFloatingState.width}px`,
+  height: `${assistantFloatingState.height}px`
+})
+
+const beginAssistantResize = (event) => {
+  if (event.button !== 0) return
+  assistantPanelExpanded.value = false
+  assistantResizeState.active = true
+  assistantResizeState.startY = event.clientY
+  assistantResizeState.startHeight = assistantPanelHeight.value
+}
+
 const toggleInteractionCollapse = () => {
   interactionCollapsed.value = !interactionCollapsed.value
   if (!interactionCollapsed.value) {
@@ -2018,7 +2227,8 @@ const toggleInteractionCollapse = () => {
 
 const beginPanelDrag = (panel, event) => {
   if (!layoutFreeMode.value || event.button !== 0) return
-  const targetState = panel === 'video' ? floatingVideoState : floatingInteractionState
+  const targetState = getFloatingPanelState(panel)
+  if (!targetState) return
   panelDragState.active = true
   panelDragState.panel = panel
   panelDragState.mode = 'drag'
@@ -2041,6 +2251,10 @@ const beginPanelResize = (panel, event) => {
     panelDragState.startHeight = targetState.height
   } else if (panel === 'interaction') {
     const targetState = floatingInteractionState
+    panelDragState.startWidth = targetState.width
+    panelDragState.startHeight = targetState.height
+  } else if (panel === 'assistant') {
+    const targetState = assistantFloatingState
     panelDragState.startWidth = targetState.width
     panelDragState.startHeight = targetState.height
   } else if (panel === 'side') {
@@ -2069,6 +2283,14 @@ const beginStageWidthResize = (event) => {
 }
 
 const handlePanelMouseMove = (event) => {
+  if (assistantResizeState.active) {
+    const dy = event.clientY - assistantResizeState.startY
+    const bounds = getAssistantResizeBounds()
+    assistantPanelHeight.value = clamp(assistantResizeState.startHeight + dy, bounds.min, bounds.max)
+    scheduleStageLayoutRefresh()
+    return
+  }
+
   if (stageResizeState.active) {
     if (stageResizeState.mode === 'height') {
       const dy = event.clientY - stageResizeState.startY
@@ -2084,7 +2306,8 @@ const handlePanelMouseMove = (event) => {
   }
 
   if (!panelDragState.active || !layoutFreeMode.value) return
-  const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
+  const targetState = getFloatingPanelState(panelDragState.panel)
+  if (!targetState && panelDragState.panel !== 'side') return
   const { width, height } = getWorkspaceSize()
   if (!width || !height) return
 
@@ -2102,8 +2325,8 @@ const handlePanelMouseMove = (event) => {
     if (panelDragState.panel === 'side') {
       rightPanelWidth.value = clamp(panelDragState.startWidth - dx, 240, Math.max(240, Math.floor(width * 0.42)))
     } else {
-      const minWidth = panelDragState.panel === 'video' ? 280 : 320
-      const minHeight = panelDragState.panel === 'video' ? 180 : 260
+      const minWidth = panelDragState.panel === 'video' ? 280 : 300
+      const minHeight = panelDragState.panel === 'video' ? 180 : 240
       const maxWidth = Math.max(minWidth, width - targetState.x - 16)
       const maxHeight = Math.max(minHeight, height - targetState.y - 16)
       targetState.width = clamp(panelDragState.startWidth + dx, minWidth, maxWidth)
@@ -2114,6 +2337,12 @@ const handlePanelMouseMove = (event) => {
 }
 
 const handlePanelMouseUp = () => {
+  if (assistantResizeState.active) {
+    assistantResizeState.active = false
+    saveLayoutState()
+    return
+  }
+
   if (stageResizeState.active) {
     stageResizeState.active = false
     stageResizeState.mode = ''
@@ -2122,10 +2351,12 @@ const handlePanelMouseUp = () => {
   }
 
   if (!panelDragState.active || !layoutFreeMode.value) return
-  const targetState = panelDragState.panel === 'video' ? floatingVideoState : floatingInteractionState
-  applyMagneticSnap(targetState)
+  const targetState = getFloatingPanelState(panelDragState.panel)
+  if (targetState) {
+    applyMagneticSnap(targetState)
+  }
   const { width, height } = getWorkspaceSize()
-  if (width && height) {
+  if (targetState && width && height) {
     targetState.x = clamp(targetState.x, 8, Math.max(8, width - targetState.width - 8))
     targetState.y = clamp(targetState.y, 8, Math.max(8, height - targetState.height - 8))
     if (targetState.x < 24) targetState.x = 8
@@ -2398,7 +2629,8 @@ const initZego = async () => {
             userID: stream.userID,
             userName: stream.userName || (assistantStream ? '助教' : '学生'),
             isAssistant: assistantStream,
-            micEnabled: assistantStream ? true : false
+            micEnabled: assistantStream ? true : false,
+            micLevel: 0
           }
           if (existingIndex === -1) {
             coHostStreams.value.push(streamRecord)
@@ -2505,7 +2737,20 @@ const initZego = async () => {
           if (index !== -1) {
             coHostStreams.value[index] = {
               ...coHostStreams.value[index],
-              micEnabled: data.enabled !== false
+              micEnabled: data.enabled !== false,
+              micLevel: data.enabled === false ? 0 : (coHostStreams.value[index].micLevel || 0)
+            }
+          }
+        } else if (data.type === 'assistant_mic_level' && canPublishLive.value && data.streamID) {
+          const targetStreamID = String(data.streamID)
+          const index = coHostStreams.value.findIndex((item) => item.streamID === targetStreamID)
+          if (index !== -1) {
+            const enabled = data.enabled !== false
+            const level = clamp(Number(data.level) || 0, 0, 100)
+            coHostStreams.value[index] = {
+              ...coHostStreams.value[index],
+              micEnabled: enabled,
+              micLevel: enabled ? level : 0
             }
           }
         }
@@ -3190,6 +3435,7 @@ const toggleAssistantSelfMic = async () => {
       })
     )
   } catch (e) {}
+  await sendAssistantMicLevel(true)
 }
 
 const kickCoHost = async (stream) => {
@@ -3279,6 +3525,10 @@ onMounted(async () => {
       if (savedStagePanelWidth) {
         stagePanelWidth.value = Number(savedStagePanelWidth) || 0
       }
+      if (savedLayout.assistantPanelHeight) {
+        assistantPanelHeight.value = Number(savedLayout.assistantPanelHeight) || 188
+      }
+      assistantPanelExpanded.value = false
       if (savedLayout.floatingVideoState) {
         Object.assign(floatingVideoState, savedLayout.floatingVideoState)
       }
@@ -3288,6 +3538,7 @@ onMounted(async () => {
     }
     initFreeLayoutPositions()
     await nextTick()
+    clampAssistantPanelHeight()
     clampStagePanelHeight()
     clampStagePanelWidth()
     try {
@@ -3341,6 +3592,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopMicTest()
   stopMicLevelMonitor()
+  stopAssistantMicLevelBroadcast()
   if (stageLayoutRefreshTimer.value) {
     clearTimeout(stageLayoutRefreshTimer.value)
     stageLayoutRefreshTimer.value = null
@@ -3583,6 +3835,37 @@ onBeforeUnmount(() => {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   min-width: 280px;
   min-height: 180px;
+}
+
+.assistant-floating-panel {
+  position: absolute;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(13, 21, 40, 0.96);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  min-width: 300px;
+  min-height: 240px;
+}
+
+.assistant-floating-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.assistant-floating-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
 }
 
 .restore-tab {
@@ -4123,12 +4406,32 @@ onBeforeUnmount(() => {
   min-height: 148px;
 }
 
+.assistant-floating-card .assistant-slot {
+  flex: 1;
+  min-height: 0;
+}
+
 .assistant-item {
   margin: 0;
 }
 
 .assistant-video {
   height: 188px;
+}
+
+.assistant-resizable {
+  position: relative;
+}
+
+.assistant-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: se-resize;
+  z-index: 3;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.3) 50%);
 }
 
 .assistant-placeholder {
