@@ -75,29 +75,30 @@
               <el-button text size="small" @click.stop="showVideoPanel = false">隐藏</el-button>
             </div>
           </div>
-          <div class="local-video" ref="localVideoRef"></div>
-          <div class="video-controls floating-controls">
-            <el-button :type="isCameraOn ? 'primary' : 'info'" circle @click="toggleCamera">
-              <el-icon><VideoCamera /></el-icon>
-            </el-button>
-            <el-button :type="isMicOn ? 'primary' : 'info'" circle @click="toggleMic">
-              <el-icon><Microphone /></el-icon>
-            </el-button>
-            <el-tooltip
-              :content="getScreenShareTooltip()"
-              :disabled="isScreenShareTooltipDisabled()"
-              placement="top"
-            >
-              <span>
-                <el-button :type="isScreenSharing ? 'danger' : 'info'" :disabled="!canPublishLive || !isLiving" circle @click="toggleScreenShare">
-                  <el-icon><Monitor /></el-icon>
-                </el-button>
-              </span>
-            </el-tooltip>
-            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
-            <el-button type="info" circle @click="switchCamera">
-              <el-icon><Switch /></el-icon>
-            </el-button>
+          <div class="local-video main-camera-video" ref="localVideoRef">
+            <span class="cohost-badge">主摄像头</span>
+            <div class="cohost-toolbar">
+              <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
+                <el-icon><VideoCamera /></el-icon>
+              </el-button>
+              <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
+                <el-icon><Microphone /></el-icon>
+              </el-button>
+              <el-tooltip
+                :content="getScreenShareTooltip()"
+                :disabled="isScreenShareTooltipDisabled()"
+                placement="top"
+              >
+                <span>
+                  <el-button :type="isScreenSharing ? 'danger' : 'info'" :disabled="!canPublishLive || !isLiving" circle size="small" @click="toggleScreenShare">
+                    <el-icon><Monitor /></el-icon>
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-button type="info" circle size="small" @click="switchCamera">
+                <el-icon><Switch /></el-icon>
+              </el-button>
+            </div>
           </div>
           <div class="resize-handle" @mousedown.prevent="beginPanelResize('video', $event)"></div>
         </div>
@@ -220,123 +221,126 @@
         </div>
 
         <div v-else class="interaction-body">
-        <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container right-side-video" ref="videoContainerRef">
-          <div class="video-head">主摄像头</div>
-          <div class="local-video" ref="localVideoRef"></div>
-          <div class="video-controls right-video-controls">
-            <el-button
-              :type="isCameraOn ? 'primary' : 'info'"
-              circle
-              @click="toggleCamera"
-            >
-              <el-icon><VideoCamera /></el-icon>
-            </el-button>
-            <el-button
-              :type="isMicOn ? 'primary' : 'info'"
-              circle
-              @click="toggleMic"
-            >
-              <el-icon><Microphone /></el-icon>
-            </el-button>
-            <el-tooltip
-              :content="getScreenShareTooltip()"
-              :disabled="isScreenShareTooltipDisabled()"
-              placement="top"
-            >
-              <span>
-                <el-button
-                  :type="isScreenSharing ? 'danger' : 'info'"
-                  :disabled="!canPublishLive || !isLiving"
-                  circle
-                  @click="toggleScreenShare"
-                >
-                  <el-icon><Monitor /></el-icon>
+          <div v-if="!layoutFreeMode && showVideoPanel && !isStageFull" class="video-container right-side-video" ref="videoContainerRef">
+            <div class="local-video main-camera-video" ref="localVideoRef">
+              <span class="cohost-badge">主摄像头</span>
+              <div class="cohost-toolbar">
+                <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
+                  <el-icon><VideoCamera /></el-icon>
                 </el-button>
-              </span>
-            </el-tooltip>
-            <span class="screen-share-state" :class="{ active: isScreenSharing }">{{ getScreenShareStateText() }}</span>
-            <el-button type="info" circle @click="switchCamera">
-              <el-icon><Switch /></el-icon>
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 连麦申请 -->
-        <el-card class="panel-card" v-if="handUpList.length > 0">
-          <template #header>
-            <span>连麦申请 ({{ handUpList.length }})</span>
-          </template>
-          <div v-for="item in handUpList" :key="item.userID" class="handup-item">
-            <span>{{ item.userName }}</span>
-            <div>
-              <el-button size="small" type="success" @click="acceptCoHost(item)">同意</el-button>
-              <el-button size="small" @click="rejectCoHost(item)">拒绝</el-button>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 连中学生视频 -->
-        <el-card class="panel-card" v-if="coHostStreams.length > 0 || showAssistantSelfPreview">
-          <template #header><span>连麦学生</span></template>
-          <div class="cohost-grid">
-            <div v-if="showAssistantSelfPreview" class="cohost-item self">
-              <div id="assistant-self-preview" class="cohost-video"></div>
-              <span class="cohost-name">我的摄像头</span>
-              <span class="cohost-mic-state" :class="{ on: assistantMicEnabled }">
-                {{ assistantMicEnabled ? '助教麦克风开启' : '助教麦克风关闭' }}
-              </span>
-            </div>
-            <div v-for="stream in coHostStreams" :key="stream.streamID" class="cohost-item">
-              <div :id="'cohost-' + stream.streamID" class="cohost-video"></div>
-              <span class="cohost-name">{{ stream.userName }}</span>
-              <span v-if="stream.isAssistant" class="cohost-mic-state" :class="{ on: stream.micEnabled }">
-                {{ stream.micEnabled ? '助教麦克风开启' : '助教麦克风关闭' }}
-              </span>
-              <el-button
-                v-if="stream.isAssistant"
-                link
-                :type="stream.micEnabled ? 'warning' : 'success'"
-                size="small"
-                @click="toggleAssistantMic(stream)"
-              >
-                {{ stream.micEnabled ? '关闭助教麦克风' : '打开助教麦克风' }}
-              </el-button>
-              <el-button link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 聊天区 -->
-        <el-card class="panel-card chat-card">
-          <template #header><span>课堂互动</span></template>
-          <div class="chat-messages" ref="chatScrollRef">
-            <div 
-              v-for="msg in messages" 
-              :key="msg.id" 
-              class="chat-msg"
-              :class="{ self: msg.isSelf, system: msg.isSystem }"
-            >
-              <div class="msg-header">
-                <span class="msg-name">{{ msg.userName }}</span>
-                <span class="msg-time">{{ msg.time }}</span>
+                <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
+                  <el-icon><Microphone /></el-icon>
+                </el-button>
+                <el-tooltip
+                  :content="getScreenShareTooltip()"
+                  :disabled="isScreenShareTooltipDisabled()"
+                  placement="top"
+                >
+                  <span>
+                    <el-button
+                      :type="isScreenSharing ? 'danger' : 'info'"
+                      :disabled="!canPublishLive || !isLiving"
+                      circle
+                      size="small"
+                      @click="toggleScreenShare"
+                    >
+                      <el-icon><Monitor /></el-icon>
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <el-button type="info" circle size="small" @click="switchCamera">
+                  <el-icon><Switch /></el-icon>
+                </el-button>
               </div>
-              <div class="msg-content">{{ msg.content }}</div>
             </div>
           </div>
-          <div class="chat-input">
-            <el-input 
-              v-model="chatText" 
-              placeholder="输入消息..." 
-              @keyup.enter="sendChat"
-            >
-              <template #append>
-                <el-button @click="sendChat">发送</el-button>
-              </template>
-            </el-input>
-          </div>
-        </el-card>
 
-        <div v-if="layoutFreeMode" class="resize-handle" @mousedown.prevent="beginPanelResize('interaction', $event)"></div>
+          <!-- 连麦申请 -->
+          <el-card class="panel-card" v-if="handUpList.length > 0">
+            <template #header>
+              <span>连麦申请 ({{ handUpList.length }})</span>
+            </template>
+            <div v-for="item in handUpList" :key="item.userID" class="handup-item">
+              <span>{{ item.userName }}</span>
+              <div>
+                <el-button size="small" type="success" @click="acceptCoHost(item)">同意</el-button>
+                <el-button size="small" @click="rejectCoHost(item)">拒绝</el-button>
+              </div>
+            </div>
+          </el-card>
+
+          <!-- 连中学生视频 -->
+          <el-card class="panel-card" v-if="coHostStreams.length > 0 || showAssistantSelfPreview">
+            <template #header><span>连麦学生</span></template>
+            <div class="cohost-grid">
+              <div v-if="showAssistantSelfPreview" class="cohost-item self">
+                <div id="assistant-self-preview" class="cohost-video">
+                  <span class="cohost-badge">我的摄像头</span>
+                  <div class="cohost-toolbar">
+                    <el-button
+                      circle
+                      size="small"
+                      :type="assistantMicEnabled ? 'primary' : 'info'"
+                      @click="toggleAssistantSelfMic"
+                    >
+                      <el-icon><Microphone /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+              <div v-for="stream in coHostStreams" :key="stream.streamID" class="cohost-item">
+                <div :id="'cohost-' + stream.streamID" class="cohost-video">
+                  <span class="cohost-badge">{{ stream.userName }}</span>
+                  <div v-if="stream.isAssistant" class="cohost-toolbar">
+                    <el-button
+                      circle
+                      size="small"
+                      :type="stream.micEnabled ? 'primary' : 'info'"
+                      @click="toggleAssistantMic(stream)"
+                    >
+                      <el-icon><Microphone /></el-icon>
+                    </el-button>
+                    <el-button circle size="small" type="danger" @click="kickCoHost(stream)">
+                      <el-icon><Close /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+                <el-button v-if="!stream.isAssistant" link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
+              </div>
+            </div>
+          </el-card>
+
+          <!-- 聊天区 -->
+          <el-card class="panel-card chat-card">
+            <template #header><span>课堂互动</span></template>
+            <div class="chat-messages" ref="chatScrollRef">
+              <div
+                v-for="msg in messages"
+                :key="msg.id"
+                class="chat-msg"
+                :class="{ self: msg.isSelf, system: msg.isSystem }"
+              >
+                <div class="msg-header">
+                  <span class="msg-name">{{ msg.userName }}</span>
+                  <span class="msg-time">{{ msg.time }}</span>
+                </div>
+                <div class="msg-content">{{ msg.content }}</div>
+              </div>
+            </div>
+            <div class="chat-input">
+              <el-input
+                v-model="chatText"
+                placeholder="输入消息..."
+                @keyup.enter="sendChat"
+              >
+                <template #append>
+                  <el-button @click="sendChat">发送</el-button>
+                </template>
+              </el-input>
+            </div>
+          </el-card>
+
+          <div v-if="layoutFreeMode" class="resize-handle" @mousedown.prevent="beginPanelResize('interaction', $event)"></div>
         </div>
       </div>
     </div>
@@ -356,6 +360,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Close } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { ZegoExpressEngine } from 'zego-express-engine-webrtc'
 import { getLiveRoomDetail, startLive, endLive, approveCohost as approveCohostApi, rejectCohost as rejectCohostApi, kickCohost as kickCohostApi } from '@/api/live'
@@ -413,22 +418,6 @@ const currentRoomLoginRoomID = ref('')
 const currentRoomLoginUserID = ref('')
 const canPublishLive = ref(true)
 const audienceMainStreamID = ref('')
-const audienceStageStreamID = ref('')
-const audienceMainRemoteStream = ref(null)
-const audienceStageRemoteStream = ref(null)
-const audiencePlayRetryTimer = ref(null)
-const audiencePlayRetryCount = ref(0)
-const stageLayoutRefreshTimer = ref(null)
-const audienceRoomStatusRetryTimer = ref(null)
-const audienceRoomStatusRetryCount = ref(0)
-const workspaceRef = ref(null)
-const leftPanelRef = ref(null)
-const videoContainerRef = ref(null)
-const stageContainerRef = ref(null)
-const stageCanvasRef = ref(null)
-const stageScreenHostRef = ref(null)
-const cameraGalleryRef = ref(null)
-const layoutFreeMode = ref(false)
 const showVideoPanel = ref(true)
 const showInteractionPanel = ref(true)
 const cameraDevices = ref([])
@@ -1712,6 +1701,12 @@ const initZego = async () => {
           const teacherStreamPrefix = `teacher_${roomId}`
           const isTeacherStream = String(stream.streamID || '').startsWith(teacherStreamPrefix)
           const isTeacherScreenStream = isScreenShareStreamID(stream.streamID)
+          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
+          const isCurrentAssistantStream = isAssistantStreamID(stream.streamID) && currentUserID && String(stream.userID || '').trim() === currentUserID
+          if (isCurrentAssistantStream) {
+            await renderAssistantSelfPreview()
+            continue
+          }
           if (isTeacherScreenStream) {
             await playAudienceStageStream(stream.streamID, { silent: true })
             continue
@@ -1729,14 +1724,12 @@ const initZego = async () => {
           }
         }
         if (!stream.streamID.includes('screen')) {
-          const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
           const assistantStream = isAssistantStreamID(stream.streamID)
-          const isCurrentUserStream = currentUserID && String(stream.userID || '').trim() === currentUserID
           const existingIndex = coHostStreams.value.findIndex((item) => item.streamID === stream.streamID)
           const streamRecord = {
             streamID: stream.streamID,
             userID: stream.userID,
-            userName: isCurrentUserStream ? '我的摄像头' : (stream.userName || (assistantStream ? '助教' : '学生')),
+            userName: stream.userName || (assistantStream ? '助教' : '学生'),
             isAssistant: assistantStream,
             micEnabled: assistantStream ? true : false
           }
@@ -2498,6 +2491,23 @@ const toggleAssistantMic = async (stream) => {
   ElMessage.success(nextEnabled ? '已打开助教麦克风' : '已关闭助教麦克风')
 }
 
+const toggleAssistantSelfMic = async () => {
+  if (canPublishLive.value || !isAssistantAudienceUser() || !assistantPublishStream.value || !zg.value || !zegoRoomID.value) return
+  const nextEnabled = !assistantMicEnabled.value
+  applyAssistantMicState(nextEnabled)
+  await renderAssistantSelfPreview()
+  try {
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({
+        type: 'assistant_mic_state',
+        streamID: assistantPublishStreamID.value,
+        enabled: nextEnabled
+      })
+    )
+  } catch (e) {}
+}
+
 const kickCoHost = async (stream) => {
   await kickCohostApi(roomId, { userId: stream.userID })
   await zg.value.sendBroadcastMessage(
@@ -2655,6 +2665,33 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .teacher-live-room {
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  --surface-border: rgba(64, 158, 255, 0.22);
+  --surface-border-strong: rgba(64, 158, 255, 0.32);
+  --panel-header-height: 36px;
+  --panel-body-padding: var(--space-2);
+  --panel-radius: 10px;
+  --toolbar-surface: rgba(15, 23, 42, 0.64);
+  --action-height: 34px;
+  --action-radius: 8px;
+  --ui-motion-duration: 0.16s;
+  --ui-motion-easing: ease;
+  --ui-shadow-hover: 0 8px 18px rgba(0, 0, 0, 0.24);
+  --ui-card-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+  --ui-card-shadow-hover: 0 16px 36px rgba(0, 0, 0, 0.28);
+  --ui-border-hover: rgba(64, 158, 255, 0.36);
+  --title-size-lg: 16px;
+  --title-size-md: 14px;
+  --text-size-sm: 12px;
+  --text-size-md: 13px;
+  --line-height-tight: 1.2;
+  --line-height-base: 1.45;
+  --stack-gap-sm: 8px;
+  --stack-gap-md: var(--space-2);
+  --row-padding-y: 8px;
+  --panel-content-gap: 8px;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -2668,7 +2705,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 var(--space-3);
   border-bottom: 1px solid #0f3460;
 }
 
@@ -2679,8 +2716,10 @@ onBeforeUnmount(() => {
 }
 
 .room-title {
-  font-size: 16px;
+  font-size: var(--title-size-lg);
+  line-height: var(--line-height-tight);
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .online-count {
@@ -2688,15 +2727,41 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   color: #aaa;
-  font-size: 14px;
+  font-size: var(--text-size-md);
+  line-height: var(--line-height-tight);
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.actions :deep(.el-button) {
+  height: var(--action-height);
+  border-radius: var(--action-radius);
+  padding: 0 12px;
+  font-size: 13px;
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), filter var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.actions :deep(.el-button:hover) {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: var(--ui-shadow-hover);
+}
+
+.actions :deep(.el-button:active) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+  box-shadow: none;
+}
+
+.actions :deep(.el-select .el-select__wrapper) {
+  min-height: var(--action-height);
+  border-radius: var(--action-radius);
 }
 
 .main-area {
@@ -2714,8 +2779,8 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 16px;
+  padding: var(--space-3);
+  gap: var(--space-3);
   overflow: hidden;
   min-width: 0;
 }
@@ -2747,7 +2812,7 @@ onBeforeUnmount(() => {
 .restore-tab {
   position: absolute;
   z-index: 18;
-  padding: 10px 14px;
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
   background: rgba(17, 24, 39, 0.9);
   color: #fff;
@@ -2770,25 +2835,13 @@ onBeforeUnmount(() => {
 .local-video {
   width: 100%;
   height: 100%;
+  position: relative;
   
   :deep(video) {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
-}
-
-.video-controls {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: rgba(0,0,0,0.6);
-  padding: 8px 16px;
-  border-radius: 24px;
 }
 
 .screen-share-state {
@@ -2816,6 +2869,9 @@ onBeforeUnmount(() => {
   color: #fff;
   cursor: move;
   user-select: none;
+  font-size: var(--title-size-md);
+  line-height: var(--line-height-tight);
+  font-weight: 500;
 }
 
 .floating-actions {
@@ -2823,6 +2879,26 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.floating-actions :deep(.el-button:not(.is-circle)) {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), filter var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.floating-actions :deep(.el-button:not(.is-circle):hover) {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: var(--ui-shadow-hover);
+}
+
+.floating-actions :deep(.el-button:not(.is-circle):active) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+  box-shadow: none;
 }
 
 .floating-controls {
@@ -2843,7 +2919,9 @@ onBeforeUnmount(() => {
 .stage-container {
   flex: 1;
   background: #fff;
+  border: 1px solid var(--surface-border);
   border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2927,11 +3005,11 @@ onBeforeUnmount(() => {
 .camera-gallery {
   border-radius: 12px;
   background: #101427;
-  border: 1px solid rgba(64, 158, 255, 0.2);
+  border: 1px solid var(--surface-border);
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-1);
 }
 
 .camera-gallery-header {
@@ -2940,7 +3018,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--text-size-md);
+  line-height: var(--line-height-tight);
+  font-weight: 500;
   color: #b8c5e3;
 }
 
@@ -2964,7 +3044,7 @@ onBeforeUnmount(() => {
 .camera-gallery-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  gap: var(--space-1);
 }
 
 .camera-gallery-item {
@@ -2972,16 +3052,23 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   overflow: hidden;
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing), border-color var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.camera-gallery-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--ui-border-hover);
+  box-shadow: var(--ui-shadow-hover);
 }
 
 .camera-gallery-item-head {
   min-height: 36px;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: rgba(15, 52, 96, 0.42);
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .camera-title-wrap {
@@ -2992,7 +3079,8 @@ onBeforeUnmount(() => {
 }
 
 .camera-gallery-title {
-  font-size: 12px;
+  font-size: var(--text-size-sm);
+  line-height: var(--line-height-tight);
   color: #d6e1ff;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3028,11 +3116,11 @@ onBeforeUnmount(() => {
 .right-panel {
   width: 280px;
   background: #16213e;
-  border-left: 1px solid #0f3460;
+  border-left: 1px solid var(--surface-border-strong);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px;
+  gap: var(--stack-gap-md);
+  padding: var(--space-3);
   overflow: hidden;
 }
 
@@ -3047,26 +3135,31 @@ onBeforeUnmount(() => {
   flex: none;
   height: 180px;
   min-height: 160px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #0c1226;
+  border: 1px solid var(--surface-border);
+  background: #0b1120;
+  border-radius: var(--panel-radius);
+  overflow: hidden;
+  box-shadow: var(--ui-card-shadow);
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing), border-color var(--ui-motion-duration) var(--ui-motion-easing);
 }
 
-.video-head {
-  position: absolute;
-  top: 8px;
+.right-side-video:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--ui-card-shadow-hover);
+  border-color: var(--ui-border-hover);
+}
+
+.main-camera-video {
+  position: relative;
+}
+
+.main-camera-video .cohost-badge {
+  top: 10px;
+}
+
+.main-camera-video .cohost-toolbar {
   left: 10px;
-  z-index: 2;
-  color: #cbd5e1;
-  font-size: 12px;
-  background: rgba(15, 23, 42, 0.7);
-  padding: 2px 8px;
-  border-radius: 999px;
-  pointer-events: none;
-}
-
-.right-video-controls {
-  gap: 10px;
-  padding: 6px 10px;
+  bottom: 10px;
 }
 
 .right-panel.collapsed {
@@ -3077,7 +3170,7 @@ onBeforeUnmount(() => {
 }
 
 .dock-panel-header {
-  height: 40px;
+  height: var(--panel-header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3085,6 +3178,9 @@ onBeforeUnmount(() => {
   background: #16213e;
   color: #fff;
   border-bottom: 1px solid #0f3460;
+  font-size: var(--title-size-md);
+  line-height: var(--line-height-tight);
+  font-weight: 500;
 }
 
 .panel-collapsed-rail {
@@ -3099,12 +3195,14 @@ onBeforeUnmount(() => {
   user-select: none;
   color: #fff;
   background: linear-gradient(180deg, #16213e 0%, #0f3460 100%);
+  font-size: var(--text-size-sm);
+  font-weight: 500;
 }
 
 .interaction-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--stack-gap-sm);
   min-height: 0;
   flex: 1;
   overflow: hidden;
@@ -3130,7 +3228,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   background: #16213e;
-  padding: 0 12px 24px;
+  padding: 0 var(--space-2) var(--space-3);
   gap: 12px;
 }
 
@@ -3145,27 +3243,79 @@ onBeforeUnmount(() => {
 
 .panel-card {
   background: #1a1a2e;
-  border: 1px solid #0f3460;
+  border: 1px solid var(--surface-border);
+  transition: border-color var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
   
   :deep(.el-card__header) {
+    min-height: var(--panel-header-height);
+    display: flex;
+    align-items: center;
     background: #16213e;
     color: #fff;
     border-bottom: 1px solid #0f3460;
-    padding: 12px 16px;
+    padding: 0 12px;
+    font-size: var(--title-size-md);
+    line-height: var(--line-height-tight);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  :deep(.el-card__header > *) {
+    display: inline-flex;
+    align-items: center;
+    min-height: calc(var(--panel-header-height) - 2px);
+    line-height: var(--line-height-tight);
   }
   
   :deep(.el-card__body) {
-    padding: 12px;
+    padding: var(--panel-body-padding);
     color: #ddd;
   }
+}
+
+.panel-card:hover {
+  border-color: var(--ui-border-hover);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.panel-card:not(.chat-card) :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-content-gap);
+}
+
+.panel-card :deep(.el-button--small:not(.is-circle)) {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), filter var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.panel-card :deep(.el-button--small:not(.is-circle):hover) {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: var(--ui-shadow-hover);
+}
+
+.panel-card :deep(.el-button--small:not(.is-circle):active) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+  box-shadow: none;
 }
 
 .handup-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
+  padding: var(--row-padding-y) 0;
   border-bottom: 1px solid #333;
+
+  > div {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
   
   &:last-child {
     border-bottom: none;
@@ -3175,21 +3325,37 @@ onBeforeUnmount(() => {
 .cohost-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
+  margin-top: 2px;
 }
 
 .cohost-item {
-  background: #0f0f23;
-  border-radius: 8px;
+  position: relative;
+  background: #0b1120;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--panel-radius);
   overflow: hidden;
   text-align: center;
-  padding-bottom: 8px;
+  padding-bottom: 0;
+  box-shadow: var(--ui-card-shadow);
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing), border-color var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.cohost-item:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--ui-card-shadow-hover);
+  border-color: var(--ui-border-hover);
+}
+
+.cohost-item.self {
+  grid-column: 1 / -1;
 }
 
 .cohost-video {
   width: 100%;
-  height: 100px;
+  height: 146px;
   background: #000;
+  position: relative;
   
   :deep(video) {
     width: 100%;
@@ -3198,22 +3364,139 @@ onBeforeUnmount(() => {
   }
 }
 
-.cohost-name {
-  display: block;
-  font-size: 12px;
-  margin: 4px 0;
-  color: #aaa;
+.cohost-item.self .cohost-video {
+  height: 208px;
 }
 
-.cohost-mic-state {
-  display: block;
+.cohost-toolbar {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: var(--toolbar-surface);
+  backdrop-filter: blur(8px);
+  z-index: 2;
+}
+
+.cohost-toolbar :deep(.el-button) {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  transition: transform var(--ui-motion-duration) var(--ui-motion-easing), filter var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
+}
+
+.cohost-toolbar :deep(.el-button .el-icon) {
+  font-size: 14px;
+}
+
+.cohost-toolbar :deep(.el-button:hover) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: var(--ui-shadow-hover);
+}
+
+.cohost-toolbar :deep(.el-button:active) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+  box-shadow: none;
+}
+
+.cohost-badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 999px;
   font-size: 11px;
-  color: #f59e0b;
-  margin-bottom: 4px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #fff;
+  background: var(--toolbar-surface);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
 }
 
-.cohost-mic-state.on {
-  color: #22c55e;
+@media (max-width: 1360px) {
+  .right-panel,
+  .right-panel.docked {
+    width: 252px;
+    min-width: 228px;
+  }
+
+  .right-side-video {
+    height: 168px;
+    min-height: 150px;
+  }
+
+  .cohost-video {
+    height: 132px;
+  }
+
+  .cohost-item.self .cohost-video {
+    height: 188px;
+  }
+
+  .cohost-grid {
+    gap: 8px;
+  }
+
+  .actions {
+    gap: 8px;
+  }
+
+  .actions :deep(.el-button) {
+    height: 32px;
+    font-size: 12px;
+    padding: 0 10px;
+  }
+
+  .actions :deep(.el-select .el-select__wrapper) {
+    min-height: 32px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .teacher-live-room {
+    --title-size-lg: 15px;
+    --title-size-md: 13px;
+    --text-size-md: 12px;
+    --row-padding-y: 7px;
+    --panel-content-gap: 7px;
+  }
+
+  .top-bar {
+    height: auto;
+    min-height: 56px;
+    padding: var(--space-1) var(--space-2);
+    flex-wrap: wrap;
+    gap: 8px;
+    align-content: center;
+  }
+
+  .room-info {
+    gap: var(--space-2);
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .actions :deep(.el-button) {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .actions :deep(.el-select .el-select__wrapper) {
+    min-height: 30px;
+  }
 }
 
 .chat-card {
@@ -3232,10 +3515,10 @@ onBeforeUnmount(() => {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: var(--panel-body-padding);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--stack-gap-sm);
 }
 
 .chat-msg {
@@ -3243,7 +3526,8 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: space-between;
     margin-bottom: 4px;
-    font-size: 12px;
+    font-size: var(--text-size-sm);
+    line-height: var(--line-height-tight);
   }
   
   .msg-name {
@@ -3253,13 +3537,15 @@ onBeforeUnmount(() => {
   
   .msg-time {
     color: #666;
+    font-variant-numeric: tabular-nums;
   }
   
   .msg-content {
     background: #0f3460;
     padding: 8px 12px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: var(--text-size-md);
+    line-height: var(--line-height-base);
     word-break: break-all;
   }
   
@@ -3285,7 +3571,18 @@ onBeforeUnmount(() => {
 }
 
 .chat-input {
-  padding: 12px;
+  padding: var(--space-2);
   border-top: 1px solid #0f3460;
+}
+
+.chat-input :deep(.el-input__wrapper) {
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+.chat-input :deep(.el-input-group__append .el-button) {
+  height: 34px;
+  border-radius: 0 8px 8px 0;
+  padding: 0 12px;
 }
 </style>
