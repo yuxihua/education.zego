@@ -611,14 +611,13 @@ const renderPreviewStream = async (container, stream) => {
   } catch (e) {}
 }
 
-const renderRemoteStream = async (container, stream) => {
+const renderRemoteStream = async (container, stream, muted = false) => {
   if (!container || !stream) return
   const host = container.querySelector?.('.main-video-host') || container
   host.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
-  // 观众端优先保证自动播放成功，避免浏览器自动播放策略导致黑屏。
-  videoEl.muted = true
+  videoEl.muted = !!muted
   videoEl.playsInline = true
   videoEl.srcObject = stream
   videoEl.style.width = '100%'
@@ -630,7 +629,7 @@ const renderRemoteStream = async (container, stream) => {
   } catch (e) {}
 }
 
-const renderCohostStream = async (container, stream, muted = true) => {
+const renderCohostStream = async (container, stream, muted = false) => {
   if (!container || !stream) return
   const host = container.querySelector?.('.cohost-video-host') || container
   host.innerHTML = ''
@@ -1828,7 +1827,7 @@ const initZego = async () => {
           try {
             const remoteStream = await zg.value.startPlayingStream(stream.streamID)
             const videoContainer = document.getElementById('cohost-' + stream.streamID)
-            await renderCohostStream(videoContainer, remoteStream, true)
+            await renderCohostStream(videoContainer, remoteStream, false)
           } catch (playErr) {
             console.warn('[LivePush] play cohost stream failed', {
               streamID: stream.streamID,
