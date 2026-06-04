@@ -1214,6 +1214,21 @@ const renderAssistantCohostPreview = async () => {
   await renderCohostStream(container, remoteStream, false)
 }
 
+const notifyAssistantCameraState = async () => {
+  if (canPublishLive.value || !isAssistantAudienceUser() || !zg.value || !zegoRoomID.value || !assistantPublishStreamID.value) return
+  try {
+    await zg.value.sendBroadcastMessage(
+      zegoRoomID.value,
+      JSON.stringify({
+        type: 'assistant_camera_state',
+        streamID: assistantPublishStreamID.value,
+        enabled: true,
+        rev: Date.now()
+      })
+    )
+  } catch (e) {}
+}
+
 const applyMainStreamTrackState = (stream) => {
   if (!stream) return
   stream.getVideoTracks().forEach((track) => {
@@ -2765,6 +2780,19 @@ const initZego = async () => {
               console.warn('[LivePush] assistant camera control failed:', err)
             })
           }
+        } else if (data.type === 'assistant_camera_state' && canPublishLive.value && data.streamID) {
+          const targetStreamID = String(data.streamID)
+          const index = coHostStreams.value.findIndex((item) => item.streamID === targetStreamID)
+          if (index !== -1) {
+            coHostStreams.value[index] = {
+              ...coHostStreams.value[index],
+              micEnabled: coHostStreams.value[index].micEnabled !== false,
+              micLevel: coHostStreams.value[index].micLevel || 0
+            }
+            renderAssistantCohostPreview().catch((err) => {
+              console.warn('[LivePush] rerender assistant cohost preview failed:', err)
+            })
+          }
         } else if (data.type === 'assistant_mic_state' && canPublishLive.value && data.streamID) {
           const targetStreamID = String(data.streamID)
           const index = coHostStreams.value.findIndex((item) => item.streamID === targetStreamID)
@@ -3417,6 +3445,7 @@ const switchAssistantCamera = async (stream = null) => {
   const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % cameraDevices.value.length
   try {
     await setAssistantCamera(cameraDevices.value[nextIndex].deviceId)
+    await notifyAssistantCameraState()
     ElMessage.success('已切换助教摄像头')
   } catch (err) {
     ElMessage.error('切换助教摄像头失败：' + parseErrorMessage(err))
