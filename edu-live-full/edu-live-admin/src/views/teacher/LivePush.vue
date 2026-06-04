@@ -44,6 +44,60 @@
             :value="device.deviceId"
           />
         </el-select>
+        <el-select
+          v-if="canPublishLive || isAssistantAudienceUser()"
+          v-model="activeMicrophoneDeviceId"
+          placeholder="麦克风"
+          size="large"
+          filterable
+          clearable
+          style="width: 220px"
+        >
+          <el-option
+            v-for="device in microphoneDevices"
+            :key="device.deviceId"
+            :label="device.label"
+            :value="device.deviceId"
+          />
+        </el-select>
+        <el-select
+          v-if="supportsOutputDeviceSelection"
+          v-model="activeSpeakerDeviceId"
+          placeholder="扬声器"
+          size="large"
+          filterable
+          clearable
+          style="width: 220px"
+        >
+          <el-option
+            v-for="device in speakerDevices"
+            :key="device.deviceId"
+            :label="device.label"
+            :value="device.deviceId"
+          />
+        </el-select>
+        <div v-if="canPublishLive || isAssistantAudienceUser()" class="audio-gain-control">
+          <span class="audio-gain-label">麦克风 {{ micGainPercent }}%</span>
+          <el-slider
+            v-model="micGainPercent"
+            :min="0"
+            :max="200"
+            :step="5"
+            :show-tooltip="false"
+            style="width: 140px"
+          />
+          <div class="audio-level-meter" :class="{ muted: !isCurrentMicEnabled }">
+            <div class="audio-level-meter-fill" :style="{ width: `${micLevelPercent}%` }"></div>
+          </div>
+        </div>
+        <el-button
+          v-if="canPublishLive || isAssistantAudienceUser()"
+          :type="isMicTestActive ? 'success' : 'info'"
+          size="large"
+          @click="toggleMicTest"
+        >
+          {{ isMicTestActive ? '停止试音' : '麦克风试音' }}
+        </el-button>
         <el-button v-if="canPublishLive" size="large" @click="addCameraPreview">
           添加摄像头
         </el-button>
@@ -455,6 +509,7 @@ const assistantStatusLine = computed(() => {
   if (assistantPublishError.value) return `状态：${assistantPublishError.value}`
   return '状态：正在启动助教摄像头'
 })
+const isCurrentMicEnabled = computed(() => (canPublishLive.value ? isMicOn.value : assistantMicEnabled.value))
 
 // 连麦
 const handUpList = ref([])
@@ -492,6 +547,13 @@ const showVideoPanel = ref(true)
 const showInteractionPanel = ref(true)
 const cameraDevices = ref([])
 const activeCameraDeviceId = ref('')
+const microphoneDevices = ref([])
+const activeMicrophoneDeviceId = ref('')
+const speakerDevices = ref([])
+const activeSpeakerDeviceId = ref('')
+const micGainPercent = ref(100)
+const micLevelPercent = ref(0)
+const isMicTestActive = ref(false)
 const cameraPreviewTiles = ref([])
 const cameraPreviewSeq = ref(0)
 const cameraPreviewPresets = ref([])
@@ -509,6 +571,9 @@ const floatingInteractionState = reactive({ x: 0, y: 16, width: 360, height: 520
 const layoutStorageKey = `teacher_live_push_layout_${roomId}`
 const layoutVersion = 2
 const cameraStorageKey = `teacher_live_push_camera_${roomId}`
+const microphoneStorageKey = `teacher_live_push_microphone_${roomId}`
+const speakerStorageKey = `teacher_live_push_speaker_${roomId}`
+const micGainStorageKey = `teacher_live_push_mic_gain_${roomId}`
 const cameraPreviewStorageKey = `teacher_live_push_camera_previews_${roomId}`
 const snapDistance = 24
 const defaultDockedRightPanelWidth = 280
@@ -519,6 +584,12 @@ const assistantPublishStreamID = ref('')
 const assistantMicEnabled = ref(true)
 const assistantPublishError = ref('')
 const stageLayoutRefreshTimer = ref(null)
+const audioContextRef = ref(null)
+const micLevelAnimationFrame = ref(0)
+const micTestAudioEl = ref(null)
+const micTestBundleRef = ref(null)
+const streamAudioBundleMap = new WeakMap()
+const supportsOutputDeviceSelection = ref(typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype?.setSinkId === 'function')
 
 // 结束直播弹窗
 const endDialogVisible = ref(false)
@@ -545,6 +616,318 @@ const parseErrorMessage = (err, fallback = '未知错误') => {
 
 const normalizeRoomID = (value) => String(value || '').trim()
 const getFallbackRoomID = () => normalizeRoomID(`room_${roomId}`)
+
+const ensureAudioContext = async () => {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextCtor) return null
+  if (!audioContextRef.value) {
+    audioContextRef.value = new AudioContextCtor()
+  }
+  if (audioContextRef.value.state === 'suspended') {
+    try {
+      await audioContextRef.value.resume()
+    } catch (e) {}
+  }
+  return audioContextRef.value
+}
+
+const buildMicrophoneConstraints = (deviceId) => ({
+  audio: {
+    deviceId: deviceId ? { exact: deviceId } : undefined,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  },
+  video: false
+})
+
+const applyAudioBundleGain = (bundle) => {
+  if (!bundle?.gainNode) return
+  bundle.gainNode.gain.value = clamp(micGainPercent.value / 100, 0, 2)
+}
+
+const getMonitoredAudioBundle = () => {
+  if (canPublishLive.value && localStream.value) {
+    return streamAudioBundleMap.get(localStream.value) || null
+  }
+  if (!canPublishLive.value && assistantPublishStream.value) {
+    return streamAudioBundleMap.get(assistantPublishStream.value) || null
+  }
+  if (micTestBundleRef.value) {
+    return micTestBundleRef.value
+  }
+  return null
+}
+
+const getPrimaryLiveAudioBundle = () => {
+  if (canPublishLive.value && localStream.value) {
+    return streamAudioBundleMap.get(localStream.value) || null
+  }
+  if (!canPublishLive.value && assistantPublishStream.value) {
+    return streamAudioBundleMap.get(assistantPublishStream.value) || null
+  }
+  return null
+}
+
+const applyOutputDeviceToMediaEl = async (mediaEl) => {
+  if (!mediaEl || !supportsOutputDeviceSelection.value) return
+  const sinkId = String(activeSpeakerDeviceId.value || '').trim()
+  if (!sinkId) return
+  if (typeof mediaEl.setSinkId !== 'function') return
+  try {
+    await mediaEl.setSinkId(sinkId)
+  } catch (err) {
+    console.warn('[LivePush] apply output device failed:', err)
+  }
+}
+
+const applyOutputDeviceToCurrentMediaElements = async () => {
+  if (!supportsOutputDeviceSelection.value) return
+  const mediaNodes = Array.from(document.querySelectorAll('video, audio'))
+  for (const node of mediaNodes) {
+    await applyOutputDeviceToMediaEl(node)
+  }
+}
+
+const stopMicLevelMonitor = () => {
+  if (micLevelAnimationFrame.value) {
+    cancelAnimationFrame(micLevelAnimationFrame.value)
+    micLevelAnimationFrame.value = 0
+  }
+  micLevelPercent.value = 0
+}
+
+const updateMicLevelMeter = () => {
+  const bundle = getMonitoredAudioBundle()
+  const analyserNode = bundle?.analyserNode
+  const analyserData = bundle?.analyserData
+
+  if (!isCurrentMicEnabled.value || !analyserNode || !analyserData) {
+    micLevelPercent.value = 0
+  } else {
+    analyserNode.getByteTimeDomainData(analyserData)
+    let peak = 0
+    for (let index = 0; index < analyserData.length; index += 1) {
+      const normalized = Math.abs((analyserData[index] - 128) / 128)
+      if (normalized > peak) peak = normalized
+    }
+    micLevelPercent.value = clamp(Math.round(peak * 180), 0, 100)
+  }
+
+  micLevelAnimationFrame.value = requestAnimationFrame(updateMicLevelMeter)
+}
+
+const ensureMicLevelMonitor = () => {
+  if (micLevelAnimationFrame.value) return
+  micLevelAnimationFrame.value = requestAnimationFrame(updateMicLevelMeter)
+}
+
+const releaseStreamAudioBundle = (stream) => {
+  const bundle = stream ? streamAudioBundleMap.get(stream) : null
+  if (!bundle) return
+  try {
+    bundle.sourceNode?.disconnect?.()
+  } catch (e) {}
+  try {
+    bundle.gainNode?.disconnect?.()
+  } catch (e) {}
+  try {
+    bundle.analyserNode?.disconnect?.()
+  } catch (e) {}
+  try {
+    bundle.destination?.stream?.getTracks?.().forEach((track) => track.stop())
+  } catch (e) {}
+  try {
+    bundle.sourceStream?.getTracks?.().forEach((track) => track.stop())
+  } catch (e) {}
+  streamAudioBundleMap.delete(stream)
+}
+
+const createProcessedAudioBundle = async (deviceId, enabled = true) => {
+  const sourceStream = await navigator.mediaDevices.getUserMedia(buildMicrophoneConstraints(deviceId))
+  const context = await ensureAudioContext()
+  if (!context) {
+    const processedTrack = sourceStream.getAudioTracks()[0] || null
+    if (processedTrack) {
+      processedTrack.enabled = !!enabled
+    }
+    return {
+      sourceStream,
+      sourceNode: null,
+      gainNode: null,
+      destination: null,
+      processedTrack
+    }
+  }
+
+  const sourceNode = context.createMediaStreamSource(sourceStream)
+  const gainNode = context.createGain()
+  const analyserNode = context.createAnalyser()
+  const destination = context.createMediaStreamDestination()
+  sourceNode.connect(gainNode)
+  gainNode.connect(destination)
+  gainNode.connect(analyserNode)
+  analyserNode.fftSize = 256
+  analyserNode.smoothingTimeConstant = 0.72
+  const processedTrack = destination.stream.getAudioTracks()[0] || null
+  if (processedTrack) {
+    processedTrack.enabled = !!enabled
+  }
+  const bundle = {
+    sourceStream,
+    sourceNode,
+    gainNode,
+    analyserNode,
+    analyserData: new Uint8Array(analyserNode.frequencyBinCount),
+    destination,
+    processedTrack
+  }
+  applyAudioBundleGain(bundle)
+  return bundle
+}
+
+const attachProcessedAudioToStream = async (stream, options = {}) => {
+  if (!stream) return
+  const { deviceId = activeMicrophoneDeviceId.value, enabled = true } = options
+  releaseStreamAudioBundle(stream)
+  try {
+    stream.getAudioTracks().forEach((track) => {
+      try {
+        stream.removeTrack(track)
+      } catch (e) {}
+      try {
+        track.stop?.()
+      } catch (e) {}
+    })
+  } catch (e) {}
+
+  const bundle = await createProcessedAudioBundle(deviceId, enabled)
+  if (!bundle?.processedTrack) return
+  stream.addTrack(bundle.processedTrack)
+  streamAudioBundleMap.set(stream, bundle)
+  ensureMicLevelMonitor()
+}
+
+const updateLiveAudioGain = () => {
+  if (localStream.value) {
+    applyAudioBundleGain(streamAudioBundleMap.get(localStream.value))
+  }
+  if (assistantPublishStream.value) {
+    applyAudioBundleGain(streamAudioBundleMap.get(assistantPublishStream.value))
+  }
+  if (micTestBundleRef.value) {
+    applyAudioBundleGain(micTestBundleRef.value)
+  }
+}
+
+const stopMicTest = () => {
+  isMicTestActive.value = false
+  if (micTestAudioEl.value) {
+    try {
+      micTestAudioEl.value.pause()
+    } catch (e) {}
+    micTestAudioEl.value.srcObject = null
+  }
+  if (micTestBundleRef.value) {
+    try {
+      micTestBundleRef.value.sourceNode?.disconnect?.()
+    } catch (e) {}
+    try {
+      micTestBundleRef.value.gainNode?.disconnect?.()
+    } catch (e) {}
+    try {
+      micTestBundleRef.value.analyserNode?.disconnect?.()
+    } catch (e) {}
+    try {
+      micTestBundleRef.value.destination?.stream?.getTracks?.().forEach((track) => track.stop())
+    } catch (e) {}
+    try {
+      micTestBundleRef.value.sourceStream?.getTracks?.().forEach((track) => track.stop())
+    } catch (e) {}
+    micTestBundleRef.value = null
+  }
+}
+
+const ensureMicTestAudioEl = () => {
+  if (micTestAudioEl.value) return micTestAudioEl.value
+  const audioEl = document.createElement('audio')
+  audioEl.autoplay = true
+  audioEl.controls = false
+  audioEl.muted = false
+  audioEl.volume = 1
+  micTestAudioEl.value = audioEl
+  return audioEl
+}
+
+const startMicTest = async () => {
+  const existingBundle = getPrimaryLiveAudioBundle()
+  const bundle = existingBundle || await createProcessedAudioBundle(activeMicrophoneDeviceId.value, isCurrentMicEnabled.value)
+  if (!existingBundle) {
+    micTestBundleRef.value = bundle
+    ensureMicLevelMonitor()
+  }
+  const targetStream = bundle?.destination?.stream || bundle?.sourceStream || null
+  if (!targetStream) {
+    throw new Error('当前麦克风不可用于试音')
+  }
+  const audioEl = ensureMicTestAudioEl()
+  audioEl.srcObject = targetStream
+  await applyOutputDeviceToMediaEl(audioEl)
+  await audioEl.play()
+  isMicTestActive.value = true
+}
+
+const toggleMicTest = async () => {
+  if (isMicTestActive.value) {
+    stopMicTest()
+    ElMessage.success('已停止麦克风试音')
+    return
+  }
+  try {
+    await startMicTest()
+    ElMessage.success('已开始麦克风试音')
+  } catch (err) {
+    stopMicTest()
+    ElMessage.error('麦克风试音失败：' + parseErrorMessage(err))
+  }
+}
+
+const republishTeacherStreamIfNeeded = async () => {
+  if (!canPublishLive.value || !isLiving.value || !localStream.value || !zg.value || isScreenSharing.value) return
+  const streamID = `teacher_${roomId}`
+  try {
+    zg.value?.stopPublishingStream?.(streamID)
+  } catch (e) {}
+  await zg.value.startPublishingStream(streamID, localStream.value)
+}
+
+const republishAssistantStreamIfNeeded = async () => {
+  if (canPublishLive.value || !isLiving.value || !assistantPublishStream.value || !assistantPublishStreamID.value || !zg.value) return
+  try {
+    zg.value?.stopPublishingStream?.(assistantPublishStreamID.value)
+  } catch (e) {}
+  await zg.value.startPublishingStream(assistantPublishStreamID.value, assistantPublishStream.value)
+}
+
+const rebindLocalMicrophoneStream = async () => {
+  if (canPublishLive.value) {
+    if (!localStream.value) return
+    await attachProcessedAudioToStream(localStream.value, {
+      deviceId: activeMicrophoneDeviceId.value,
+      enabled: isMicOn.value
+    })
+    await republishTeacherStreamIfNeeded()
+    return
+  }
+
+  if (!assistantPublishStream.value) return
+  await attachProcessedAudioToStream(assistantPublishStream.value, {
+    deviceId: activeMicrophoneDeviceId.value,
+    enabled: assistantMicEnabled.value
+  })
+  await republishAssistantStreamIfNeeded()
+  await renderAssistantSelfPreview()
+}
 
 const markCurrentRoomLogin = (roomID, userID) => {
   currentRoomLoginRoomID.value = normalizeRoomID(roomID)
@@ -623,6 +1006,7 @@ const renderRemoteStream = async (container, stream, muted = false) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'cover'
+  await applyOutputDeviceToMediaEl(videoEl)
   host.appendChild(videoEl)
   try {
     await videoEl.play()
@@ -641,6 +1025,7 @@ const renderCohostStream = async (container, stream, muted = false) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'cover'
+  await applyOutputDeviceToMediaEl(videoEl)
   host.appendChild(videoEl)
   try {
     await videoEl.play()
@@ -893,6 +1278,59 @@ const refreshCameraDevices = async () => {
   }
 }
 
+const refreshMicrophoneDevices = async () => {
+  try {
+    const currentSelected = activeMicrophoneDeviceId.value
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const audioInputs = devices.filter((device) => device.kind === 'audioinput')
+    microphoneDevices.value = audioInputs.map((device, index) => ({
+      deviceId: device.deviceId,
+      label: device.label || `麦克风 ${index + 1}`
+    }))
+    if (microphoneDevices.value.length === 0) {
+      activeMicrophoneDeviceId.value = ''
+      return
+    }
+    const selectedExists = microphoneDevices.value.some((item) => item.deviceId === currentSelected)
+    if (selectedExists) {
+      activeMicrophoneDeviceId.value = currentSelected
+      return
+    }
+    activeMicrophoneDeviceId.value = microphoneDevices.value[0].deviceId
+  } catch (err) {
+    console.warn('[LivePush] refreshMicrophoneDevices failed:', err)
+  }
+}
+
+const refreshSpeakerDevices = async () => {
+  if (!supportsOutputDeviceSelection.value) {
+    speakerDevices.value = []
+    activeSpeakerDeviceId.value = ''
+    return
+  }
+  try {
+    const currentSelected = activeSpeakerDeviceId.value
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const audioOutputs = devices.filter((device) => device.kind === 'audiooutput')
+    speakerDevices.value = audioOutputs.map((device, index) => ({
+      deviceId: device.deviceId,
+      label: device.label || `扬声器 ${index + 1}`
+    }))
+    if (speakerDevices.value.length === 0) {
+      activeSpeakerDeviceId.value = ''
+      return
+    }
+    const selectedExists = speakerDevices.value.some((item) => item.deviceId === currentSelected)
+    if (selectedExists) {
+      activeSpeakerDeviceId.value = currentSelected
+      return
+    }
+    activeSpeakerDeviceId.value = speakerDevices.value[0].deviceId
+  } catch (err) {
+    console.warn('[LivePush] refreshSpeakerDevices failed:', err)
+  }
+}
+
 const loadCameraPreviewPresets = () => {
   try {
     const raw = localStorage.getItem(cameraPreviewStorageKey)
@@ -961,7 +1399,7 @@ const removeCameraPreviewPreset = (deviceId) => {
 }
 
 const buildCameraConstraints = (deviceId, withAudio = true) => ({
-  audio: withAudio,
+  audio: false,
   video: {
     deviceId: deviceId ? { exact: deviceId } : undefined,
     width: { ideal: 1280 },
@@ -969,13 +1407,14 @@ const buildCameraConstraints = (deviceId, withAudio = true) => ({
   }
 })
 
-const createZegoCameraStream = async (deviceId, withAudio = true) => {
+const createZegoCameraStream = async (deviceId, withAudio = true, options = {}) => {
   if (!zg.value?.createStream) {
     throw new Error('ZEGO 推流引擎未就绪')
   }
+  const { microphoneDeviceId = activeMicrophoneDeviceId.value, micEnabled = true } = options
   const cameraConfig = {
     video: true,
-    audio: withAudio,
+    audio: false,
     videoQuality: 2,
     width: 1280,
     height: 720,
@@ -985,27 +1424,42 @@ const createZegoCameraStream = async (deviceId, withAudio = true) => {
   if (deviceId) {
     cameraConfig.videoInputID = deviceId
   }
-  return zg.value.createStream({ camera: cameraConfig })
+  const stream = await zg.value.createStream({ camera: cameraConfig })
+  if (withAudio) {
+    await attachProcessedAudioToStream(stream, {
+      deviceId: microphoneDeviceId,
+      enabled: micEnabled
+    })
+  }
+  return stream
 }
 
-const createNativeCameraStream = async (deviceId, withAudio = true) => {
+const createNativeCameraStream = async (deviceId, withAudio = true, options = {}) => {
   const constraints = buildCameraConstraints(deviceId, withAudio)
-  return navigator.mediaDevices.getUserMedia(constraints)
+  const stream = await navigator.mediaDevices.getUserMedia(constraints)
+  if (withAudio) {
+    await attachProcessedAudioToStream(stream, {
+      deviceId: options.microphoneDeviceId,
+      enabled: options.micEnabled
+    })
+  }
+  return stream
 }
 
-const createCameraStream = async (deviceId, withAudio = true, preferZego = false) => {
+const createCameraStream = async (deviceId, withAudio = true, preferZego = false, options = {}) => {
   if (preferZego) {
     try {
-      return { stream: await createZegoCameraStream(deviceId, withAudio), provider: 'zego' }
+      return { stream: await createZegoCameraStream(deviceId, withAudio, options), provider: 'zego' }
     } catch (err) {
       console.warn('[LivePush] createZegoCameraStream failed, fallback to native:', err)
     }
   }
-  return { stream: await createNativeCameraStream(deviceId, withAudio), provider: 'native' }
+  return { stream: await createNativeCameraStream(deviceId, withAudio, options), provider: 'native' }
 }
 
 const releaseMediaStream = (stream, provider = 'native') => {
   if (!stream) return
+  releaseStreamAudioBundle(stream)
   if (provider === 'zego') {
     try {
       zg.value?.destroyStream?.(stream)
@@ -1059,7 +1513,10 @@ const startAssistantPublishing = async (authInfo) => {
   try {
     // Prefer ZEGO camera stream, but gracefully fallback to native stream
     // so assistant preview/publish still works on browsers with createStream quirks.
-    const { stream, provider } = await createCameraStream('', true, true)
+    const { stream, provider } = await createCameraStream('', true, true, {
+      microphoneDeviceId: activeMicrophoneDeviceId.value,
+      micEnabled: assistantMicEnabled.value
+    })
     assistantPublishStream.value = stream
     assistantPublishStreamProvider.value = provider
     assistantPublishStreamID.value = nextStreamID
@@ -1181,7 +1638,10 @@ const setMainCamera = async (deviceId) => {
     }
 
     // 主摄像头用于正式推流，必须使用 ZEGO 创建的流。
-    const stream = await createZegoCameraStream(deviceId, true)
+    const stream = await createZegoCameraStream(deviceId, true, {
+      microphoneDeviceId: activeMicrophoneDeviceId.value,
+      micEnabled: isMicOn.value
+    })
     await publishMainCameraStream(stream, 'zego')
     if (isLiving.value && !isScreenSharing.value) {
       await announceFocusedStream(`teacher_${roomId}`, 'main_camera')
@@ -1738,6 +2198,50 @@ watch(activeCameraDeviceId, (deviceId) => {
     } else {
       localStorage.removeItem(cameraStorageKey)
     }
+  } catch (e) {}
+})
+
+watch(activeMicrophoneDeviceId, async (deviceId, previousDeviceId) => {
+  try {
+    if (deviceId) {
+      localStorage.setItem(microphoneStorageKey, deviceId)
+    } else {
+      localStorage.removeItem(microphoneStorageKey)
+    }
+  } catch (e) {}
+
+  if (!previousDeviceId || previousDeviceId === deviceId) return
+  if (isMicTestActive.value) {
+    stopMicTest()
+  }
+  try {
+    await rebindLocalMicrophoneStream()
+    ElMessage.success('麦克风已切换')
+  } catch (err) {
+    ElMessage.error('切换麦克风失败：' + parseErrorMessage(err))
+  }
+})
+
+watch(activeSpeakerDeviceId, async (deviceId) => {
+  try {
+    if (deviceId) {
+      localStorage.setItem(speakerStorageKey, deviceId)
+    } else {
+      localStorage.removeItem(speakerStorageKey)
+    }
+  } catch (e) {}
+  await applyOutputDeviceToCurrentMediaElements()
+})
+
+watch(micGainPercent, (value) => {
+  const nextValue = clamp(Number(value) || 0, 0, 200)
+  if (nextValue !== value) {
+    micGainPercent.value = nextValue
+    return
+  }
+  updateLiveAudioGain()
+  try {
+    localStorage.setItem(micGainStorageKey, String(nextValue))
   } catch (e) {}
 })
 
@@ -2647,6 +3151,18 @@ onMounted(async () => {
       if (savedCameraDeviceId) {
         activeCameraDeviceId.value = savedCameraDeviceId
       }
+      const savedMicrophoneDeviceId = localStorage.getItem(microphoneStorageKey)
+      if (savedMicrophoneDeviceId) {
+        activeMicrophoneDeviceId.value = savedMicrophoneDeviceId
+      }
+      const savedMicGain = Number(localStorage.getItem(micGainStorageKey))
+      if (!Number.isNaN(savedMicGain) && savedMicGain >= 0) {
+        micGainPercent.value = clamp(savedMicGain, 0, 200)
+      }
+      const savedSpeakerDeviceId = localStorage.getItem(speakerStorageKey)
+      if (savedSpeakerDeviceId) {
+        activeSpeakerDeviceId.value = savedSpeakerDeviceId
+      }
     } catch (e) {}
     const savedLayout = loadLayoutState()
     if (savedLayout && Number(savedLayout.layoutVersion || 1) >= layoutVersion) {
@@ -2708,8 +3224,12 @@ onMounted(async () => {
       console.error('[LivePush] auth/init failed:', err)
     }
     await refreshCameraDevices()
+    await refreshMicrophoneDevices()
+    await refreshSpeakerDevices()
     await restoreCameraPreviewTiles()
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameraDevices)
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshMicrophoneDevices)
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshSpeakerDevices)
     window.addEventListener('unhandledrejection', handleUnhandledRejection)
     document.addEventListener('mousemove', handlePanelMouseMove)
     document.addEventListener('mouseup', handlePanelMouseUp)
@@ -2721,6 +3241,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopMicTest()
+  stopMicLevelMonitor()
   if (stageLayoutRefreshTimer.value) {
     clearTimeout(stageLayoutRefreshTimer.value)
     stageLayoutRefreshTimer.value = null
@@ -2738,6 +3260,12 @@ onBeforeUnmount(() => {
   })
   cameraPreviewTiles.value = []
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
+  navigator.mediaDevices?.removeEventListener?.('devicechange', refreshMicrophoneDevices)
+  navigator.mediaDevices?.removeEventListener?.('devicechange', refreshSpeakerDevices)
+  try {
+    audioContextRef.value?.close?.()
+  } catch (e) {}
+  audioContextRef.value = null
   window.removeEventListener('unhandledrejection', handleUnhandledRejection)
   document.removeEventListener('mousemove', handlePanelMouseMove)
   document.removeEventListener('mouseup', handlePanelMouseUp)
@@ -2844,6 +3372,56 @@ onBeforeUnmount(() => {
 .actions :deep(.el-select .el-select__wrapper) {
   min-height: var(--action-height);
   border-radius: var(--action-radius);
+}
+
+.audio-gain-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--action-height);
+  padding: 0 12px;
+  border-radius: var(--action-radius);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.audio-gain-label {
+  color: #dbe5ff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.audio-gain-control :deep(.el-slider) {
+  --el-slider-main-bg-color: #67c23a;
+  --el-slider-runway-bg-color: rgba(255, 255, 255, 0.18);
+}
+
+.audio-gain-control :deep(.el-slider__runway) {
+  margin: 0;
+}
+
+.audio-level-meter {
+  position: relative;
+  width: 56px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.audio-level-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e 0%, #f59e0b 72%, #ef4444 100%);
+  transition: width 80ms linear;
+}
+
+.audio-level-meter.muted .audio-level-meter-fill {
+  width: 0 !important;
+}
+
+.audio-gain-control + :deep(.el-button) {
+  flex: none;
 }
 
 .main-area {
@@ -3601,6 +4179,11 @@ onBeforeUnmount(() => {
   .actions :deep(.el-select .el-select__wrapper) {
     min-height: 32px;
   }
+
+  .audio-gain-control {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 @media (max-width: 1200px) {
@@ -3639,6 +4222,11 @@ onBeforeUnmount(() => {
 
   .actions :deep(.el-select .el-select__wrapper) {
     min-height: 30px;
+  }
+
+  .audio-gain-control {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
