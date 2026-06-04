@@ -3355,6 +3355,40 @@ const isScreenShareTooltipDisabled = () => {
   return !isScreenSharing.value && canPublishLive.value && isLiving.value
 }
 
+const createScreenShareConfig = () => {
+  const baseConfig = {
+    audio: true,
+    videoQuality: 2,
+    width: 1920,
+    height: 1080,
+    frameRate: 15,
+    bitrate: 1500
+  }
+  const runtimePlatform = `${navigator?.platform || ''} ${navigator?.userAgent || ''}`
+  const isWindows = /windows|win32|win64/i.test(runtimePlatform)
+  if (!isWindows) {
+    return {
+      preferred: baseConfig,
+      fallback: null,
+      preferGdi: false
+    }
+  }
+
+  return {
+    // 兼容不同 SDK 版本可能存在的字段，优先软件/GDI 采集，避免 DX 硬件捕获。
+    preferred: {
+      ...baseConfig,
+      captureMode: 'gdi',
+      videoCaptureMode: 1,
+      preferSoftwareCapture: true,
+      enableDXGI: false,
+      enableDirectX: false
+    },
+    fallback: baseConfig,
+    preferGdi: true
+  }
+}
+
 const toggleScreenShare = async () => {
   if (!canPublishLive.value) {
     ElMessage.warning('仅老师可开启屏幕共享')
@@ -3386,9 +3420,17 @@ const toggleScreenShare = async () => {
     await announceFocusedStream(streamID, 'screen_share_stop')
   } else {
     try {
-      screenStream.value = await zg.value.createStream({
-        screen: { audio: true, videoQuality: 2, width: 1920, height: 1080, frameRate: 15, bitrate: 1500 }
-      })
+      const { preferred, fallback, preferGdi } = createScreenShareConfig()
+      try {
+        screenStream.value = await zg.value.createStream({ screen: preferred })
+      } catch (createErr) {
+        if (!preferGdi || !fallback) {
+          throw createErr
+        }
+        screenStream.value = await zg.value.createStream({ screen: fallback })
+        ElMessage.warning('当前浏览器或 SDK 不支持 GDI 参数，已使用兼容模式开启屏幕共享')
+      }
+
       await renderStageScreenStream(screenStream.value)
       const screenTrack = screenStream.value?.getVideoTracks?.()?.[0]
       if (screenTrack) {
@@ -3406,7 +3448,12 @@ const toggleScreenShare = async () => {
       await announceFocusedStream(screenStreamID, 'screen_share_start')
     } catch (err) {
       clearStageCanvas()
-      ElMessage.warning('屏幕共享已取消')
+      const message = parseErrorMessage(err)
+      if (/cancel|denied|permission|拒绝|取消/i.test(message)) {
+        ElMessage.warning('屏幕共享已取消')
+      } else {
+        ElMessage.error('开启屏幕共享失败：' + message)
+      }
     }
   }
 }
