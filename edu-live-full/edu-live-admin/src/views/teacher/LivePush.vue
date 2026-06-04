@@ -247,79 +247,76 @@
 
       <div
         v-if="layoutFreeMode && isLiving"
-        class="assistant-floating-panel"
+        class="video-container floating-video assistant-floating-panel"
         :style="getAssistantPanelStyle()"
       >
-        <div class="floating-panel-header" @mousedown.prevent="beginPanelDrag('assistant', $event)">
+        <div class="floating-handle" @mousedown.prevent="beginPanelDrag('assistant', $event)">
           <span>助教摄像头</span>
         </div>
-        <el-card class="panel-card assistant-card assistant-floating-card">
-          <div class="assistant-slot">
-            <template v-if="canPublishLive">
-              <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
-                <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                  <div class="cohost-video-host"></div>
-                  <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
-                  <div class="cohost-toolbar">
-                    <div class="mic-button-wrap">
-                      <el-button
-                        circle
-                        size="small"
-                        :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
-                        @click="toggleAssistantMic(assistantCohostStream)"
-                      >
-                        <el-icon><Microphone /></el-icon>
-                      </el-button>
-                      <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
-                        <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
-                      </span>
-                    </div>
-                    <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
-                      <el-icon><Close /></el-icon>
+        <div class="assistant-slot assistant-slot-floating">
+          <template v-if="canPublishLive">
+            <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
+              <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                <div class="cohost-video-host"></div>
+                <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
+                <div class="cohost-toolbar">
+                  <div class="mic-button-wrap">
+                    <el-button
+                      circle
+                      size="small"
+                      :type="assistantCohostStream.micEnabled ? 'primary' : 'info'"
+                      @click="toggleAssistantMic(assistantCohostStream)"
+                    >
+                      <el-icon><Microphone /></el-icon>
                     </el-button>
+                    <span class="mic-level-chip" :class="getRemoteMicLevelChipClass(assistantCohostStream.micEnabled, assistantCohostStream.micLevel)">
+                      <span class="mic-level-chip-fill" :style="{ height: `${assistantCohostStream.micEnabled ? (assistantCohostStream.micLevel || 0) : 0}%` }"></span>
+                    </span>
                   </div>
-                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                  <el-button circle size="small" type="danger" @click="kickCoHost(assistantCohostStream)">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
                 </div>
-              </div>
-              <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                {{ assistantTeacherPlaceholderText }}
                 <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
               </div>
-            </template>
-            <template v-else>
-              <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
-                <div id="assistant-self-preview" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                  <div class="cohost-video-host"></div>
-                  <span class="cohost-badge">我的摄像头</span>
-                  <div class="cohost-toolbar">
-                    <div class="mic-button-wrap">
-                      <el-button
-                        circle
-                        size="small"
-                        :type="assistantMicEnabled ? 'primary' : 'info'"
-                        @click="toggleAssistantSelfMic"
-                      >
-                        <el-icon><Microphone /></el-icon>
-                      </el-button>
-                      <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
-                        <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
-                      </span>
-                    </div>
-                    <el-button circle size="small" type="info" @click="switchAssistantCamera">
-                      <el-icon><Switch /></el-icon>
+            </div>
+            <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+              {{ assistantTeacherPlaceholderText }}
+              <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+            </div>
+          </template>
+          <template v-else>
+            <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
+              <div id="assistant-self-preview" class="cohost-video assistant-video assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+                <div class="cohost-video-host"></div>
+                <span class="cohost-badge">我的摄像头</span>
+                <div class="cohost-toolbar">
+                  <div class="mic-button-wrap">
+                    <el-button
+                      circle
+                      size="small"
+                      :type="assistantMicEnabled ? 'primary' : 'info'"
+                      @click="toggleAssistantSelfMic"
+                    >
+                      <el-icon><Microphone /></el-icon>
                     </el-button>
+                    <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
+                      <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
+                    </span>
                   </div>
-                  <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+                  <el-button circle size="small" type="info" @click="switchAssistantCamera">
+                    <el-icon><Switch /></el-icon>
+                  </el-button>
                 </div>
-              </div>
-              <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
-                {{ assistantAudiencePlaceholderText }}
                 <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
               </div>
-            </template>
-          </div>
-          <div class="assistant-status-line">{{ assistantStatusLine }}</div>
-        </el-card>
+            </div>
+            <div v-else class="assistant-placeholder assistant-resizable" :style="getAssistantViewportStyle()" @dblclick="toggleAssistantViewportSize">
+              {{ assistantAudiencePlaceholderText }}
+              <div class="assistant-resize-handle" @mousedown.prevent="beginAssistantResize"></div>
+            </div>
+          </template>
+        </div>
         <div class="resize-handle" @mousedown.prevent="beginPanelResize('assistant', $event)"></div>
       </div>
 
@@ -711,6 +708,7 @@ const assistantMicLevelLastSentAt = ref(0)
 const micTestAudioEl = ref(null)
 const micTestBundleRef = ref(null)
 const streamAudioBundleMap = new WeakMap()
+const cohostRemoteStreamMap = new Map()
 const supportsOutputDeviceSelection = ref(typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype?.setSinkId === 'function')
 
 // 结束直播弹窗
@@ -1196,6 +1194,28 @@ const renderAssistantSelfPreview = async () => {
   await nextTick()
   const container = document.getElementById('assistant-self-preview')
   await renderCohostStream(container, assistantPublishStream.value, true)
+}
+
+const renderAssistantCohostPreview = async () => {
+  if (!canPublishLive.value || !isLiving.value || !zg.value || !assistantCohostStream.value?.streamID) return
+  const streamID = String(assistantCohostStream.value.streamID)
+  await nextTick()
+  const container = document.getElementById('cohost-' + streamID)
+  if (!container) return
+  let remoteStream = cohostRemoteStreamMap.get(streamID)
+  if (!remoteStream) {
+    try {
+      remoteStream = await zg.value.startPlayingStream(streamID)
+      cohostRemoteStreamMap.set(streamID, remoteStream)
+    } catch (err) {
+      console.warn('[LivePush] rebind assistant cohost stream failed', {
+        streamID,
+        error: parseErrorMessage(err)
+      })
+      return
+    }
+  }
+  await renderCohostStream(container, remoteStream, false)
 }
 
 const applyMainStreamTrackState = (stream) => {
@@ -2483,6 +2503,10 @@ watch([showAssistantSelfPreview, showInteractionPanel], async () => {
   await renderAssistantSelfPreview()
 })
 
+watch([layoutFreeMode, showInteractionPanel, () => assistantCohostStream.value?.streamID], async () => {
+  await renderAssistantCohostPreview()
+})
+
 watch(() => cameraPreviewTiles.value.length, async () => {
   await nextTick()
   clampStagePanelHeight()
@@ -2643,6 +2667,7 @@ const initZego = async () => {
           await nextTick()
           try {
             const remoteStream = await zg.value.startPlayingStream(stream.streamID)
+            cohostRemoteStreamMap.set(stream.streamID, remoteStream)
             const videoContainer = document.getElementById('cohost-' + stream.streamID)
             await renderCohostStream(videoContainer, remoteStream, false)
           } catch (playErr) {
@@ -2675,6 +2700,7 @@ const initZego = async () => {
           continue
         }
         zg.value.stopPlayingStream(stream.streamID)
+        cohostRemoteStreamMap.delete(stream.streamID)
         coHostStreams.value = coHostStreams.value.filter(s => s.streamID !== stream.streamID)
       }
     }
@@ -3609,6 +3635,7 @@ onBeforeUnmount(() => {
     releaseMediaStream(tile.stream, tile.streamProvider)
   })
   cameraPreviewTiles.value = []
+  cohostRemoteStreamMap.clear()
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraDevices)
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshMicrophoneDevices)
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshSpeakerDevices)
@@ -3838,33 +3865,16 @@ onBeforeUnmount(() => {
 }
 
 .assistant-floating-panel {
-  position: absolute;
   z-index: 21;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(13, 21, 40, 0.96);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
   min-width: 300px;
   min-height: 240px;
 }
 
-.assistant-floating-card {
+.assistant-slot-floating {
   flex: 1;
   display: flex;
   flex-direction: column;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-}
-
-.assistant-floating-card :deep(.el-card__body) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding: 8px;
   min-height: 0;
 }
 
@@ -4406,7 +4416,7 @@ onBeforeUnmount(() => {
   min-height: 148px;
 }
 
-.assistant-floating-card .assistant-slot {
+.assistant-slot-floating .assistant-slot {
   flex: 1;
   min-height: 0;
 }
