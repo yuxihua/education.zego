@@ -6,35 +6,32 @@
         <el-tag type="success" effect="dark" v-if="isLiving && !canPublishLive">● 听课中</el-tag>
         <el-tag type="danger" effect="dark" v-else-if="isLiving">● 直播中</el-tag>
         <el-tag type="info" v-else>未开始</el-tag>
-        <el-tag v-if="canPublishLive && isLiving" :type="isScreenSharing ? 'success' : 'info'" effect="dark">
-          {{ isScreenSharing ? '屏幕共享中' : '未共享屏幕' }}
-        </el-tag>
         <span class="room-title">{{ roomInfo.title }}</span>
         <span class="online-count">
           <el-icon><User /></el-icon> 在线 {{ onlineCount }} 人
         </span>
       </div>
       <div class="actions">
-        <el-button size="large" @click="toggleLayoutMode">
+        <el-button size="small" @click="toggleLayoutMode">
           {{ layoutFreeMode ? '锁定布局' : '自由布局' }}
         </el-button>
-        <el-button size="large" @click="resetLayout">
+        <el-button size="small" @click="resetLayout">
           重置布局
         </el-button>
-        <el-button size="large" @click="showVideoPanel = !showVideoPanel">
+        <el-button size="small" @click="showVideoPanel = !showVideoPanel">
           {{ showVideoPanel ? '隐藏摄像头' : '显示摄像头' }}
         </el-button>
-        <el-button size="large" @click="showInteractionPanel = !showInteractionPanel">
+        <el-button size="small" @click="showInteractionPanel = !showInteractionPanel">
           {{ showInteractionPanel ? '隐藏交流窗' : '显示交流窗' }}
         </el-button>
         <el-select
           v-if="canPublishLive"
           v-model="activeCameraDeviceId"
           placeholder="主摄像头"
-          size="large"
+          size="small"
           filterable
           clearable
-          style="width: 220px"
+          style="width: 158px"
           @change="handleMainCameraChange"
         >
           <el-option
@@ -48,10 +45,10 @@
           v-if="canPublishLive || isAssistantAudienceUser()"
           v-model="activeMicrophoneDeviceId"
           placeholder="麦克风"
-          size="large"
+          size="small"
           filterable
           clearable
-          style="width: 220px"
+          style="width: 150px"
         >
           <el-option
             v-for="device in microphoneDevices"
@@ -64,10 +61,10 @@
           v-if="supportsOutputDeviceSelection"
           v-model="activeSpeakerDeviceId"
           placeholder="扬声器"
-          size="large"
+          size="small"
           filterable
           clearable
-          style="width: 220px"
+          style="width: 150px"
         >
           <el-option
             v-for="device in speakerDevices"
@@ -77,36 +74,36 @@
           />
         </el-select>
         <div v-if="canPublishLive || isAssistantAudienceUser()" class="audio-gain-control">
-          <span class="audio-gain-label">麦克风 {{ micGainPercent }}%</span>
+          <span class="audio-gain-label">音量 {{ micGainPercent }}%</span>
           <el-slider
             v-model="micGainPercent"
             :min="0"
             :max="200"
             :step="5"
             :show-tooltip="false"
-            style="width: 140px"
+            style="width: 88px"
           />
           <div class="audio-level-meter" :class="{ muted: !isCurrentMicEnabled }">
-            <div class="audio-level-meter-fill" :style="{ width: `${micLevelPercent}%` }"></div>
+            <div class="audio-level-meter-fill" :style="{ height: `${isCurrentMicEnabled ? micLevelPercent : 0}%` }"></div>
           </div>
         </div>
         <el-button
           v-if="canPublishLive || isAssistantAudienceUser()"
           :type="isMicTestActive ? 'success' : 'info'"
-          size="large"
+          size="small"
           @click="toggleMicTest"
         >
           {{ isMicTestActive ? '停止试音' : '麦克风试音' }}
         </el-button>
-        <el-button v-if="canPublishLive" size="large" @click="addCameraPreview">
+        <el-button v-if="canPublishLive" size="small" @click="addCameraPreview">
           添加摄像头
         </el-button>
-        <el-button v-if="canPublishLive" size="large" @click="refreshCameraDevices">
+        <el-button v-if="canPublishLive" size="small" @click="refreshCameraDevices">
           刷新设备
         </el-button>
         <el-button 
           :type="isLiving ? 'danger' : 'primary'" 
-          size="large"
+          size="small"
           @click="isLiving ? handleEndLive() : handleStartLive()"
         >
           {{ canPublishLive ? (isLiving ? '结束直播' : '开始直播') : (isLiving ? '退出听课' : '进入听课') }}
@@ -140,7 +137,9 @@
                 <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
                   <el-icon><Microphone /></el-icon>
                 </el-button>
-                <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">{{ isMicOn ? micLevelPercent : 0 }}%</span>
+                <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">
+                  <span class="mic-level-chip-fill" :style="{ height: `${isMicOn ? micLevelPercent : 0}%` }"></span>
+                </span>
               </div>
               <el-tooltip
                 :content="getScreenShareTooltip()"
@@ -291,7 +290,9 @@
                   <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
                     <el-icon><Microphone /></el-icon>
                   </el-button>
-                  <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">{{ isMicOn ? micLevelPercent : 0 }}%</span>
+                  <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">
+                    <span class="mic-level-chip-fill" :style="{ height: `${isMicOn ? micLevelPercent : 0}%` }"></span>
+                  </span>
                 </div>
                 <el-tooltip
                   :content="getScreenShareTooltip()"
@@ -372,7 +373,9 @@
                         >
                           <el-icon><Microphone /></el-icon>
                         </el-button>
-                        <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">{{ assistantMicEnabled ? micLevelPercent : 0 }}%</span>
+                        <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">
+                          <span class="mic-level-chip-fill" :style="{ height: `${assistantMicEnabled ? micLevelPercent : 0}%` }"></span>
+                        </span>
                       </div>
                       <el-button circle size="small" type="info" @click="switchAssistantCamera">
                         <el-icon><Switch /></el-icon>
@@ -3405,19 +3408,24 @@ onBeforeUnmount(() => {
 }
 
 .top-bar {
-  height: 56px;
+  height: 52px;
   background: #16213e;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--space-3);
+  gap: 10px;
+  padding: 0 10px;
   border-bottom: 1px solid #0f3460;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .room-info {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .room-title {
@@ -3425,6 +3433,10 @@ onBeforeUnmount(() => {
   line-height: var(--line-height-tight);
   font-weight: 600;
   letter-spacing: 0.01em;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .online-count {
@@ -3439,16 +3451,21 @@ onBeforeUnmount(() => {
 .actions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
 }
 
 .actions :deep(.el-button) {
-  height: var(--action-height);
+  height: 30px;
   border-radius: var(--action-radius);
-  padding: 0 12px;
-  font-size: 13px;
+  padding: 0 8px;
+  font-size: 12px;
   transition: transform var(--ui-motion-duration) var(--ui-motion-easing), filter var(--ui-motion-duration) var(--ui-motion-easing), box-shadow var(--ui-motion-duration) var(--ui-motion-easing);
 }
 
@@ -3465,23 +3482,23 @@ onBeforeUnmount(() => {
 }
 
 .actions :deep(.el-select .el-select__wrapper) {
-  min-height: var(--action-height);
+  min-height: 30px;
   border-radius: var(--action-radius);
 }
 
 .audio-gain-control {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: var(--action-height);
-  padding: 0 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
   border-radius: var(--action-radius);
   background: rgba(255, 255, 255, 0.06);
 }
 
 .audio-gain-label {
   color: #dbe5ff;
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -3496,8 +3513,8 @@ onBeforeUnmount(() => {
 
 .audio-level-meter {
   position: relative;
-  width: 56px;
-  height: 8px;
+  width: 8px;
+  height: 24px;
   border-radius: 999px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.14);
@@ -3505,14 +3522,18 @@ onBeforeUnmount(() => {
 }
 
 .audio-level-meter-fill {
-  height: 100%;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, #22c55e 0%, #f59e0b 72%, #ef4444 100%);
-  transition: width 80ms linear;
+  background: linear-gradient(180deg, #ef4444 0%, #f59e0b 45%, #22c55e 100%);
+  transition: height 80ms linear;
 }
 
 .audio-level-meter.muted .audio-level-meter-fill {
-  width: 0 !important;
+  height: 0 !important;
 }
 
 .audio-gain-control + :deep(.el-button) {
@@ -4205,39 +4226,45 @@ onBeforeUnmount(() => {
 
 .mic-level-chip {
   position: absolute;
-  right: -10px;
-  bottom: -6px;
-  min-width: 34px;
-  height: 14px;
-  padding: 0 4px;
+  right: -4px;
+  bottom: -2px;
+  width: 8px;
+  height: 24px;
   border-radius: 999px;
-  font-size: 10px;
-  line-height: 14px;
-  text-align: center;
-  color: #f8fafc;
-  background: rgba(15, 23, 42, 0.82);
+  background: rgba(15, 23, 42, 0.72);
   box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.24);
   pointer-events: none;
+  overflow: hidden;
+}
+
+.mic-level-chip-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  border-radius: inherit;
+  transition: height 80ms linear;
 }
 
 .mic-level-chip.is-muted {
-  background: rgba(100, 116, 139, 0.78);
-  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.22);
+  background: rgba(71, 85, 105, 0.72);
 }
 
-.mic-level-chip.is-low {
-  background: rgba(34, 197, 94, 0.84);
-  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+.mic-level-chip.is-muted .mic-level-chip-fill {
+  background: rgba(148, 163, 184, 0.66);
 }
 
-.mic-level-chip.is-mid {
-  background: rgba(245, 158, 11, 0.86);
-  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.28);
+.mic-level-chip.is-low .mic-level-chip-fill {
+  background: rgba(34, 197, 94, 0.9);
 }
 
-.mic-level-chip.is-high {
-  background: rgba(239, 68, 68, 0.88);
-  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.32);
+.mic-level-chip.is-mid .mic-level-chip-fill {
+  background: rgba(245, 158, 11, 0.92);
+}
+
+.mic-level-chip.is-high .mic-level-chip-fill {
+  background: rgba(239, 68, 68, 0.94);
 }
 
 .cohost-toolbar :deep(.el-button) {
@@ -4318,8 +4345,8 @@ onBeforeUnmount(() => {
   }
 
   .audio-gain-control {
-    width: 100%;
-    justify-content: space-between;
+    width: auto;
+    justify-content: flex-start;
   }
 }
 
@@ -4333,22 +4360,22 @@ onBeforeUnmount(() => {
   }
 
   .top-bar {
-    height: auto;
-    min-height: 56px;
-    padding: var(--space-1) var(--space-2);
-    flex-wrap: wrap;
-    gap: 8px;
-    align-content: center;
+    height: 52px;
+    min-height: 52px;
+    padding: 0 8px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    align-content: stretch;
   }
 
   .room-info {
-    gap: var(--space-2);
+    gap: 8px;
   }
 
   .actions {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 6px;
+    width: auto;
+    justify-content: flex-end;
+    gap: 5px;
   }
 
   .actions :deep(.el-button) {
@@ -4362,8 +4389,8 @@ onBeforeUnmount(() => {
   }
 
   .audio-gain-control {
-    width: 100%;
-    justify-content: space-between;
+    width: auto;
+    justify-content: flex-start;
   }
 }
 
