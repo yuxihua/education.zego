@@ -136,9 +136,12 @@
               <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
                 <el-icon><VideoCamera /></el-icon>
               </el-button>
-              <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
-                <el-icon><Microphone /></el-icon>
-              </el-button>
+              <div class="mic-button-wrap">
+                <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
+                  <el-icon><Microphone /></el-icon>
+                </el-button>
+                <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">{{ isMicOn ? micLevelPercent : 0 }}%</span>
+              </div>
               <el-tooltip
                 :content="getScreenShareTooltip()"
                 :disabled="isScreenShareTooltipDisabled()"
@@ -284,9 +287,12 @@
                 <el-button :type="isCameraOn ? 'primary' : 'info'" circle size="small" @click="toggleCamera">
                   <el-icon><VideoCamera /></el-icon>
                 </el-button>
-                <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
-                  <el-icon><Microphone /></el-icon>
-                </el-button>
+                <div class="mic-button-wrap">
+                  <el-button :type="isMicOn ? 'primary' : 'info'" circle size="small" @click="toggleMic">
+                    <el-icon><Microphone /></el-icon>
+                  </el-button>
+                  <span class="mic-level-chip" :class="getMicLevelChipClass(isMicOn)">{{ isMicOn ? micLevelPercent : 0 }}%</span>
+                </div>
                 <el-tooltip
                   :content="getScreenShareTooltip()"
                   :disabled="isScreenShareTooltipDisabled()"
@@ -357,13 +363,19 @@
                     <div class="cohost-video-host"></div>
                     <span class="cohost-badge">我的摄像头</span>
                     <div class="cohost-toolbar">
-                      <el-button
-                        circle
-                        size="small"
-                        :type="assistantMicEnabled ? 'primary' : 'info'"
-                        @click="toggleAssistantSelfMic"
-                      >
-                        <el-icon><Microphone /></el-icon>
+                      <div class="mic-button-wrap">
+                        <el-button
+                          circle
+                          size="small"
+                          :type="assistantMicEnabled ? 'primary' : 'info'"
+                          @click="toggleAssistantSelfMic"
+                        >
+                          <el-icon><Microphone /></el-icon>
+                        </el-button>
+                        <span class="mic-level-chip" :class="getMicLevelChipClass(assistantMicEnabled)">{{ assistantMicEnabled ? micLevelPercent : 0 }}%</span>
+                      </div>
+                      <el-button circle size="small" type="info" @click="switchAssistantCamera">
+                        <el-icon><Switch /></el-icon>
                       </el-button>
                     </div>
                   </div>
@@ -510,6 +522,13 @@ const assistantStatusLine = computed(() => {
   return '状态：正在启动助教摄像头'
 })
 const isCurrentMicEnabled = computed(() => (canPublishLive.value ? isMicOn.value : assistantMicEnabled.value))
+const getMicLevelChipClass = (enabled) => {
+  if (!enabled) return 'is-muted'
+  const value = Number(micLevelPercent.value) || 0
+  if (value >= 75) return 'is-high'
+  if (value >= 35) return 'is-mid'
+  return 'is-low'
+}
 
 // 连麦
 const handUpList = ref([])
@@ -1513,7 +1532,8 @@ const startAssistantPublishing = async (authInfo) => {
   try {
     // Prefer ZEGO camera stream, but gracefully fallback to native stream
     // so assistant preview/publish still works on browsers with createStream quirks.
-    const { stream, provider } = await createCameraStream('', true, true, {
+    const selectedCameraDeviceId = activeCameraDeviceId.value || cameraDevices.value[0]?.deviceId || ''
+    const { stream, provider } = await createCameraStream(selectedCameraDeviceId, true, true, {
       microphoneDeviceId: activeMicrophoneDeviceId.value,
       micEnabled: assistantMicEnabled.value
     })
@@ -1619,6 +1639,64 @@ const trySwitchMainCameraInPlace = async (deviceId) => {
   } catch (err) {
     console.warn('[LivePush] useVideoDevice failed, fallback to recreate stream:', err)
     return false
+  }
+}
+
+const trySwitchAssistantCameraInPlace = async (deviceId) => {
+  if (!zg.value?.useVideoDevice) return false
+  if (!assistantPublishStream.value || assistantPublishStreamProvider.value !== 'zego') return false
+  try {
+    await zg.value.useVideoDevice(assistantPublishStream.value, deviceId)
+    applyAssistantMicState(assistantMicEnabled.value)
+    await renderAssistantSelfPreview()
+    return true
+  } catch (err) {
+    console.warn('[LivePush] switch assistant camera in place failed, fallback to recreate stream:', err)
+    return false
+  }
+}
+
+const setAssistantCamera = async (deviceId) => {
+  if (!deviceId) {
+    throw new Error('未指定摄像头设备')
+  }
+  if (canPublishLive.value || !isAssistantAudienceUser()) {
+    return
+  }
+
+  const previousDeviceId = activeCameraDeviceId.value
+  activeCameraDeviceId.value = deviceId
+  try {
+    const switched = await trySwitchAssistantCameraInPlace(deviceId)
+    if (switched) {
+      return
+    }
+
+    const { stream, provider } = await createCameraStream(deviceId, true, true, {
+      microphoneDeviceId: activeMicrophoneDeviceId.value,
+      micEnabled: assistantMicEnabled.value
+    })
+
+    const previousStream = assistantPublishStream.value
+    const previousProvider = assistantPublishStreamProvider.value
+    assistantPublishStream.value = stream
+    assistantPublishStreamProvider.value = provider
+    applyAssistantMicState(assistantMicEnabled.value)
+
+    if (isLiving.value && assistantPublishStreamID.value) {
+      try {
+        zg.value?.stopPublishingStream?.(assistantPublishStreamID.value)
+      } catch (e) {}
+      await zg.value.startPublishingStream(assistantPublishStreamID.value, stream)
+    }
+
+    if (previousStream) {
+      releaseMediaStream(previousStream, previousProvider)
+    }
+    await renderAssistantSelfPreview()
+  } catch (err) {
+    activeCameraDeviceId.value = previousDeviceId
+    throw err
   }
 }
 
@@ -3032,6 +3110,23 @@ const switchCamera = async () => {
   }
 }
 
+const switchAssistantCamera = async () => {
+  if (canPublishLive.value || !isAssistantAudienceUser()) return
+  await refreshCameraDevices()
+  if (cameraDevices.value.length <= 1) {
+    ElMessage.info('当前仅检测到一个摄像头')
+    return
+  }
+  const currentIndex = cameraDevices.value.findIndex((item) => item.deviceId === activeCameraDeviceId.value)
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % cameraDevices.value.length
+  try {
+    await setAssistantCamera(cameraDevices.value[nextIndex].deviceId)
+    ElMessage.success('已切换助教摄像头')
+  } catch (err) {
+    ElMessage.error('切换助教摄像头失败：' + parseErrorMessage(err))
+  }
+}
+
 // ==================== 连麦管理 ====================
 const acceptCoHost = async (student) => {
   await approveCohostApi(roomId, { userId: student.userID })
@@ -4101,6 +4196,48 @@ onBeforeUnmount(() => {
   background: var(--toolbar-surface);
   backdrop-filter: blur(8px);
   z-index: 2;
+}
+
+.mic-button-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.mic-level-chip {
+  position: absolute;
+  right: -10px;
+  bottom: -6px;
+  min-width: 34px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.24);
+  pointer-events: none;
+}
+
+.mic-level-chip.is-muted {
+  background: rgba(100, 116, 139, 0.78);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.22);
+}
+
+.mic-level-chip.is-low {
+  background: rgba(34, 197, 94, 0.84);
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+}
+
+.mic-level-chip.is-mid {
+  background: rgba(245, 158, 11, 0.86);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.28);
+}
+
+.mic-level-chip.is-high {
+  background: rgba(239, 68, 68, 0.88);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.32);
 }
 
 .cohost-toolbar :deep(.el-button) {
