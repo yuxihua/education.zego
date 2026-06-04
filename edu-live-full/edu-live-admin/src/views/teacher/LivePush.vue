@@ -276,9 +276,16 @@
         </el-card>
 
         <!-- 连中学生视频 -->
-        <el-card class="panel-card" v-if="coHostStreams.length > 0">
+        <el-card class="panel-card" v-if="coHostStreams.length > 0 || showAssistantSelfPreview">
           <template #header><span>连麦学生</span></template>
           <div class="cohost-grid">
+            <div v-if="showAssistantSelfPreview" class="cohost-item self">
+              <div id="assistant-self-preview" class="cohost-video"></div>
+              <span class="cohost-name">我的摄像头</span>
+              <span class="cohost-mic-state" :class="{ on: assistantMicEnabled }">
+                {{ assistantMicEnabled ? '助教麦克风开启' : '助教麦克风关闭' }}
+              </span>
+            </div>
             <div v-for="stream in coHostStreams" :key="stream.streamID" class="cohost-item">
               <div :id="'cohost-' + stream.streamID" class="cohost-video"></div>
               <span class="cohost-name">{{ stream.userName }}</span>
@@ -384,6 +391,9 @@ const stageStatusText = ref('')
 const hasStageScreenContent = computed(() => {
   if (canPublishLive.value) return isScreenSharing.value
   return Boolean(audienceStageStreamID.value)
+})
+const showAssistantSelfPreview = computed(() => {
+  return !canPublishLive.value && isAssistantAudienceUser() && Boolean(assistantPublishStream.value)
 })
 
 // 连麦
@@ -572,6 +582,13 @@ const renderCohostStream = async (container, stream, muted = true) => {
   try {
     await videoEl.play()
   } catch (e) {}
+}
+
+const renderAssistantSelfPreview = async () => {
+  if (!showAssistantSelfPreview.value || !assistantPublishStream.value) return
+  await nextTick()
+  const container = document.getElementById('assistant-self-preview')
+  await renderCohostStream(container, assistantPublishStream.value, true)
 }
 
 const applyMainStreamTrackState = (stream) => {
@@ -968,7 +985,10 @@ const applyAssistantMicState = (enabled) => {
 
 const startAssistantPublishing = async (authInfo) => {
   if (canPublishLive.value || !isAssistantAudienceUser() || !zg.value || !isLiving.value) return false
-  if (assistantPublishStream.value && assistantPublishStreamID.value) return true
+  if (assistantPublishStream.value && assistantPublishStreamID.value) {
+    await renderAssistantSelfPreview()
+    return true
+  }
 
   const nextStreamID = buildAssistantStreamID(authInfo?.userId || currentRoomLoginUserID.value)
   try {
@@ -978,6 +998,7 @@ const startAssistantPublishing = async (authInfo) => {
     assistantPublishStreamID.value = nextStreamID
     applyAssistantMicState(true)
     await zg.value.startPublishingStream(nextStreamID, stream)
+    await renderAssistantSelfPreview()
     return true
   } catch (err) {
     console.warn('[LivePush] startAssistantPublishing failed:', err)
@@ -1614,6 +1635,11 @@ watch([localVideoRef, stageScreenHostRef], async () => {
   await restoreAudiencePlaybackViews()
 })
 
+watch([showAssistantSelfPreview, showInteractionPanel], async () => {
+  if (!showAssistantSelfPreview.value) return
+  await renderAssistantSelfPreview()
+})
+
 watch(() => cameraPreviewTiles.value.length, async () => {
   await nextTick()
   clampStagePanelHeight()
@@ -1797,9 +1823,30 @@ const initZego = async () => {
           }
         } else if (data.type === 'assistant_mic_control' && !canPublishLive.value && isAssistantAudienceUser()) {
           const targetUserID = String(data.targetUserID || '').trim()
+          const targetStreamID = String(data.targetStreamID || '').trim()
           const currentUserID = String(liveIdentity.value?.userId || currentRoomLoginUserID.value || '').trim()
-          if (targetUserID && currentUserID && targetUserID === currentUserID) {
+          const currentStreamID = String(assistantPublishStreamID.value || '').trim()
+          const matchedByStreamID = targetStreamID && currentStreamID && targetStreamID === currentStreamID
+          const matchedByUserID = targetUserID && currentUserID && targetUserID === currentUserID
+          if (matchedByStreamID || matchedByUserID) {
             applyAssistantMicState(data.enabled !== false)
+            if (zg.value && zegoRoomID.value) {
+              try {
+                zg.value.sendBroadcastMessage(
+                  zegoRoomID.value,
+                  JSON.stringify({ type: 'assistant_mic_state', streamID: currentStreamID || targetStreamID, enabled: assistantMicEnabled.value })
+                )
+              } catch (e) {}
+            }
+          }
+        } else if (data.type === 'assistant_mic_state' && canPublishLive.value && data.streamID) {
+          const targetStreamID = String(data.streamID)
+          const index = coHostStreams.value.findIndex((item) => item.streamID === targetStreamID)
+          if (index !== -1) {
+            coHostStreams.value[index] = {
+              ...coHostStreams.value[index],
+              micEnabled: data.enabled !== false
+            }
           }
         }
       } catch (e) {}
@@ -2428,16 +2475,17 @@ const rejectCoHost = async (student) => {
 
 const toggleAssistantMic = async (stream) => {
   if (!canPublishLive.value || !stream?.isAssistant || !zg.value || !zegoRoomID.value) return
-  const targetUserID = String(stream.userID || '').trim()
-  if (!targetUserID) {
-    ElMessage.warning('未获取到助教身份，暂时无法控制麦克风')
-    return
-  }
-
   const nextEnabled = !stream.micEnabled
+  const targetUserID = String(stream.userID || '').trim()
+  const targetStreamID = String(stream.streamID || '').trim()
   await zg.value.sendBroadcastMessage(
     zegoRoomID.value,
-    JSON.stringify({ type: 'assistant_mic_control', targetUserID, enabled: nextEnabled })
+    JSON.stringify({
+      type: 'assistant_mic_control',
+      targetUserID: targetUserID || undefined,
+      targetStreamID,
+      enabled: nextEnabled
+    })
   )
 
   const index = coHostStreams.value.findIndex((item) => item.streamID === stream.streamID)
