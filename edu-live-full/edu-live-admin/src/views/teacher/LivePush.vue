@@ -278,6 +278,7 @@
               <template v-if="canPublishLive">
                 <div v-if="assistantCohostStream" class="cohost-item self assistant-item">
                   <div :id="'cohost-' + assistantCohostStream.streamID" class="cohost-video assistant-video">
+                    <div class="cohost-video-host"></div>
                     <span class="cohost-badge">{{ assistantCohostStream.userName || '助教' }}</span>
                     <div class="cohost-toolbar">
                       <el-button
@@ -299,6 +300,7 @@
               <template v-else>
                 <div v-if="isAssistantAudienceUser() && showAssistantSelfPreview" class="cohost-item self assistant-item">
                   <div id="assistant-self-preview" class="cohost-video assistant-video">
+                    <div class="cohost-video-host"></div>
                     <span class="cohost-badge">我的摄像头</span>
                     <div class="cohost-toolbar">
                       <el-button
@@ -324,6 +326,7 @@
             <div class="cohost-grid">
               <div v-for="stream in studentCoHostStreams" :key="stream.streamID" class="cohost-item">
                 <div :id="'cohost-' + stream.streamID" class="cohost-video">
+                  <div class="cohost-video-host"></div>
                   <span class="cohost-badge">{{ stream.userName }}</span>
                 </div>
                 <el-button link type="danger" size="small" @click="kickCoHost(stream)">挂断</el-button>
@@ -629,7 +632,8 @@ const renderRemoteStream = async (container, stream) => {
 
 const renderCohostStream = async (container, stream, muted = true) => {
   if (!container || !stream) return
-  container.innerHTML = ''
+  const host = container.querySelector?.('.cohost-video-host') || container
+  host.innerHTML = ''
   const videoEl = document.createElement('video')
   videoEl.autoplay = true
   videoEl.muted = !!muted
@@ -638,7 +642,7 @@ const renderCohostStream = async (container, stream, muted = true) => {
   videoEl.style.width = '100%'
   videoEl.style.height = '100%'
   videoEl.style.objectFit = 'cover'
-  container.appendChild(videoEl)
+  host.appendChild(videoEl)
   try {
     await videoEl.play()
   } catch (e) {}
@@ -3482,6 +3486,20 @@ onBeforeUnmount(() => {
   height: 146px;
   background: #000;
   position: relative;
+
+  .cohost-video-host {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .cohost-video-host :deep(video),
+  .cohost-video-host video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
   
   :deep(video) {
     width: 100%;
