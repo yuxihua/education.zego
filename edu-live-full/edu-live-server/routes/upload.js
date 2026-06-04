@@ -156,11 +156,20 @@ router.post('/ppt/:roomId', auth, upload.single('file'), asyncHandler(async (req
   const filePath = req.file.path;
 
   let fileUrl = `/uploads/ppt/${req.file.filename}`;
+  let storageType = 'local';
+  let ossWarning = '';
 
   // 如果配置了 OSS，上传到 OSS
   if (process.env.OSS_ACCESS_KEY_ID) {
-    await ossClient.put(ossKey, filePath);
-    fileUrl = `https://${process.env.OSS_BUCKET}.${process.env.OSS_REGION}.aliyuncs.com/${ossKey}`;
+    try {
+      await ossClient.put(ossKey, filePath);
+      fileUrl = `https://${process.env.OSS_BUCKET}.${process.env.OSS_REGION}.aliyuncs.com/${ossKey}`;
+      storageType = 'oss';
+    } catch (err) {
+      // OSS 不可用时回退本地存储，避免影响课件上传主流程。
+      ossWarning = err?.message || 'OSS上传失败，已回退本地存储';
+      console.warn('[PPT上传] OSS失败，已回退本地:', ossWarning);
+    }
   }
 
   // 保存到数据库
@@ -173,7 +182,15 @@ router.post('/ppt/:roomId', auth, upload.single('file'), asyncHandler(async (req
     status: 'ready'
   });
 
-  success(res, ppt, 'PPT上传成功');
+  const payload = {
+    ...ppt.toJSON(),
+    storageType
+  };
+  if (ossWarning) {
+    payload.warning = ossWarning;
+  }
+
+  success(res, payload, storageType === 'oss' ? 'PPT上传成功' : 'PPT上传成功（已回退本地存储）');
 }));
 
 module.exports = router;
