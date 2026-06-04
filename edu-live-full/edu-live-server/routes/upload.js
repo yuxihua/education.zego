@@ -16,10 +16,17 @@ const { auth } = require('../middleware/auth');
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 const MAX_FILE_SIZE = parseInt(process.env.UPLOAD_MAX_SIZE) || 100 * 1024 * 1024; // 100MB
 
+const resolveUploadType = (req) => {
+  if (req.params?.type) return String(req.params.type);
+  if (req.params?.roomId) return 'ppt';
+  return 'image';
+};
+
 // Multer 存储配置
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(UPLOAD_DIR, req.params.type || 'images');
+    const type = resolveUploadType(req);
+    const uploadPath = path.join(UPLOAD_DIR, type);
     try {
       fs.mkdirSync(uploadPath, { recursive: true });
       cb(null, uploadPath);
@@ -43,7 +50,7 @@ const fileFilter = (req, file, cb) => {
     'document': /pdf|doc|docx|xls|xlsx/
   };
 
-  const type = req.params.type || 'image';
+  const type = resolveUploadType(req);
   const mimeType = allowedTypes[type];
 
   if (!mimeType) {
