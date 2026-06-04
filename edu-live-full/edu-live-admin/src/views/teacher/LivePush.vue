@@ -2761,7 +2761,9 @@ const initZego = async () => {
           const matchedByStreamID = targetStreamID && currentStreamID && targetStreamID === currentStreamID
           const matchedByUserID = targetUserID && currentUserID && targetUserID === currentUserID
           if (matchedByStreamID || matchedByUserID) {
-            await switchAssistantCamera()
+            switchAssistantCamera().catch((err) => {
+              console.warn('[LivePush] assistant camera control failed:', err)
+            })
           }
         } else if (data.type === 'assistant_mic_state' && canPublishLive.value && data.streamID) {
           const targetStreamID = String(data.streamID)
