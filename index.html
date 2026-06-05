@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zego Education – Online Classroom</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="hero">
+    <header class="header">
+      <div class="logo">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="#1F6FEB"/>
+          <path d="M8 10h10v4H8zM14 16h10v4H14zM8 22h10v4H8z" fill="#fff"/>
+        </svg>
+        <span>Zego Education</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <h1 class="card__title">Online Classroom</h1>
+        <p class="card__subtitle">Start or join a live class in seconds</p>
+
+        <form id="joinForm" class="form" novalidate>
+          <div class="form__group">
+            <label class="form__label" for="roomId">Class Room ID</label>
+            <input
+              class="form__input"
+              id="roomId"
+              type="text"
+              placeholder="e.g. math-101"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="form__group">
+            <label class="form__label" for="userName">Your Name</label>
+            <input
+              class="form__input"
+              id="userName"
+              type="text"
+              placeholder="e.g. Alice"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="form__group">
+            <label class="form__label">Join as</label>
+            <div class="role-group">
+              <label class="role-option">
+                <input type="radio" name="role" value="Teacher" checked />
+                <span class="role-option__box">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <circle cx="10" cy="6" r="4" fill="#1F6FEB"/>
+                    <path d="M2 18c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="#1F6FEB" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Teacher
+                </span>
+              </label>
+              <label class="role-option">
+                <input type="radio" name="role" value="Student" />
+                <span class="role-option__box">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <circle cx="10" cy="6" r="4" fill="#6c757d"/>
+                    <path d="M2 18c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="#6c757d" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Student
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <p id="formError" class="form__error" hidden></p>
+
+          <button class="btn btn--primary" type="submit">Enter Classroom</button>
+        </form>
+      </section>
+
+      <section class="features">
+        <div class="feature">
+          <span class="feature__icon">📹</span>
+          <h3>HD Video</h3>
+          <p>Crystal-clear video powered by Zego real-time engine</p>
+        </div>
+        <div class="feature">
+          <span class="feature__icon">🖥️</span>
+          <h3>Screen Sharing</h3>
+          <p>Share your screen or slides with all participants</p>
+        </div>
+        <div class="feature">
+          <span class="feature__icon">💬</span>
+          <h3>Live Chat</h3>
+          <p>Interact with students via real-time text chat</p>
+        </div>
+        <div class="feature">
+          <span class="feature__icon">🎙️</span>
+          <h3>Interactive Audio</h3>
+          <p>Students can raise their hand and speak</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Powered by <a href="https://www.zegocloud.com" target="_blank" rel="noopener noreferrer">ZEGOCLOUD</a></p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
