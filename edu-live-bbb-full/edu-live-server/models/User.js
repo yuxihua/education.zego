@@ -99,6 +99,9 @@ const User = sequelize.define('User', {
 }, {
   tableName: 'users',
   timestamps: true,
+  indexes: [
+    { fields: ['institution_id'] }
+  ],
   hooks: {
     // 创建前加密密码
     beforeCreate: async (user) => {
