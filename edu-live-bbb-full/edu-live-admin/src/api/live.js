@@ -64,11 +64,20 @@ export const getLiveRoomDetail = async (id) => {
 	}
 }
 
-export const getZegoReplayByRoom = async (zegoRoomId) => {
-	if (!zegoRoomId) return null
-	const res = await request.get(`/zego/replay/${encodeURIComponent(zegoRoomId)}`)
+export const getBbbReplayByRoom = async (meetingID) => {
+	if (!meetingID) return null
+	const res = await request.get(`/bbb/replay/${encodeURIComponent(meetingID)}`)
 	return buildReplayInfo(res)
 }
+
+export const getBbbReplayByLiveRoom = async (roomId) => {
+	if (!roomId) return null
+	const res = await request.get(`/bbb/replay-room/${encodeURIComponent(roomId)}`)
+	return buildReplayInfo(res)
+}
+
+// 兼容旧调用，后续可全量替换为 getBbbReplayByLiveRoom
+export const getZegoReplayByRoom = getBbbReplayByLiveRoom
 
 export const getLiveStats = async (id) => {
 	const detail = await getLiveRoomDetail(id)

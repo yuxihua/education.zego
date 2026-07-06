@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { LiveRoom, PPTFile } = require('../models');
+const { LiveRoom, Course } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth } = require('../middleware/auth');
@@ -187,16 +187,29 @@ async function handleRoomClose(payload) {
  * @GET /api/zego/replay/:roomId
  * 获取回放信息
  */
-router.get('/replay/:roomId', asyncHandler(async (req, res) => {
+router.get('/replay/:roomId', auth, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   const room = await LiveRoom.findOne({
     where: { zegoRoomId: roomId },
-    attributes: ['id', 'zegoRoomId', 'title', 'replayUrl', 'replayDuration', 'replaySize', 'status']
+    attributes: ['id', 'courseId', 'zegoRoomId', 'title', 'replayUrl', 'replayDuration', 'replaySize', 'status'],
+    include: [{
+      model: Course,
+      as: 'course',
+      attributes: ['id', 'institutionId']
+    }]
   });
 
   if (!room) {
     return fail(res, '直播间不存在', 404, 404);
+  }
+
+  if (req.user.role !== 'superadmin') {
+    const roomInstitutionId = Number(room.course?.institutionId || 0);
+    const operatorInstitutionId = Number(req.user?.institutionId || 0);
+    if (!roomInstitutionId || roomInstitutionId !== operatorInstitutionId) {
+      return fail(res, '无权访问该直播回放', 403, 403);
+    }
   }
 
   if (!room.replayUrl) {

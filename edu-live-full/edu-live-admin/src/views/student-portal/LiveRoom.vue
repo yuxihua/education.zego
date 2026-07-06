@@ -34,6 +34,14 @@
                   :title="`该课程共有 ${roomInfo.courseLiveRoomCount} 个直播间，当前默认进入最新一场。`"
                 />
 
+                <el-alert
+                  v-if="roomInfo.replayFromRoomId && roomInfo.replayFromRoomId !== roomInfo.id"
+                  style="margin-bottom: 12px"
+                  type="success"
+                  :closable="false"
+                  :title="`当前直播间暂无回放，已为你切换到最近一场回放：${roomInfo.replayFromRoomTitle || ('#' + roomInfo.replayFromRoomId)}${formatReplaySourceTime(roomInfo.replayFromEndTime)}`"
+                />
+
                 <div v-if="showRealtimePlayer" class="video-wrapper realtime-wrapper">
                   <div ref="remoteVideoRef" class="realtime-player"></div>
                 </div>
@@ -119,6 +127,7 @@
                   <el-descriptions-item label="开播时间">{{ roomInfo.actualStartTime || '-' }}</el-descriptions-item>
                   <el-descriptions-item label="在线人数">{{ roomInfo.onlineCount || 0 }}</el-descriptions-item>
                   <el-descriptions-item label="累计观看">{{ roomInfo.totalViewCount || 0 }}</el-descriptions-item>
+                  <el-descriptions-item label="入会身份">{{ viewerIdentityLabel }}</el-descriptions-item>
                   <el-descriptions-item label="ZEGO房间号">{{ roomInfo.zegoRoomId || '-' }}</el-descriptions-item>
                 </el-descriptions>
               </el-card>
@@ -128,7 +137,10 @@
                 <div class="replay-block">
                   <div>回放状态：{{ roomInfo.replayUrl ? '已生成' : '未生成' }}</div>
                   <div v-if="roomInfo.replayDuration">回放时长：{{ roomInfo.replayDuration }} 秒</div>
-                  <div v-if="roomInfo.replaySize">回放大小：{{ roomInfo.replaySize }}</div>
+                  <div v-if="roomInfo.replaySize">回放大小：{{ formatFileSize(roomInfo.replaySize) }}</div>
+                  <div v-if="roomInfo.replayFromRoomId && roomInfo.replayFromRoomId !== roomInfo.id">
+                    回放来源：{{ roomInfo.replayFromRoomTitle || ('房间#' + roomInfo.replayFromRoomId) }}{{ formatReplaySourceTime(roomInfo.replayFromEndTime) }}
+                  </div>
                 </div>
                 <el-table :data="roomInfo.pptFiles || []" size="small" border style="margin-top: 12px">
                   <el-table-column prop="name" label="课件名称" min-width="120" />
@@ -204,6 +216,7 @@ const pendingCohostApproval = ref(false)
 const isCohosting = ref(false)
 const isMicOn = ref(true)
 const isCameraOn = ref(true)
+const viewerRole = ref('student')
 let chatPollTimer = null
 
 const renderLocalStream = async (container, stream) => {
@@ -247,15 +260,49 @@ const statusTagTypeMap = {
 
 const statusText = computed(() => statusTextMap[roomInfo.value?.status] || roomInfo.value?.status || '-')
 const statusTagType = computed(() => statusTagTypeMap[roomInfo.value?.status] || 'info')
-const realtimeEligible = computed(() => ['living', 'paused'].includes(roomInfo.value?.status) && !!roomInfo.value?.zegoRoomId)
+const realtimeEligible = computed(() => {
+  if (viewerRole.value === 'parent') return false
+  return ['living', 'paused'].includes(roomInfo.value?.status) && !!roomInfo.value?.zegoRoomId
+})
 const canRequestCohost = computed(() => realtimeEligible.value && !cohostRequested.value && !isCohosting.value)
 const showRealtimePlayer = computed(() => realtimeEligible.value && !!currentStreamId.value)
+const viewerIdentityLabel = computed(() => viewerRole.value === 'parent' ? '家长（CDN拉流）' : '学员')
 const primaryVideoUrl = computed(() => {
   if (showRealtimePlayer.value) return ''
   if (roomInfo.value?.hlsUrl) return roomInfo.value.hlsUrl
   if (roomInfo.value?.replayUrl) return roomInfo.value.replayUrl
   return ''
 })
+
+const decodeTokenPayload = (token) => {
+  try {
+    const segments = String(token || '').split('.')
+    if (segments.length < 2) return null
+    const base64 = segments[1].replace(/-/g, '+').replace(/_/g, '/')
+    const normalized = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const payload = JSON.parse(window.atob(normalized))
+    return payload && typeof payload === 'object' ? payload : null
+  } catch (err) {
+    return null
+  }
+}
+
+const resolveViewerRole = () => {
+  const token = localStorage.getItem(studentTokenKey)
+  const payload = decodeTokenPayload(token)
+  const role = String(payload?.role || 'student').trim().toLowerCase()
+  viewerRole.value = role === 'parent' ? 'parent' : 'student'
+}
+
+const getAudienceOnlineUserId = () => {
+  const token = localStorage.getItem(studentTokenKey)
+  const payload = decodeTokenPayload(token)
+  const sid = Number(payload?.studentId || payload?.id || 0)
+  if (viewerRole.value === 'parent') {
+    return sid ? `parent_${sid}` : `parent_guest_${Date.now()}`
+  }
+  return sid ? `student_${sid}` : `student_guest_${Date.now()}`
+}
 
 const getTeacherStreamMeta = (streamID) => {
   const roomNumericId = String(roomInfo.value?.id || '')
@@ -345,7 +392,7 @@ const reportOnlineState = async (action) => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer ' + token
       },
-      body: JSON.stringify({ userId: zegoAuthInfo.value?.userId || `student_${Date.now()}` })
+      body: JSON.stringify({ userId: zegoAuthInfo.value?.userId || getAudienceOnlineUserId() })
     })
   } catch (err) {}
 }
@@ -390,6 +437,31 @@ const formatTime = (value) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+}
+
+const formatReplaySourceTime = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const YYYY = date.getFullYear()
+  const MM = String(date.getMonth() + 1).padStart(2, '0')
+  const DD = String(date.getDate()).padStart(2, '0')
+  const HH = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  return `（${YYYY}-${MM}-${DD} ${HH}:${mm} 场次）`
+}
+
+const formatFileSize = (size) => {
+  const bytes = Number(size || 0)
+  if (!bytes) return '-'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[index]}`
 }
 
 const sendChat = async () => {
@@ -579,6 +651,9 @@ const connectRealtime = async () => {
     }
   } catch (err) {
     liveError.value = err.message || '连接实时直播失败'
+    if (roomInfo.value?.hlsUrl || roomInfo.value?.pullUrl || roomInfo.value?.replayUrl) {
+      liveNotice.value = '实时连线不可用，已切换为CDN拉流观看模式'
+    }
   }
 }
 
@@ -723,6 +798,7 @@ const cleanupRealtime = async () => {
 const loadRoom = async () => {
   loading.value = true
   try {
+    resolveViewerRole()
     roomInfo.value = await studentLiveRoomByCourse(route.params.courseId)
     liveNotice.value = ''
     liveError.value = ''
@@ -733,6 +809,9 @@ const loadRoom = async () => {
     } else {
       await cleanupRealtime()
       startChatPolling()
+      if (viewerRole.value === 'parent' && (roomInfo.value?.hlsUrl || roomInfo.value?.pullUrl || roomInfo.value?.replayUrl)) {
+        liveNotice.value = '当前以家长身份入会，已自动使用CDN拉流观看'
+      }
     }
   } catch (err) {
     roomInfo.value = null

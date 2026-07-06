@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+.vite/
+.cache/
+.next/
+.nuxt/
+
+# Environment files (keep templates)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime/generated assets
+uploads/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

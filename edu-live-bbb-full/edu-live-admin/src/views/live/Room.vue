@@ -16,7 +16,7 @@
             <el-descriptions-item label="讲师">{{ roomInfo?.teacherName }}</el-descriptions-item>
             <el-descriptions-item label="在线人数">{{ roomInfo?.onlineCount || 0 }}</el-descriptions-item>
             <el-descriptions-item label="开播时间">{{ roomInfo?.startTime }}</el-descriptions-item>
-            <el-descriptions-item label="ZEGO房间号">{{ roomInfo?.zegoRoomId }}</el-descriptions-item>
+            <el-descriptions-item label="会议ID">{{ roomInfo?.zegoRoomId }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
 
@@ -98,16 +98,20 @@
           </div>
           <div v-else-if="roomInfo?.zegoRoomId">
             <p>回放状态：<el-tag type="info">待生成</el-tag></p>
-            <p style="margin-top: 10px; color: #909399">可根据 ZEGO 房间号获取录播回放地址。</p>
-            <p style="margin-top: 10px; word-break: break-all">ZEGO查询地址：{{ replayQueryUrl }}</p>
-            <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayQueryUrl">复制查询地址</el-button>
+            <p style="margin-top: 10px; color: #909399">会议结束并完成转码后，可刷新获取 BBB 回放地址。</p>
+            <p v-if="replayPolling" style="margin-top: 10px; color: #909399">
+              自动检测中：第 {{ replayPollCount }} / {{ REPLAY_POLL_MAX }} 次
+            </p>
+            <p v-if="isReplayPollExhausted" style="margin-top: 10px; color: #e6a23c">
+              自动检测已结束，请稍后手动刷新回放状态。
+            </p>
             <el-button
               type="primary"
               style="margin-top: 15px; width: 100%"
               :loading="generatingReplay"
-              @click="handleGenerateReplayFromZego"
+              @click="handleRefreshReplay"
             >
-              根据 ZEGO 生成回放地址
+              刷新回放状态
             </el-button>
           </div>
           <el-empty v-else description="暂无回放" />
@@ -165,7 +169,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getZegoReplayByRoom } from '@/api/live'
+import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayByLiveRoom } from '@/api/live'
 
 const route = useRoute()
 const router = useRouter()
@@ -191,12 +195,8 @@ const uploadHeaders = computed(() => ({ Authorization: 'Bearer ' + userStore.tok
 const onlineBreakdownTotal = computed(() => (stats.value?.parentOnline || 0) + (stats.value?.studentOnline || 0) + (stats.value?.otherOnline || 0))
 const onlineStatsGap = computed(() => (stats.value?.currentOnline || 0) - onlineBreakdownTotal.value)
 const hasOnlineStatsMismatch = computed(() => stats.value && onlineStatsGap.value !== 0)
-const replayQueryUrl = computed(() => {
-  const zegoRoomId = roomInfo.value?.zegoRoomId
-  if (!zegoRoomId) return ''
-  return `${window.location.origin}/api/zego/replay/${encodeURIComponent(zegoRoomId)}`
-})
 const isReplayFallback = computed(() => Boolean(roomInfo.value?.replayFromRoomId && !roomInfo.value?.replayUrl))
+const isReplayPollExhausted = computed(() => !replayInfo.value?.url && !replayPolling.value && replayPollCount.value >= REPLAY_POLL_MAX)
 const originRoomId = computed(() => {
   const value = Number(route.query.fromRoomId || 0)
   return Number.isFinite(value) && value > 0 ? value : 0
@@ -393,20 +393,6 @@ const handleCopyReplayUrl = async () => {
   }
 }
 
-const handleCopyReplayQueryUrl = async () => {
-  const url = replayQueryUrl.value
-  if (!url) {
-    ElMessage.warning('暂无可复制的查询地址')
-    return
-  }
-  try {
-    await copyText(url)
-    ElMessage.success('查询地址已复制')
-  } catch (err) {
-    ElMessage.error('复制失败，请手动复制')
-  }
-}
-
 const clearReplayPollTimer = () => {
   replayPolling.value = false
   if (replayPollTimer) {
@@ -415,14 +401,13 @@ const clearReplayPollTimer = () => {
   }
 }
 
-const fetchReplayByZego = async (options = {}) => {
+const fetchReplayByRoom = async (options = {}) => {
   const { silent = false } = options
-  const zegoRoomId = roomInfo.value?.zegoRoomId
-  if (!zegoRoomId) return null
-  const replay = await getZegoReplayByRoom(zegoRoomId)
+  if (!roomId) return null
+  const replay = await getBbbReplayByLiveRoom(roomId)
   replayInfo.value = replay
   if (!silent && replay?.url) {
-    ElMessage.success('ZEGO 回放地址已生成')
+    ElMessage.success('BBB 回放地址已更新')
   }
   return replay
 }
@@ -442,7 +427,7 @@ const scheduleReplayPoll = () => {
     replayPollTimer = null
     replayPollCount.value += 1
     try {
-      const replay = await fetchReplayByZego({ silent: true })
+      const replay = await fetchReplayByRoom({ silent: true })
       if (replay?.url) {
         clearReplayPollTimer()
         return
@@ -452,15 +437,15 @@ const scheduleReplayPoll = () => {
   }, REPLAY_POLL_INTERVAL)
 }
 
-const handleGenerateReplayFromZego = async () => {
-  const zegoRoomId = roomInfo.value?.zegoRoomId
-  if (!zegoRoomId) {
-    ElMessage.warning('当前直播间缺少 ZEGO 房间号')
+const handleRefreshReplay = async () => {
+  if (!roomInfo.value?.zegoRoomId) {
+    ElMessage.warning('当前直播间缺少会议ID')
     return
   }
+  replayPollCount.value = 0
   generatingReplay.value = true
   try {
-    const replay = await fetchReplayByZego({ silent: false })
+    const replay = await fetchReplayByRoom({ silent: false })
     if (replay?.url) {
       clearReplayPollTimer()
     } else {
@@ -479,7 +464,7 @@ onMounted(async () => {
   replayInfo.value = roomInfo.value?.replayInfo || null
   if (!replayInfo.value && roomInfo.value?.zegoRoomId) {
     try {
-      replayInfo.value = await fetchReplayByZego({ silent: true })
+      replayInfo.value = await fetchReplayByRoom({ silent: true })
     } catch (err) {}
     scheduleReplayPoll()
   }

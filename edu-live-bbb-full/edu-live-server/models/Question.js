@@ -1,0 +1,67 @@
+/**
+ * 题库模型
+ */
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const Question = sequelize.define('Question', {
+  id: {
+    type: DataTypes.BIGINT.UNSIGNED,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  type: {
+    type: DataTypes.ENUM('single', 'multiple', 'judge', 'essay'),
+    allowNull: false,
+    defaultValue: 'single',
+    comment: '题型'
+  },
+  content: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+    comment: '题目内容'
+  },
+  options: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    comment: '选项JSON'
+  },
+  answer: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: '答案'
+  },
+  analysis: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: '解析'
+  },
+  difficulty: {
+    type: DataTypes.TINYINT.UNSIGNED,
+    defaultValue: 1,
+    comment: '难度：1-3'
+  },
+  categoryName: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    field: 'category_name',
+    comment: '分类名称'
+  },
+  institutionId: {
+    type: DataTypes.BIGINT.UNSIGNED,
+    defaultValue: 0,
+    field: 'institution_id',
+    comment: '所属机构ID'
+  }
+}, {
+  tableName: 'questions',
+  timestamps: true,
+  indexes: [
+    { fields: ['type'] },
+    { fields: ['category_name'] },
+    { fields: ['institution_id'] },
+    { fields: ['created_at'] }
+  ]
+});
+
+module.exports = Question;

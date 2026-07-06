@@ -12,6 +12,7 @@ const { auth, requireRole } = require('../middleware/auth');
 const { liveLimiter } = require('../middleware/ratelimit');
 const redis = require('../config/redis');
 const { writeOperationLog } = require('../utils/operationLogWriter');
+const { callBbb } = require('../utils/bbbApi');
 
 function getOperatorInstitutionId(req) {
   return req.user?.institutionId || 0;
@@ -508,6 +509,21 @@ router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'assista
     return fail(res, '无权操作', 403, 403);
   }
 
+  const meetingID = String(room.zegoRoomId || '').trim();
+  let bbbEnded = false;
+  if (meetingID) {
+    try {
+      await callBbb('end', {
+        meetingID,
+        password: room.anchorPassword || `moderator-${room.id}`
+      });
+      bbbEnded = true;
+    } catch (err) {
+      // 兼容未创建会议等场景，直播状态仍允许手动关闭
+      console.warn(`[Live][Stop] BBB end skipped: room=${room.id}, reason=${err.message}`);
+    }
+  }
+
   await room.update({
     status: 'finished',
     endTime: new Date()
@@ -516,7 +532,7 @@ router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'assista
   await writeOperationLog(req, {
     action: '结束直播',
     path: `/api/live/room/${id}/stop`,
-    payload: { roomId: id, zegoRoomId: room.zegoRoomId, title: room.title },
+    payload: { roomId: id, zegoRoomId: room.zegoRoomId, title: room.title, bbbEnded },
     message: '直播已结束'
   });
 
