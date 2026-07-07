@@ -86,6 +86,20 @@ const pickBestRecording = (recordings = [], meetingID = '') => {
 };
 
 const normalizeMeetingId = (room) => String(room?.zegoRoomId || room?.id || '').trim();
+const normalizeLayout = (value) => {
+  const validLayouts = new Set([
+    'CUSTOM_LAYOUT',
+    'SMART_LAYOUT',
+    'PRESENTATION_FOCUS',
+    'VIDEO_FOCUS',
+    'CAMERAS_ONLY',
+    'PARTICIPANTS_AND_CHAT_ONLY',
+    'PRESENTATION_ONLY',
+    'MEDIA_ONLY'
+  ]);
+  const layout = String(value || '').trim().toUpperCase();
+  return validLayouts.has(layout) ? layout : 'VIDEO_FOCUS';
+};
 const getCurrentStudentId = (req) => req.user?.studentId || req.user?.id || 0;
 const normalizeJoinRole = (value) => {
   const role = String(value || '').trim().toLowerCase();
@@ -236,14 +250,25 @@ router.get('/join/:roomId', auth, asyncHandler(async (req, res) => {
 
   const fullName = req.user.nickname || req.user.username || '用户';
   const userId = req.user.studentId ? `student_${req.user.studentId}` : `user_${req.user.id}`;
+  const preferredLayout = normalizeLayout(config.join?.defaultLayout);
 
-  const joinUrl = buildJoinUrl({
+  const joinParams = {
     meetingID,
     fullName,
     password: joinAsModerator ? (room.anchorPassword || `moderator-${room.id}`) : (room.studentPassword || `attendee-${room.id}`),
     userID: userId,
     redirect: true
-  });
+  };
+
+  if (config.join?.useDefaultLayoutOnJoin) {
+    joinParams['userdata-bbb_default_layout'] = preferredLayout;
+  }
+
+  if (config.join?.enforceLayout) {
+    joinParams.enforceLayout = preferredLayout;
+  }
+
+  const joinUrl = buildJoinUrl(joinParams);
 
   return success(res, {
     joinUrl,

@@ -13,5 +13,11 @@ module.exports = {
     record: (process.env.BBB_RECORD || 'true') === 'true',
     autoStartRecording: (process.env.BBB_AUTO_START_RECORDING || 'true') === 'true',
     allowStartStopRecording: (process.env.BBB_ALLOW_START_STOP_RECORDING || 'true') === 'true'
+  },
+
+  join: {
+    defaultLayout: process.env.BBB_DEFAULT_LAYOUT || 'VIDEO_FOCUS',
+    enforceLayout: (process.env.BBB_ENFORCE_LAYOUT || 'false') === 'true',
+    useDefaultLayoutOnJoin: (process.env.BBB_USE_DEFAULT_LAYOUT_ON_JOIN || 'true') === 'true'
   }
 };
