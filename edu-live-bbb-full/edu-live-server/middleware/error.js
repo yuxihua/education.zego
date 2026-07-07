@@ -83,7 +83,13 @@ function errorHandler(err, req, res, next) {
     });
   } else {
     // 生产环境记录关键错误
-    console.error(`[Error] ${req.method} ${req.originalUrl} - ${message}`);
+    if (err.bbbCall || err.payload) {
+      const payloadText = err.payload ? JSON.stringify(err.payload) : '';
+      const paramsText = err.bbbParams ? JSON.stringify(err.bbbParams) : '';
+      console.error(`[Error] ${req.method} ${req.originalUrl} - ${message} | bbbCall=${err.bbbCall || ''} | bbbParams=${paramsText} | bbbPayload=${payloadText}`);
+    } else {
+      console.error(`[Error] ${req.method} ${req.originalUrl} - ${message}`);
+    }
   }
 
   fail(res, message, statusCode, errorCode);

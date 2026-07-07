@@ -521,7 +521,9 @@ router.post('/room/:id/stop', auth, requireRole(['admin', 'superadmin', 'assista
       bbbEnded = true;
     } catch (err) {
       // 兼容未创建会议等场景，直播状态仍允许手动关闭
-      console.warn(`[Live][Stop] BBB end skipped: room=${room.id}, reason=${err.message}`);
+      const bbbMessageKey = err?.payload?.messageKey || '';
+      const bbbPayload = err?.payload ? JSON.stringify(err.payload) : '';
+      console.warn(`[Live][Stop] BBB end skipped: room=${room.id}, reason=${err.message}, messageKey=${bbbMessageKey}, payload=${bbbPayload}`);
     }
   }
 

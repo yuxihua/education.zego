@@ -34,6 +34,19 @@ const parseResponse = (xmlText) => {
   return data.response || data;
 };
 
+const sanitizeBbbParams = (params = {}) => {
+  const maskedKeys = new Set(['password', 'attendeePW', 'moderatorPW']);
+  const safe = {};
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (maskedKeys.has(key)) {
+      safe[key] = '***';
+      return;
+    }
+    safe[key] = value;
+  });
+  return safe;
+};
+
 const ensureConfig = () => {
   if (!config.endpoint || !config.secret) {
     const err = new Error('BBB 未配置，请检查 BBB_API_BASE_URL 和 BBB_SHARED_SECRET');
@@ -54,6 +67,8 @@ const callBbb = async (callName, params = {}) => {
     const err = new Error(payload.messageKey || payload.message || 'BBB API 调用失败');
     err.statusCode = 400;
     err.payload = payload;
+    err.bbbCall = callName;
+    err.bbbParams = sanitizeBbbParams(params);
     throw err;
   }
   return payload;
