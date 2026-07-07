@@ -122,8 +122,7 @@ router.post('/meeting/:roomId/create', auth, asyncHandler(async (req, res) => {
   const meetingID = normalizeMeetingId(room);
   if (!meetingID) return fail(res, '缺少会议标识', 400, 400);
 
-  const isTeacher = req.user.role === 'superadmin' || Number(room.anchorId) === Number(req.user.id);
-  if (!isTeacher) return fail(res, '无权限创建会议', 403, 403);
+  if (!canJoinAsModerator(req, room)) return fail(res, '无权限创建会议', 403, 403);
 
   const payload = await callBbb('create', {
     meetingID,
@@ -190,8 +189,7 @@ router.post('/meeting/:roomId/end', auth, asyncHandler(async (req, res) => {
   if (!room) return fail(res, '直播间不存在', 404, 404);
   if (!await ensureRoomAccess(req, res, room)) return;
 
-  const isTeacher = req.user.role === 'superadmin' || Number(room.anchorId) === Number(req.user.id);
-  if (!isTeacher) return fail(res, '无权限结束会议', 403, 403);
+  if (!canJoinAsModerator(req, room)) return fail(res, '无权限结束会议', 403, 403);
 
   const meetingID = normalizeMeetingId(room);
   if (!meetingID) return fail(res, '缺少会议标识', 400, 400);
