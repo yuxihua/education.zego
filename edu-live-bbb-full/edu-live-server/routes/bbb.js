@@ -12,6 +12,79 @@ const { auth } = require('../middleware/auth');
 const config = require('../config/bbb');
 const { callBbb, toBool, listRecordings, buildJoinUrl } = require('../utils/bbbApi');
 
+const normalizeKey = (value) => String(value || '').trim().toLowerCase();
+
+const toTimestamp = (value) => {
+  if (!value && value !== 0) return 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return 0;
+    // BBB 有的字段为毫秒时间戳。
+    return numeric > 1e12 ? numeric : numeric * 1000;
+  }
+
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const getMeetingCandidates = (recording = {}) => {
+  const values = [];
+
+  const pushValue = (input) => {
+    const normalized = normalizeKey(input);
+    if (!normalized) return;
+    values.push(normalized);
+  };
+
+  pushValue(recording.meetingID);
+  pushValue(recording.meetingId);
+  pushValue(recording.internalMeetingID);
+  pushValue(recording.internalMeetingId);
+
+  const metadata = recording.metadata || {};
+  Object.entries(metadata).forEach(([key, value]) => {
+    const keyText = normalizeKey(key);
+    if (!keyText.includes('meeting') || !keyText.includes('id')) return;
+    pushValue(value);
+  });
+
+  return values;
+};
+
+const isRecordingMatchMeeting = (recording, meetingID) => {
+  const target = normalizeKey(meetingID);
+  if (!target) return false;
+  return getMeetingCandidates(recording).includes(target);
+};
+
+const getRecordingPlaybackUrl = (recording) => {
+  const playback = recording?.playback?.format;
+  const playbackItems = Array.isArray(playback) ? playback : [playback];
+  const firstPlayable = playbackItems.find(item => item?.url);
+  return firstPlayable?.url || '';
+};
+
+const pickBestRecording = (recordings = [], meetingID = '') => {
+  const published = recordings
+    .filter(item => item && toBool(item.published))
+    .filter(item => Boolean(getRecordingPlaybackUrl(item)));
+
+  if (!published.length) return null;
+
+  const matched = published.filter(item => isRecordingMatchMeeting(item, meetingID));
+  const candidates = matched.length ? matched : (published.length === 1 ? published : []);
+  if (!candidates.length) return null;
+
+  return candidates.sort((a, b) => {
+    const aEnd = toTimestamp(a.endTime) || toTimestamp(a.publishedDate) || toTimestamp(a.startTime);
+    const bEnd = toTimestamp(b.endTime) || toTimestamp(b.publishedDate) || toTimestamp(b.startTime);
+    return bEnd - aEnd;
+  })[0];
+};
+
 const normalizeMeetingId = (room) => String(room?.zegoRoomId || room?.id || '').trim();
 const getCurrentStudentId = (req) => req.user?.studentId || req.user?.id || 0;
 const normalizeJoinRole = (value) => {
@@ -91,15 +164,13 @@ const ensureRoomAccess = async (req, res, room) => {
 const fetchReplay = async (meetingID) => {
   const payload = await callBbb('getRecordings', { meetingID });
   const recordings = listRecordings(payload.recordings);
-  const published = recordings.find(item => toBool(item.published));
+  const published = pickBestRecording(recordings, meetingID);
 
   if (!published) {
     return null;
   }
 
-  const playback = published.playback?.format;
-  const playbackItem = Array.isArray(playback) ? playback[0] : playback;
-  const url = playbackItem?.url || '';
+  const url = getRecordingPlaybackUrl(published);
   if (!url) return null;
 
   return {
