@@ -274,6 +274,20 @@ router.get('/join/:roomId', auth, asyncHandler(async (req, res) => {
     return fail(res, '无权限以主持人身份入会', 403, 403);
   }
 
+  // create 接口是幂等的，入会前主动调用可避免 meetingForciblyEnded 导致无法进入。
+  await callBbb('create', {
+    meetingID,
+    name: room.title || `直播间-${room.id}`,
+    attendeePW: room.studentPassword || `attendee-${room.id}`,
+    moderatorPW: room.anchorPassword || `moderator-${room.id}`,
+    welcome: config.meeting.welcome,
+    duration: config.meeting.defaultDuration,
+    maxParticipants: config.meeting.maxParticipants,
+    record: config.meeting.record,
+    autoStartRecording: config.meeting.autoStartRecording,
+    allowStartStopRecording: config.meeting.allowStartStopRecording
+  });
+
   const fullName = req.user.nickname || req.user.username || '用户';
   const userId = req.user.studentId ? `student_${req.user.studentId}` : `user_${req.user.id}`;
   const preferredLayout = normalizeLayout(config.join?.defaultLayout);
