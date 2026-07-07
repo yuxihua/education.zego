@@ -80,6 +80,16 @@
             <el-button type="primary" style="margin-top: 15px; width: 100%" @click="handleOpenReplay">查看回放</el-button>
             <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayUrl">复制回放地址</el-button>
             <el-button
+              v-if="canDeleteReplay && !isReplayFallback"
+              type="danger"
+              plain
+              style="margin-top: 10px; width: 100%"
+              :loading="deletingReplay"
+              @click="handleDeleteReplay"
+            >
+              删除回放
+            </el-button>
+            <el-button
               v-if="isReplayFallback && roomInfo?.replayFromRoomId"
               plain
               style="margin-top: 10px; width: 100%"
@@ -169,7 +179,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayByLiveRoom } from '@/api/live'
+import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayByLiveRoom, deleteBbbReplayByLiveRoom } from '@/api/live'
 
 const route = useRoute()
 const router = useRouter()
@@ -183,6 +193,7 @@ const stats = ref(null)
 const pptLoading = ref(false)
 const uploading = ref(false)
 const generatingReplay = ref(false)
+const deletingReplay = ref(false)
 const replayPolling = ref(false)
 const replayPollCount = ref(0)
 
@@ -207,6 +218,7 @@ const canReturnToOriginRoom = computed(() => {
 })
 
 const canManagePpt = computed(() => ['superadmin', 'admin', 'assistant', 'teacher'].includes(userStore.userInfo?.role))
+const canDeleteReplay = computed(() => ['superadmin', 'admin'].includes(userStore.userInfo?.role))
 
 const normalizePptItem = (item) => ({
   ...item,
@@ -390,6 +402,33 @@ const handleCopyReplayUrl = async () => {
     ElMessage.success('回放地址已复制')
   } catch (err) {
     ElMessage.error('复制失败，请手动复制')
+  }
+}
+
+const handleDeleteReplay = async () => {
+  if (!roomInfo.value?.id) {
+    ElMessage.warning('未找到直播间信息')
+    return
+  }
+  if (!replayInfo.value?.url) {
+    ElMessage.warning('暂无可删除回放')
+    return
+  }
+
+  await ElMessageBox.confirm('确认删除当前直播间回放？删除后不可恢复。', '提示', { type: 'warning' })
+  deletingReplay.value = true
+  try {
+    await deleteBbbReplayByLiveRoom(roomId)
+    replayInfo.value = null
+    if (roomInfo.value) {
+      roomInfo.value.replayUrl = null
+      roomInfo.value.replayDuration = null
+      roomInfo.value.replaySize = null
+    }
+    clearReplayPollTimer()
+    ElMessage.success('回放已删除')
+  } finally {
+    deletingReplay.value = false
   }
 }
 

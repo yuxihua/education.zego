@@ -76,6 +76,11 @@ export const getBbbReplayByLiveRoom = async (roomId) => {
 	return buildReplayInfo(res)
 }
 
+export const deleteBbbReplayByLiveRoom = async (roomId) => {
+	if (!roomId) return null
+	return request.delete(`/bbb/replay-room/${encodeURIComponent(roomId)}`)
+}
+
 // 兼容旧调用，后续可全量替换为 getBbbReplayByLiveRoom
 export const getZegoReplayByRoom = getBbbReplayByLiveRoom
 
