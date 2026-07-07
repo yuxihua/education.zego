@@ -469,7 +469,8 @@ router.post('/room/:id/start', auth, requireRole(['admin', 'superadmin', 'teache
   }
   if (!checkCourseInstitutionAccess(req, res, room.course)) return;
 
-  if (room.anchorId !== req.user.id && req.user.role !== 'superadmin') {
+  const canAdminStart = ['superadmin', 'admin'].includes(req.user.role);
+  if (room.anchorId !== req.user.id && !canAdminStart) {
     return fail(res, '无权操作', 403, 403);
   }
 
