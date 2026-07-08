@@ -90,7 +90,7 @@ router.post('/:type', auth, upload.single('file'), asyncHandler(async (req, res)
     return fail(res, '未选择文件', 400, 400);
   }
 
-  const fileUrl = `/uploads/${req.params.type}/${req.file.filename}`;
+  const fileUrl = `/api/uploads/${req.params.type}/${req.file.filename}`;
 
   success(res, {
     originalName: req.file.originalname,
@@ -155,7 +155,7 @@ router.post('/ppt/:roomId', auth, upload.single('file'), asyncHandler(async (req
   const ossKey = `ppt/${roomId}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
   const filePath = req.file.path;
 
-  let fileUrl = `/uploads/ppt/${req.file.filename}`;
+  let fileUrl = `/api/uploads/ppt/${req.file.filename}`;
   let storageType = 'local';
   let ossWarning = '';
 

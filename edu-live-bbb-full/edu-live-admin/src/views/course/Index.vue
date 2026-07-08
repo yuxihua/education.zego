@@ -254,6 +254,8 @@ const handleArchive = async (row) => {
 const resolveCoverUrl = (cover) => {
   if (!cover) return ''
   if (/^https?:\/\//i.test(cover)) return cover
+  if (cover.startsWith('/api/uploads/')) return cover
+  if (cover.startsWith('/uploads/')) return `/api${cover}`
   if (cover.startsWith('/')) return cover
   return `/${cover.replace(/^\/+/, '')}`
 }

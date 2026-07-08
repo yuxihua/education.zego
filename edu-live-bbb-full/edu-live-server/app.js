@@ -120,6 +120,7 @@ app.use(compression());
 
 // 静态文件（上传目录）
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Body 解析（普通 JSON）
 app.use(express.json({ limit: '10mb' }));
