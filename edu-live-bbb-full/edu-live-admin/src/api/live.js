@@ -11,9 +11,13 @@ const statusMap = {
 const buildReplayInfo = (payload = {}) => {
 	if (!payload?.url) return null
 	return {
+		recordingID: payload.recordingID || '',
 		duration: payload.duration || 0,
 		size: payload.size || 0,
-		url: payload.url
+		url: payload.url,
+		startTime: payload.startTime || null,
+		endTime: payload.endTime || null,
+		publishedAt: payload.publishedAt || null
 	}
 }
 
@@ -71,6 +75,13 @@ export const getBbbReplayByLiveRoom = async (roomId) => {
 	if (!roomId) return null
 	const res = await request.get(`/bbb/replay-room/${encodeURIComponent(roomId)}`)
 	return buildReplayInfo(res)
+}
+
+export const getBbbReplayListByLiveRoom = async (roomId) => {
+	if (!roomId) return []
+	const res = await request.get(`/bbb/replay-room/${encodeURIComponent(roomId)}/all`)
+	const list = res?.list || (Array.isArray(res) ? res : [])
+	return list.map(buildReplayInfo).filter(Boolean)
 }
 
 export const deleteBbbReplayByLiveRoom = async (roomId) => {

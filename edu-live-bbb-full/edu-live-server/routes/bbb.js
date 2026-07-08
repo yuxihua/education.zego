@@ -67,6 +67,27 @@ const getRecordingPlaybackUrl = (recording) => {
   return firstPlayable?.url || '';
 };
 
+const buildReplayPayload = (recording = {}) => ({
+  url: getRecordingPlaybackUrl(recording),
+  recordingID: recording.recordID || '',
+  size: Number(recording.size || 0),
+  duration: Number(recording.playback?.duration || 0),
+  startTime: recording.startTime || null,
+  endTime: recording.endTime || null,
+  publishedAt: recording.publishedDate || null
+});
+
+const listSessionReplays = (recordings = [], meetingID = '') => recordings
+  .filter(item => item && toBool(item.published))
+  .filter(item => Boolean(getRecordingPlaybackUrl(item)))
+  .filter(item => isRecordingMatchMeeting(item, meetingID))
+  .sort((a, b) => {
+    const aEnd = toTimestamp(a.endTime) || toTimestamp(a.publishedDate) || toTimestamp(a.startTime);
+    const bEnd = toTimestamp(b.endTime) || toTimestamp(b.publishedDate) || toTimestamp(b.startTime);
+    return bEnd - aEnd;
+  })
+  .map(buildReplayPayload);
+
 const pickBestRecording = (recordings = [], meetingID = '') => {
   const published = recordings
     .filter(item => item && toBool(item.published))
@@ -189,15 +210,9 @@ const fetchReplay = async (meetingID) => {
     return null;
   }
 
-  const url = getRecordingPlaybackUrl(published);
-  if (!url) return null;
-
-  return {
-    url,
-    recordingID: published.recordID || '',
-    size: Number(published.size || 0),
-    duration: Number(published.playback?.duration || 0)
-  };
+  const replay = buildReplayPayload(published);
+  if (!replay.url) return null;
+  return replay;
 };
 
 const deleteReplayByMeeting = async (meetingID) => {
@@ -390,6 +405,38 @@ router.get('/replay-room/:roomId', auth, asyncHandler(async (req, res) => {
     meetingID,
     roomId: room.id
   }, '获取回放成功');
+}));
+
+router.get('/replay-room/:roomId/all', auth, asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const room = await LiveRoom.findByPk(roomId, {
+    include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
+  });
+  if (!room) return fail(res, '直播间不存在', 404, 404);
+  if (!await ensureRoomAccess(req, res, room)) return;
+
+  const meetingID = normalizeMeetingId(room);
+  if (!meetingID) return fail(res, '缺少会议标识', 400, 400);
+
+  const payload = await callBbb('getRecordings', { meetingID });
+  const recordings = listRecordings(payload.recordings);
+  const list = listSessionReplays(recordings, meetingID);
+  if (!list.length) {
+    return fail(res, '回放尚未生成', 404, 404);
+  }
+
+  const latest = list[0];
+  await room.update({
+    replayUrl: latest.url,
+    replayDuration: latest.duration,
+    replaySize: latest.size
+  });
+
+  return success(res, {
+    roomId: room.id,
+    meetingID,
+    list
+  }, '获取回放列表成功');
 }));
 
 router.delete('/replay-room/:roomId', auth, asyncHandler(async (req, res) => {

@@ -70,11 +70,12 @@
             <p>回放状态：<el-tag type="success">已生成</el-tag></p>
             <p style="margin-top: 10px">视频时长：{{ formatDuration(replayInfo.duration) }}</p>
             <p style="margin-top: 10px">视频大小：{{ formatFileSize(replayInfo.size) }}</p>
+            <p style="margin-top: 10px">回放数量：{{ replayList.length }}</p>
             <p style="margin-top: 10px; word-break: break-all">回放地址：{{ replayInfo.url }}</p>
             <el-button type="primary" style="margin-top: 15px; width: 100%" @click="handleOpenReplay">查看回放</el-button>
             <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayUrl">复制回放地址</el-button>
             <el-button
-              v-if="canDeleteReplay && !isReplayFallback"
+              v-if="canDeleteReplay"
               type="danger"
               plain
               style="margin-top: 10px; width: 100%"
@@ -83,6 +84,19 @@
             >
               删除回放
             </el-button>
+            <div v-if="replayList.length > 1" class="replay-list">
+              <div class="replay-list-title">本场次全部回放</div>
+              <div v-for="item in replayList" :key="item.recordingID || item.url" class="replay-list-item">
+                <div class="replay-list-info">
+                  <div>时长：{{ formatDuration(item.duration) }} · 大小：{{ formatFileSize(item.size) }}</div>
+                  <div class="replay-list-url">{{ item.url }}</div>
+                </div>
+                <div class="replay-list-actions">
+                  <el-button link type="primary" @click="handleOpenReplay(item.url)">查看</el-button>
+                  <el-button link @click="handleCopyReplayUrl(item.url)">复制</el-button>
+                </div>
+              </div>
+            </div>
           </div>
           <div v-else-if="roomInfo?.zegoRoomId">
             <p>回放状态：<el-tag type="info">待生成</el-tag></p>
@@ -157,7 +171,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayByLiveRoom, deleteBbbReplayByLiveRoom } from '@/api/live'
+import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayListByLiveRoom, deleteBbbReplayByLiveRoom } from '@/api/live'
 
 const route = useRoute()
 const router = useRouter()
@@ -167,6 +181,7 @@ const roomId = route.params.id
 const roomInfo = ref(null)
 const pptList = ref([])
 const replayInfo = ref(null)
+const replayList = ref([])
 const stats = ref(null)
 const pptLoading = ref(false)
 const uploading = ref(false)
@@ -320,16 +335,17 @@ const copyText = async (text) => {
   return true
 }
 
-const handleOpenReplay = () => {
-  if (!replayInfo.value?.url) {
+const handleOpenReplay = (targetUrl = '') => {
+  const url = targetUrl || replayInfo.value?.url
+  if (!url) {
     ElMessage.warning('暂无可用回放地址')
     return
   }
-  window.open(replayInfo.value.url, '_blank', 'noopener,noreferrer')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const handleCopyReplayUrl = async () => {
-  const url = replayInfo.value?.url
+const handleCopyReplayUrl = async (targetUrl = '') => {
+  const url = targetUrl || replayInfo.value?.url
   if (!url) {
     ElMessage.warning('暂无可复制的回放地址')
     return
@@ -357,6 +373,7 @@ const handleDeleteReplay = async () => {
   try {
     await deleteBbbReplayByLiveRoom(roomId)
     replayInfo.value = null
+    replayList.value = []
     if (roomInfo.value) {
       roomInfo.value.replayUrl = null
       roomInfo.value.replayDuration = null
@@ -377,15 +394,16 @@ const clearReplayPollTimer = () => {
   }
 }
 
-const fetchReplayByRoom = async (options = {}) => {
+const fetchReplayListByRoom = async (options = {}) => {
   const { silent = false } = options
-  if (!roomId) return null
-  const replay = await getBbbReplayByLiveRoom(roomId)
-  replayInfo.value = replay
-  if (!silent && replay?.url) {
-    ElMessage.success('BBB 回放地址已更新')
+  if (!roomId) return []
+  const list = await getBbbReplayListByLiveRoom(roomId)
+  replayList.value = list
+  replayInfo.value = list[0] || null
+  if (!silent && list.length) {
+    ElMessage.success('BBB 回放列表已更新')
   }
-  return replay
+  return list
 }
 
 const scheduleReplayPoll = () => {
@@ -403,8 +421,8 @@ const scheduleReplayPoll = () => {
     replayPollTimer = null
     replayPollCount.value += 1
     try {
-      const replay = await fetchReplayByRoom({ silent: true })
-      if (replay?.url) {
+      const list = await fetchReplayListByRoom({ silent: true })
+      if (list.length) {
         clearReplayPollTimer()
         return
       }
@@ -421,8 +439,8 @@ const handleRefreshReplay = async () => {
   replayPollCount.value = 0
   generatingReplay.value = true
   try {
-    const replay = await fetchReplayByRoom({ silent: false })
-    if (replay?.url) {
+    const list = await fetchReplayListByRoom({ silent: false })
+    if (list.length) {
       clearReplayPollTimer()
     } else {
       ElMessage.info('当前暂无可用回放，请稍后重试')
@@ -438,9 +456,15 @@ onMounted(async () => {
   await refreshPptList()
   stats.value = await getLiveStats(roomId)
   replayInfo.value = roomInfo.value?.replayInfo || null
+  replayList.value = replayInfo.value ? [replayInfo.value] : []
+  if (roomInfo.value?.zegoRoomId) {
+    try {
+      await fetchReplayListByRoom({ silent: true })
+    } catch (err) {}
+  }
   if (!replayInfo.value && roomInfo.value?.zegoRoomId) {
     try {
-      replayInfo.value = await fetchReplayByRoom({ silent: true })
+      await fetchReplayListByRoom({ silent: true })
     } catch (err) {}
     scheduleReplayPoll()
   }
@@ -462,4 +486,40 @@ onBeforeUnmount(() => {
 .stats-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
 .stats-item:last-child { border-bottom: none; }
 .stats-num { font-weight: 700; color: #409EFF; }
+
+.replay-list {
+  margin-top: 14px;
+  border-top: 1px solid #ebeef5;
+  padding-top: 10px;
+}
+
+.replay-list-title {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.replay-list-item {
+  padding: 8px 0;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.replay-list-item:last-child {
+  border-bottom: none;
+}
+
+.replay-list-info {
+  font-size: 12px;
+  color: #606266;
+}
+
+.replay-list-url {
+  margin-top: 4px;
+  word-break: break-all;
+  color: #909399;
+}
+
+.replay-list-actions {
+  margin-top: 4px;
+}
 </style>
