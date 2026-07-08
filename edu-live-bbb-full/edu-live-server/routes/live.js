@@ -171,21 +171,6 @@ async function checkStudentCourseAccess(req, res, courseId, options = {}) {
   return order;
 }
 
-async function findLatestReplayRoom(courseId, excludeRoomId = 0) {
-  const where = {
-    courseId,
-    replayUrl: { [Op.ne]: null }
-  };
-  if (excludeRoomId) {
-    where.id = { [Op.ne]: excludeRoomId };
-  }
-
-  return LiveRoom.findOne({
-    where,
-    order: [['createdAt', 'DESC']]
-  });
-}
-
 /**
  * @GET /api/live/rooms
  * 获取直播间列表
@@ -264,18 +249,6 @@ router.get('/room/:id', auth, asyncHandler(async (req, res) => {
   // 增加观看次数
   await LiveRoom.increment('totalViewCount', { where: { id } });
 
-  if (!room.replayUrl) {
-    const replayRoom = await findLatestReplayRoom(room.courseId, Number(id));
-    if (replayRoom?.replayUrl) {
-      room.setDataValue('replayFallbackUrl', replayRoom.replayUrl);
-      room.setDataValue('replayFallbackDuration', replayRoom.replayDuration || 0);
-      room.setDataValue('replayFallbackSize', replayRoom.replaySize || 0);
-      room.setDataValue('replayFromRoomId', replayRoom.id);
-      room.setDataValue('replayFromRoomTitle', replayRoom.title || '');
-      room.setDataValue('replayFromEndTime', replayRoom.endTime || replayRoom.createdAt || null);
-    }
-  }
-
   const audienceStats = await getRoomAudienceStats(id);
   room.setDataValue('onlineCount', audienceStats.onlineCount);
   room.setDataValue('parentOnlineCount', audienceStats.parentOnlineCount);
@@ -310,19 +283,6 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
 
   const courseLiveRoomCount = await LiveRoom.count({ where: { courseId } });
   room.courseLiveRoomCount = courseLiveRoomCount;
-
-  if (!room.replayUrl) {
-    const replayRoom = await findLatestReplayRoom(courseId, room.id);
-
-    if (replayRoom?.replayUrl) {
-      room.setDataValue('replayUrl', replayRoom.replayUrl);
-      room.setDataValue('replayDuration', replayRoom.replayDuration || 0);
-      room.setDataValue('replaySize', replayRoom.replaySize || 0);
-      room.setDataValue('replayFromRoomId', replayRoom.id);
-      room.setDataValue('replayFromRoomTitle', replayRoom.title || '');
-      room.setDataValue('replayFromEndTime', replayRoom.endTime || replayRoom.createdAt || null);
-    }
-  }
 
   const audienceStats = await getRoomAudienceStats(room.id);
   room.setDataValue('onlineCount', audienceStats.onlineCount);

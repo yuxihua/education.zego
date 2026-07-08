@@ -48,18 +48,15 @@ export const startLive = (id, data) => request.post(`/live/room/${id}/start`, da
 
 export const getLiveRoomDetail = async (id) => {
 	const res = await request.get(`/live/room/${id}`)
-	const replayUrl = res.replayUrl || res.replayFallbackUrl
-	const replayDuration = res.replayUrl ? res.replayDuration : res.replayFallbackDuration
-	const replaySize = res.replayUrl ? res.replaySize : res.replayFallbackSize
 	return {
 		...res,
 		teacherName: res.anchorName || '',
 		startTime: res.actualStartTime || '',
 		pptList: res.pptFiles || [],
 		replayInfo: buildReplayInfo({
-			url: replayUrl,
-			duration: replayDuration,
-			size: replaySize
+			url: res.replayUrl,
+			duration: res.replayDuration,
+			size: res.replaySize
 		})
 	}
 }

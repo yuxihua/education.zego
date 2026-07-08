@@ -70,12 +70,6 @@
             <p>回放状态：<el-tag type="success">已生成</el-tag></p>
             <p style="margin-top: 10px">视频时长：{{ formatDuration(replayInfo.duration) }}</p>
             <p style="margin-top: 10px">视频大小：{{ formatFileSize(replayInfo.size) }}</p>
-            <p v-if="isReplayFallback" style="margin-top: 10px">
-              回放来源：{{ roomInfo?.replayFromRoomTitle || ('房间#' + roomInfo?.replayFromRoomId) }}
-            </p>
-            <p v-if="isReplayFallback && roomInfo?.replayFromEndTime" style="margin-top: 10px">
-              来源场次时间：{{ formatDateTime(roomInfo.replayFromEndTime) }}
-            </p>
             <p style="margin-top: 10px; word-break: break-all">回放地址：{{ replayInfo.url }}</p>
             <el-button type="primary" style="margin-top: 15px; width: 100%" @click="handleOpenReplay">查看回放</el-button>
             <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayUrl">复制回放地址</el-button>
@@ -88,22 +82,6 @@
               @click="handleDeleteReplay"
             >
               删除回放
-            </el-button>
-            <el-button
-              v-if="isReplayFallback && roomInfo?.replayFromRoomId"
-              plain
-              style="margin-top: 10px; width: 100%"
-              @click="handleOpenReplaySourceRoom"
-            >
-              查看来源场次详情
-            </el-button>
-            <el-button
-              v-if="canReturnToOriginRoom"
-              plain
-              style="margin-top: 10px; width: 100%"
-              @click="handleBackToOriginRoom"
-            >
-              返回当前场次
             </el-button>
           </div>
           <div v-else-if="roomInfo?.zegoRoomId">
@@ -206,16 +184,7 @@ const uploadHeaders = computed(() => ({ Authorization: 'Bearer ' + userStore.tok
 const onlineBreakdownTotal = computed(() => (stats.value?.parentOnline || 0) + (stats.value?.studentOnline || 0) + (stats.value?.otherOnline || 0))
 const onlineStatsGap = computed(() => (stats.value?.currentOnline || 0) - onlineBreakdownTotal.value)
 const hasOnlineStatsMismatch = computed(() => stats.value && onlineStatsGap.value !== 0)
-const isReplayFallback = computed(() => Boolean(roomInfo.value?.replayFromRoomId && !roomInfo.value?.replayUrl))
 const isReplayPollExhausted = computed(() => !replayInfo.value?.url && !replayPolling.value && replayPollCount.value >= REPLAY_POLL_MAX)
-const originRoomId = computed(() => {
-  const value = Number(route.query.fromRoomId || 0)
-  return Number.isFinite(value) && value > 0 ? value : 0
-})
-const canReturnToOriginRoom = computed(() => {
-  if (!originRoomId.value) return false
-  return Number(roomInfo.value?.id || 0) !== originRoomId.value
-})
 
 const canManagePpt = computed(() => ['superadmin', 'admin', 'assistant', 'teacher'].includes(userStore.userInfo?.role))
 const canDeleteReplay = computed(() => ['superadmin', 'admin'].includes(userStore.userInfo?.role))
@@ -269,19 +238,6 @@ const formatDuration = (seconds) => {
   if (hour > 0) return `${hour}时${minute}分${second}秒`
   if (minute > 0) return `${minute}分${second}秒`
   return `${second}秒`
-}
-
-const formatDateTime = (value) => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  const Y = date.getFullYear()
-  const M = String(date.getMonth() + 1).padStart(2, '0')
-  const D = String(date.getDate()).padStart(2, '0')
-  const h = String(date.getHours()).padStart(2, '0')
-  const m = String(date.getMinutes()).padStart(2, '0')
-  const s = String(date.getSeconds()).padStart(2, '0')
-  return `${Y}-${M}-${D} ${h}:${m}:${s}`
 }
 
 const getAbsFileUrl = (url) => {
@@ -370,25 +326,6 @@ const handleOpenReplay = () => {
     return
   }
   window.open(replayInfo.value.url, '_blank', 'noopener,noreferrer')
-}
-
-const handleOpenReplaySourceRoom = () => {
-  const sourceRoomId = roomInfo.value?.replayFromRoomId
-  if (!sourceRoomId) {
-    ElMessage.warning('未找到来源场次')
-    return
-  }
-  const currentId = Number(roomInfo.value?.id || route.params.id || 0)
-  const query = currentId ? `?fromRoomId=${currentId}` : ''
-  router.push(`/live/room/${sourceRoomId}${query}`)
-}
-
-const handleBackToOriginRoom = () => {
-  if (!originRoomId.value) {
-    ElMessage.warning('未找到当前场次')
-    return
-  }
-  router.push(`/live/room/${originRoomId.value}`)
 }
 
 const handleCopyReplayUrl = async () => {
