@@ -92,20 +92,23 @@
           <el-input v-model="form.title" />
         </el-form-item>
         <el-form-item label="课程封面">
-          <el-upload
-            action="/api/upload/image"
-            :headers="{ Authorization: 'Bearer ' + userStore.token }"
-            :on-success="handleUploadSuccess"
-            :on-error="handleUploadError"
-            :show-file-list="false"
-          >
-            <el-image v-if="form.cover" :src="resolveCoverUrl(form.cover)" style="width: 200px; height: 120px" fit="cover">
-              <template #error>
-                <div class="cover-placeholder large">加载失败</div>
-              </template>
-            </el-image>
-            <el-button v-else type="primary">上传封面</el-button>
-          </el-upload>
+          <div class="cover-editor">
+            <el-upload
+              action="/api/upload/image"
+              :headers="{ Authorization: 'Bearer ' + userStore.token }"
+              :on-success="handleUploadSuccess"
+              :on-error="handleUploadError"
+              :show-file-list="false"
+            >
+              <el-image v-if="form.cover" :src="resolveCoverUrl(form.cover)" style="width: 200px; height: 120px" fit="cover">
+                <template #error>
+                  <div class="cover-placeholder large">加载失败</div>
+                </template>
+              </el-image>
+              <el-button v-else type="primary">上传封面</el-button>
+            </el-upload>
+            <el-button style="margin-top: 8px" @click="openImagePicker">从已上传选择</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="所属讲师" prop="teacherId">
           <el-select v-model="form.teacherId" placeholder="选择讲师" style="width: 260px">
@@ -146,6 +149,42 @@
         <el-button type="primary" @click="handleCreateTeacher">创建</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="imagePickerVisible" title="选择已上传图片" width="760px">
+      <el-skeleton :rows="6" animated v-if="imageLoading" />
+      <div v-else>
+        <el-empty v-if="uploadedImageList.length === 0" description="暂无已上传图片" />
+        <div v-else class="image-grid">
+          <div
+            v-for="item in uploadedImageList"
+            :key="item.url"
+            class="image-item"
+            :class="{ active: selectedImageUrl === item.url }"
+            @click="selectUploadedImage(item.url)"
+          >
+            <el-image :src="item.url" fit="cover" class="image-item-preview">
+              <template #error>
+                <div class="cover-placeholder">加载失败</div>
+              </template>
+            </el-image>
+          </div>
+        </div>
+
+        <el-pagination
+          v-model:current-page="imagePagination.page"
+          v-model:page-size="imagePagination.size"
+          :page-sizes="[12, 24, 48]"
+          :total="imagePagination.total"
+          layout="total, sizes, prev, pager, next"
+          style="margin-top: 16px; justify-content: flex-end"
+          @change="loadUploadedImages"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="imagePickerVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmSelectedImage">使用该图片</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -153,7 +192,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getCourseList, createCourse, updateCourse, deleteCourse, publishCourse, archiveCourse, getTeacherList, createTeacher } from '@/api/course'
+import { getCourseList, createCourse, updateCourse, deleteCourse, publishCourse, archiveCourse, getTeacherList, createTeacher, listUploadedImages } from '@/api/course'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -173,6 +212,11 @@ const teacherList = ref([])
 const teacherDialogVisible = ref(false)
 const teacherFormRef = ref()
 const teacherForm = reactive({ username: '', nickname: '', password: '', phone: '' })
+const imagePickerVisible = ref(false)
+const imageLoading = ref(false)
+const uploadedImageList = ref([])
+const selectedImageUrl = ref('')
+const imagePagination = reactive({ page: 1, size: 12, total: 0 })
 const teacherRules = {
   username: [{ required: true, message: '请输入登录账号', trigger: 'blur' }],
   nickname: [{ required: true, message: '请输入讲师姓名', trigger: 'blur' }],
@@ -251,6 +295,44 @@ const handleArchive = async (row) => {
   loadData()
 }
 
+const loadUploadedImages = async () => {
+  imageLoading.value = true
+  try {
+    const res = await listUploadedImages({ page: imagePagination.page, size: imagePagination.size })
+    uploadedImageList.value = (res?.list || []).map(item => ({
+      ...item,
+      url: resolveCoverUrl(item.url)
+    }))
+    imagePagination.total = res?.total || 0
+  } catch (err) {
+    ElMessage.error('加载已上传图片失败')
+  } finally {
+    imageLoading.value = false
+  }
+}
+
+const openImagePicker = async () => {
+  imagePickerVisible.value = true
+  selectedImageUrl.value = resolveCoverUrl(form.cover)
+  if (!uploadedImageList.value.length) {
+    imagePagination.page = 1
+    await loadUploadedImages()
+  }
+}
+
+const selectUploadedImage = (url) => {
+  selectedImageUrl.value = url
+}
+
+const confirmSelectedImage = () => {
+  if (!selectedImageUrl.value) {
+    ElMessage.warning('请先选择一张图片')
+    return
+  }
+  form.cover = selectedImageUrl.value
+  imagePickerVisible.value = false
+}
+
 const resolveCoverUrl = (cover) => {
   if (!cover) return ''
   if (/^https?:\/\//i.test(cover)) return cover
@@ -300,6 +382,11 @@ onMounted(async () => {
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .search-form { margin-bottom: 20px; }
+.cover-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 .cover-placeholder {
   width: 60px;
   height: 40px;
@@ -314,5 +401,25 @@ onMounted(async () => {
 .cover-placeholder.large {
   width: 200px;
   height: 120px;
+}
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.image-item {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.image-item.active {
+  border-color: #409eff;
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+.image-item-preview {
+  width: 100%;
+  height: 72px;
 }
 </style>
