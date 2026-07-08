@@ -28,6 +28,25 @@ function canManageTargetUser(operator, target) {
   return target.institutionId === operator.institutionId && target.role !== 'superadmin';
 }
 
+function parseDateTime(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const normalized = text.replace('T', ' ').replace('Z', '');
+  const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (matched) {
+    const [, y, m, d, hh, mm, ss = '0'] = matched;
+    const date = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 router.get('/accounts', auth, requireRole(ACCOUNT_ROLES), asyncHandler(async (req, res) => {
   const { keyword, role, status, institutionId, page = 1, size = 10 } = req.query;
 
@@ -268,9 +287,14 @@ router.get('/operation-logs', auth, requireRole(ACCOUNT_ROLES), asyncHandler(asy
   if (path) where.path = { [Op.like]: `%${path}%` };
   if (successFlag !== undefined && successFlag !== '') where.success = Number(successFlag) === 1;
   if (startTime || endTime) {
+    const startDate = startTime ? parseDateTime(startTime) : null;
+    const endDate = endTime ? parseDateTime(endTime) : null;
+    if ((startTime && !startDate) || (endTime && !endDate)) {
+      return fail(res, '时间范围格式无效', 400, 400);
+    }
     where.createdAt = {};
-    if (startTime) where.createdAt[Op.gte] = new Date(startTime);
-    if (endTime) where.createdAt[Op.lte] = new Date(endTime);
+    if (startDate) where.createdAt[Op.gte] = startDate;
+    if (endDate) where.createdAt[Op.lte] = endDate;
   }
 
   if (keyword) {
@@ -322,9 +346,14 @@ router.get('/operation-logs/export', auth, requireRole(ACCOUNT_ROLES), asyncHand
   if (path) where.path = { [Op.like]: `%${path}%` };
   if (successFlag !== undefined && successFlag !== '') where.success = Number(successFlag) === 1;
   if (startTime || endTime) {
+    const startDate = startTime ? parseDateTime(startTime) : null;
+    const endDate = endTime ? parseDateTime(endTime) : null;
+    if ((startTime && !startDate) || (endTime && !endDate)) {
+      return fail(res, '时间范围格式无效', 400, 400);
+    }
     where.createdAt = {};
-    if (startTime) where.createdAt[Op.gte] = new Date(startTime);
-    if (endTime) where.createdAt[Op.lte] = new Date(endTime);
+    if (startDate) where.createdAt[Op.gte] = startDate;
+    if (endDate) where.createdAt[Op.lte] = endDate;
   }
 
   if (keyword) {

@@ -23,6 +23,25 @@ function getOperatorInstitutionId(req) {
   return req.user?.institutionId || 0;
 }
 
+function parseDateTime(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const normalized = text.replace('T', ' ').replace('Z', '');
+  const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (matched) {
+    const [, y, m, d, hh, mm, ss = '0'] = matched;
+    const date = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function canAccessByCourseInstitution(req, courseInstitutionId) {
   if (req.user?.role === 'superadmin') return true;
   return courseInstitutionId === getOperatorInstitutionId(req);
@@ -38,10 +57,15 @@ function buildSubmissionQuery(source, keyword, status, submitTimeStart, submitTi
   if (submitTimeStart || submitTimeEnd) {
     baseWhere.submitTime = {};
     if (submitTimeStart) {
-      baseWhere.submitTime[Op.gte] = new Date(submitTimeStart);
+      const startDate = parseDateTime(submitTimeStart);
+      if (startDate) baseWhere.submitTime[Op.gte] = startDate;
     }
     if (submitTimeEnd) {
-      baseWhere.submitTime[Op.lte] = new Date(submitTimeEnd);
+      const endDate = parseDateTime(submitTimeEnd);
+      if (endDate) baseWhere.submitTime[Op.lte] = endDate;
+    }
+    if (Object.keys(baseWhere.submitTime).length === 0) {
+      delete baseWhere.submitTime;
     }
   }
 

@@ -47,6 +47,30 @@ function buildAudienceUserId(req) {
   return uid ? `${role}_${uid}` : `guest_${Date.now()}`;
 }
 
+function formatDateTimeSecond(dateValue) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+}
+
+function serializeLiveRoom(room) {
+  const raw = room?.toJSON ? room.toJSON() : room;
+  return {
+    ...raw,
+    actualStartTime: raw?.actualStartTime ? formatDateTimeSecond(raw.actualStartTime) : null,
+    endTime: raw?.endTime ? formatDateTimeSecond(raw.endTime) : null,
+    createdAt: raw?.createdAt ? formatDateTimeSecond(raw.createdAt) : null,
+    updatedAt: raw?.updatedAt ? formatDateTimeSecond(raw.updatedAt) : null,
+    replayFromEndTime: raw?.replayFromEndTime ? formatDateTimeSecond(raw.replayFromEndTime) : null
+  };
+}
+
 async function getRoomAudienceStats(roomId) {
   const members = await redis.smembers(`room:${roomId}:online`);
   let parentOnlineCount = 0;
@@ -74,34 +98,35 @@ async function getRoomAudienceStats(roomId) {
 
 function buildStudentRoomPayload(room) {
   const raw = room?.toJSON ? room.toJSON() : room;
+  const normalized = serializeLiveRoom(raw);
   return {
-    id: raw.id,
-    courseId: raw.courseId,
-    courseLiveRoomCount: raw.courseLiveRoomCount || 0,
-    title: raw.title,
-    status: raw.status,
-    anchorId: raw.anchorId,
-    anchorName: raw.anchorName,
-    onlineCount: raw.onlineCount,
-    peakCount: raw.peakCount,
-    totalViewCount: raw.totalViewCount,
-    parentOnlineCount: raw.parentOnlineCount || 0,
-    studentOnlineCount: raw.studentOnlineCount || 0,
-    otherOnlineCount: raw.otherOnlineCount || 0,
-    zegoRoomId: raw.zegoRoomId,
-    pullUrl: raw.pullUrl,
-    hlsUrl: raw.hlsUrl,
-    replayUrl: raw.replayUrl,
-    replayDuration: raw.replayDuration,
-    replaySize: raw.replaySize,
-    replayFromRoomId: raw.replayFromRoomId || null,
-    replayFromRoomTitle: raw.replayFromRoomTitle || '',
-    replayFromEndTime: raw.replayFromEndTime || null,
-    actualStartTime: raw.actualStartTime,
-    endTime: raw.endTime,
-    chatEnabled: raw.chatEnabled,
-    course: raw.course || null,
-    pptFiles: raw.pptFiles || []
+    id: normalized.id,
+    courseId: normalized.courseId,
+    courseLiveRoomCount: normalized.courseLiveRoomCount || 0,
+    title: normalized.title,
+    status: normalized.status,
+    anchorId: normalized.anchorId,
+    anchorName: normalized.anchorName,
+    onlineCount: normalized.onlineCount,
+    peakCount: normalized.peakCount,
+    totalViewCount: normalized.totalViewCount,
+    parentOnlineCount: normalized.parentOnlineCount || 0,
+    studentOnlineCount: normalized.studentOnlineCount || 0,
+    otherOnlineCount: normalized.otherOnlineCount || 0,
+    zegoRoomId: normalized.zegoRoomId,
+    pullUrl: normalized.pullUrl,
+    hlsUrl: normalized.hlsUrl,
+    replayUrl: normalized.replayUrl,
+    replayDuration: normalized.replayDuration,
+    replaySize: normalized.replaySize,
+    replayFromRoomId: normalized.replayFromRoomId || null,
+    replayFromRoomTitle: normalized.replayFromRoomTitle || '',
+    replayFromEndTime: normalized.replayFromEndTime || null,
+    actualStartTime: normalized.actualStartTime,
+    endTime: normalized.endTime,
+    chatEnabled: normalized.chatEnabled,
+    course: normalized.course || null,
+    pptFiles: normalized.pptFiles || []
   };
 }
 
@@ -217,7 +242,7 @@ router.get('/rooms', auth, asyncHandler(async (req, res) => {
   });
 
   success(res, {
-    list: rows,
+    list: rows.map((item) => serializeLiveRoom(item)),
     pagination: {
       total: count,
       page: parseInt(page),
@@ -255,7 +280,7 @@ router.get('/room/:id', auth, asyncHandler(async (req, res) => {
   room.setDataValue('studentOnlineCount', audienceStats.studentOnlineCount);
   room.setDataValue('otherOnlineCount', audienceStats.otherOnlineCount);
 
-  success(res, room);
+  success(res, serializeLiveRoom(room));
 }));
 
 /**
@@ -378,7 +403,7 @@ router.post('/room', auth, requireRole(['admin', 'superadmin', 'teacher']), asyn
     status: 'waiting'
   });
 
-  success(res, room, '直播间创建成功');
+  success(res, serializeLiveRoom(room), '直播间创建成功');
 }));
 
 /**

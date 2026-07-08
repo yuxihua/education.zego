@@ -8,6 +8,19 @@ const statusMap = {
 	closed: 'ended'
 }
 
+const toLocalDateTime = (value) => {
+	if (!value) return ''
+	const dt = new Date(value)
+	if (Number.isNaN(dt.getTime())) return String(value)
+	const y = dt.getFullYear()
+	const m = String(dt.getMonth() + 1).padStart(2, '0')
+	const d = String(dt.getDate()).padStart(2, '0')
+	const hh = String(dt.getHours()).padStart(2, '0')
+	const mm = String(dt.getMinutes()).padStart(2, '0')
+	const ss = String(dt.getSeconds()).padStart(2, '0')
+	return `${y}-${m}-${d} ${hh}:${mm}:${ss}`
+}
+
 const buildReplayInfo = (payload = {}) => {
 	if (!payload?.url) return null
 	return {
@@ -15,9 +28,9 @@ const buildReplayInfo = (payload = {}) => {
 		duration: payload.duration || 0,
 		size: payload.size || 0,
 		url: payload.url,
-		startTime: payload.startTime || null,
-		endTime: payload.endTime || null,
-		publishedAt: payload.publishedAt || null
+		startTime: toLocalDateTime(payload.startTime) || null,
+		endTime: toLocalDateTime(payload.endTime) || null,
+		publishedAt: toLocalDateTime(payload.publishedAt) || null
 	}
 }
 
@@ -35,7 +48,7 @@ export const getLiveList = async (params = {}) => {
 		...item,
 		courseName: item.course?.title || '',
 		teacherName: item.anchorName || item.teacherName || '',
-		startTime: item.actualStartTime || item.createdAt || '',
+		startTime: toLocalDateTime(item.actualStartTime || item.createdAt),
 		status: statusMap[item.status] || item.status
 	}))
 
@@ -55,7 +68,8 @@ export const getLiveRoomDetail = async (id) => {
 	return {
 		...res,
 		teacherName: res.anchorName || '',
-		startTime: res.actualStartTime || '',
+		startTime: toLocalDateTime(res.actualStartTime),
+		endTime: toLocalDateTime(res.endTime),
 		pptList: res.pptFiles || [],
 		replayInfo: buildReplayInfo({
 			url: res.replayUrl,

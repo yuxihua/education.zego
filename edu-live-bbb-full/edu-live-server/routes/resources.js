@@ -20,7 +20,21 @@ function getInstitutionId(req) {
 }
 
 function parseDate(value) {
-  const date = new Date(value);
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const normalized = text.replace('T', ' ').replace('Z', '');
+  const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (matched) {
+    const [, y, m, d, hh, mm, ss = '0'] = matched;
+    const date = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -40,6 +54,27 @@ function formatDateTime(dateValue) {
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
   return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
+function formatDateTimeSecond(dateValue) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+}
+
+function serializeSchedule(row) {
+  const raw = row?.toJSON ? row.toJSON() : row;
+  return {
+    ...raw,
+    startTime: formatDateTimeSecond(raw?.startTime),
+    endTime: formatDateTimeSecond(raw?.endTime)
+  };
 }
 
 function cloneTimeLanes(list = []) {
@@ -413,8 +448,13 @@ router.get('/schedules', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req
   if (classroomId) where.classroomId = Number(classroomId);
   if (teacherId) where.teacherId = Number(teacherId);
   if (startDate && endDate) {
-    where.startTime = { [Op.lt]: new Date(endDate) };
-    where.endTime = { [Op.gt]: new Date(startDate) };
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+    if (!start || !end) {
+      return fail(res, '时间范围格式无效', 400, 400);
+    }
+    where.startTime = { [Op.lt]: end };
+    where.endTime = { [Op.gt]: start };
   }
 
   const list = await TeachingSchedule.findAll({
@@ -426,7 +466,7 @@ router.get('/schedules', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req
     order: [['startTime', 'ASC'], ['id', 'ASC']]
   });
 
-  success(res, list);
+  success(res, list.map((item) => serializeSchedule(item)));
 }));
 
 router.get('/time-lanes', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
@@ -498,8 +538,13 @@ router.get('/schedules/export', auth, requireRole(ADMIN_ROLES), asyncHandler(asy
   if (classroomId) where.classroomId = Number(classroomId);
   if (teacherId) where.teacherId = Number(teacherId);
   if (startDate && endDate) {
-    where.startTime = { [Op.lt]: new Date(endDate) };
-    where.endTime = { [Op.gt]: new Date(startDate) };
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+    if (!start || !end) {
+      return fail(res, '时间范围格式无效', 400, 400);
+    }
+    where.startTime = { [Op.lt]: end };
+    where.endTime = { [Op.gt]: start };
   }
 
   const list = await TeachingSchedule.findAll({
@@ -664,7 +709,7 @@ router.post('/schedules', auth, requireRole(ADMIN_ROLES), [
     status: req.body.status === 0 || req.body.status === '0' ? 0 : 1
   });
 
-  success(res, row, '排课创建成功');
+  success(res, serializeSchedule(row), '排课创建成功');
 }));
 
 router.put('/schedules/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {
@@ -696,7 +741,7 @@ router.put('/schedules/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async 
     status: req.body.status !== undefined ? Number(req.body.status) : row.status
   });
 
-  success(res, row, '排课更新成功');
+  success(res, serializeSchedule(row), '排课更新成功');
 }));
 
 router.delete('/schedules/:id', auth, requireRole(ADMIN_ROLES), asyncHandler(async (req, res) => {

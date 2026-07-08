@@ -77,7 +77,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="开播时间" prop="startTime">
-          <el-date-picker v-model="form.startTime" type="datetime" placeholder="选择时间" />
+          <el-date-picker v-model="form.startTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="选择时间" />
         </el-form-item>
       </el-form>
       <template #footer>

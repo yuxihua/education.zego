@@ -430,6 +430,24 @@ const buildCommonParams = () => {
   return params
 }
 
+const parseLocalDateTime = (value) => {
+  if (!value) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  const text = String(value).trim()
+  if (!text) return null
+
+  const normalized = text.replace('T', ' ').replace('Z', '')
+  const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2})(?::(\d{2}))?$/)
+  if (matched) {
+    const [, y, m, d, hh, mm, ss = '0'] = matched
+    const dt = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+    return Number.isNaN(dt.getTime()) ? null : dt
+  }
+
+  const dt = new Date(text)
+  return Number.isNaN(dt.getTime()) ? null : dt
+}
+
 const formatRange = (start, end) => {
   const fmt = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
   return `${fmt(start)} ~ ${fmt(end)}`
@@ -442,8 +460,8 @@ const weekRangeText = computed(() => {
 
 const weekGridDays = computed(() => {
   if (scheduleViewMode.value !== 'week' || !scheduleSearch.startDate) return []
-  const start = new Date(scheduleSearch.startDate)
-  if (Number.isNaN(start.getTime())) return []
+  const start = parseLocalDateTime(scheduleSearch.startDate)
+  if (!start) return []
 
   const names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   const days = Array.from({ length: 7 }).map((_, idx) => {
@@ -462,8 +480,8 @@ const weekGridDays = computed(() => {
   })
 
   for (const item of schedules.value || []) {
-    const dt = new Date(item.startTime)
-    if (Number.isNaN(dt.getTime())) continue
+    const dt = parseLocalDateTime(item.startTime)
+    if (!dt) continue
     const y = dt.getFullYear()
     const m = String(dt.getMonth() + 1).padStart(2, '0')
     const d = String(dt.getDate()).padStart(2, '0')
@@ -474,7 +492,11 @@ const weekGridDays = computed(() => {
   }
 
   days.forEach((day) => {
-    day.items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+    day.items.sort((a, b) => {
+      const ta = parseLocalDateTime(a.startTime)?.getTime() || 0
+      const tb = parseLocalDateTime(b.startTime)?.getTime() || 0
+      return ta - tb
+    })
   })
   return days
 })
@@ -526,8 +548,8 @@ const slotTimeText = (item) => {
 
 const getLaneItems = (day, lane) => {
   return (day?.items || []).filter((item) => {
-    const dt = new Date(item.startTime)
-    if (Number.isNaN(dt.getTime())) return false
+    const dt = parseLocalDateTime(item.startTime)
+    if (!dt) return false
     const minute = dt.getHours() * 60 + dt.getMinutes()
     const laneStart = lane.startHour * 60 + lane.startMinute
     const laneEnd = lane.endHour * 60 + lane.endMinute
@@ -584,9 +606,9 @@ const buildDropPayload = (drag, targetDay, targetLane) => {
     return null
   }
 
-  const start = new Date(String(drag.startTime).replace(' ', 'T'))
-  const end = new Date(String(drag.endTime).replace(' ', 'T'))
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+  const start = parseLocalDateTime(drag.startTime)
+  const end = parseLocalDateTime(drag.endTime)
+  if (!start || !end) {
     return null
   }
 
@@ -770,9 +792,9 @@ const applyScheduleViewRange = async () => {
 
 const moveWeek = async (step) => {
   if (scheduleViewMode.value !== 'week') return
-  const start = new Date(scheduleSearch.startDate)
-  const end = new Date(scheduleSearch.endDate)
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+  const start = parseLocalDateTime(scheduleSearch.startDate)
+  const end = parseLocalDateTime(scheduleSearch.endDate)
+  if (!start || !end) {
     await applyScheduleViewRange()
     return
   }
