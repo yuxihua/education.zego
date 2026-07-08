@@ -215,6 +215,32 @@ const fetchReplay = async (meetingID) => {
   return replay;
 };
 
+const buildCreateMeetingParams = (room) => {
+  const params = {
+    meetingID: normalizeMeetingId(room),
+    name: room.title || `直播间-${room.id}`,
+    attendeePW: room.studentPassword || `attendee-${room.id}`,
+    moderatorPW: room.anchorPassword || `moderator-${room.id}`,
+    welcome: config.meeting.welcome,
+    duration: config.meeting.defaultDuration,
+    maxParticipants: config.meeting.maxParticipants,
+    record: config.meeting.record,
+    autoStartRecording: config.meeting.autoStartRecording,
+    allowStartStopRecording: config.meeting.allowStartStopRecording,
+    endWhenNoModerator: config.meeting.endWhenNoModerator
+  };
+
+  if (Number.isInteger(config.meeting.meetingExpireWhenLastUserLeftInMinutes)) {
+    params.meetingExpireWhenLastUserLeftInMinutes = config.meeting.meetingExpireWhenLastUserLeftInMinutes;
+  }
+
+  if (Number.isInteger(config.meeting.endWhenNoModeratorDelayInMinutes)) {
+    params.endWhenNoModeratorDelayInMinutes = config.meeting.endWhenNoModeratorDelayInMinutes;
+  }
+
+  return params;
+};
+
 const deleteReplayByMeeting = async (meetingID) => {
   const payload = await callBbb('getRecordings', { meetingID });
   const recordings = listRecordings(payload.recordings);
@@ -250,18 +276,7 @@ router.post('/meeting/:roomId/create', auth, asyncHandler(async (req, res) => {
 
   if (!canJoinAsModerator(req, room)) return fail(res, '无权限创建会议', 403, 403);
 
-  const payload = await callBbb('create', {
-    meetingID,
-    name: room.title || `直播间-${room.id}`,
-    attendeePW: room.studentPassword || `attendee-${room.id}`,
-    moderatorPW: room.anchorPassword || `moderator-${room.id}`,
-    welcome: config.meeting.welcome,
-    duration: config.meeting.defaultDuration,
-    maxParticipants: config.meeting.maxParticipants,
-    record: config.meeting.record,
-    autoStartRecording: config.meeting.autoStartRecording,
-    allowStartStopRecording: config.meeting.allowStartStopRecording
-  });
+  const payload = await callBbb('create', buildCreateMeetingParams(room));
 
   return success(res, {
     roomId: room.id,
@@ -290,18 +305,7 @@ router.get('/join/:roomId', auth, asyncHandler(async (req, res) => {
   }
 
   // create 接口是幂等的，入会前主动调用可避免 meetingForciblyEnded 导致无法进入。
-  await callBbb('create', {
-    meetingID,
-    name: room.title || `直播间-${room.id}`,
-    attendeePW: room.studentPassword || `attendee-${room.id}`,
-    moderatorPW: room.anchorPassword || `moderator-${room.id}`,
-    welcome: config.meeting.welcome,
-    duration: config.meeting.defaultDuration,
-    maxParticipants: config.meeting.maxParticipants,
-    record: config.meeting.record,
-    autoStartRecording: config.meeting.autoStartRecording,
-    allowStartStopRecording: config.meeting.allowStartStopRecording
-  });
+  await callBbb('create', buildCreateMeetingParams(room));
 
   const fullName = req.user.nickname || req.user.username || '用户';
   const userId = req.user.studentId ? `student_${req.user.studentId}` : `user_${req.user.id}`;
