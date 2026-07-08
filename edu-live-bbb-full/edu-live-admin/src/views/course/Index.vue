@@ -31,7 +31,11 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="cover" label="封面" width="100">
           <template #default="{ row }">
-            <el-image :src="row.cover" style="width: 60px; height: 40px; border-radius: 4px" fit="cover" />
+            <el-image :src="resolveCoverUrl(row.cover)" style="width: 60px; height: 40px; border-radius: 4px" fit="cover">
+              <template #error>
+                <div class="cover-placeholder">无封面</div>
+              </template>
+            </el-image>
           </template>
         </el-table-column>
         <el-table-column prop="title" label="课程名称" min-width="200" />
@@ -95,7 +99,11 @@
             :on-error="handleUploadError"
             :show-file-list="false"
           >
-            <el-image v-if="form.cover" :src="form.cover" style="width: 200px; height: 120px" fit="cover" />
+            <el-image v-if="form.cover" :src="resolveCoverUrl(form.cover)" style="width: 200px; height: 120px" fit="cover">
+              <template #error>
+                <div class="cover-placeholder large">加载失败</div>
+              </template>
+            </el-image>
             <el-button v-else type="primary">上传封面</el-button>
           </el-upload>
         </el-form-item>
@@ -243,13 +251,20 @@ const handleArchive = async (row) => {
   loadData()
 }
 
+const resolveCoverUrl = (cover) => {
+  if (!cover) return ''
+  if (/^https?:\/\//i.test(cover)) return cover
+  if (cover.startsWith('/')) return cover
+  return `/${cover.replace(/^\/+/, '')}`
+}
+
 const handleUploadSuccess = (res) => {
   const url = res?.data?.url || res?.url
   if (!url) {
     ElMessage.error('上传返回异常，未获取到图片地址')
     return
   }
-  form.cover = url
+  form.cover = resolveCoverUrl(url)
 }
 
 const handleUploadError = () => {
@@ -283,4 +298,19 @@ onMounted(async () => {
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .search-form { margin-bottom: 20px; }
+.cover-placeholder {
+  width: 60px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.cover-placeholder.large {
+  width: 200px;
+  height: 120px;
+}
 </style>
