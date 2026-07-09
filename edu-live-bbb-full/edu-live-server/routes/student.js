@@ -220,7 +220,8 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
       studentId: student.id,
       role: 'student',
       nickname: student.nickname,
-      phone: student.phone
+      phone: student.phone,
+      institutionId: student.institutionId || 0
     });
 
     await redis.setex(cacheKey, 300, JSON.stringify({
@@ -316,7 +317,8 @@ router.post('/login', asyncHandler(async (req, res) => {
     studentId: student.id,
     role: 'student',
     nickname: student.nickname,
-    phone: student.phone
+    phone: student.phone,
+    institutionId: student.institutionId || 0
   });
 
   success(res, {

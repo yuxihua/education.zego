@@ -64,24 +64,37 @@ router.get('/list', optionalAuth, asyncHandler(async (req, res) => {
   } = req.query;
 
   const where = {};
+  const userRole = String(req.user?.role || '').trim().toLowerCase();
   
   if (status) where.status = status;
   if (category) where.category = category;
   if (req.user) {
-    if (req.user.role !== 'superadmin') {
+    if (userRole === 'superadmin') {
+      if (institutionId !== undefined && institutionId !== '') {
+        const institutionIdNum = Number(institutionId);
+        if (!Number.isNaN(institutionIdNum)) {
+          where.institutionId = institutionIdNum;
+        }
+      }
+    } else if (userRole === 'student' || userRole === 'parent') {
+      const tokenInstitutionId = Number(req.user.institutionId || 0);
+      if (tokenInstitutionId > 0) {
+        where.institutionId = tokenInstitutionId;
+      } else if (institutionId !== undefined && institutionId !== '') {
+        const institutionIdNum = Number(institutionId);
+        if (!Number.isNaN(institutionIdNum)) {
+          where.institutionId = institutionIdNum;
+        }
+      }
+    } else {
       where.institutionId = req.user.institutionId || 0;
-    } else if (institutionId !== undefined && institutionId !== '') {
+    }
+  } else if (institutionId !== undefined && institutionId !== '') {
       const institutionIdNum = Number(institutionId);
       if (!Number.isNaN(institutionIdNum)) {
         where.institutionId = institutionIdNum;
       }
     }
-  } else if (institutionId !== undefined && institutionId !== '') {
-    const institutionIdNum = Number(institutionId);
-    if (!Number.isNaN(institutionIdNum)) {
-      where.institutionId = institutionIdNum;
-    }
-  }
   if (keyword) {
     where.title = { [Op.like]: `%${keyword}%` };
   }
