@@ -284,6 +284,12 @@ const buyPreviewCourse = async () => {
 
 const buyByAlipay = async (course) => {
   const res = await studentCreateAlipayOrder(course.id)
+  if (res?.status === 'paid') {
+    ElMessage.success('已成功加入已购课程')
+    await loadMyCourses()
+    await loadMyRecordings()
+    return
+  }
   if (!res.formHtml) {
     ElMessage.error('下单失败：未获取支付表单')
     return

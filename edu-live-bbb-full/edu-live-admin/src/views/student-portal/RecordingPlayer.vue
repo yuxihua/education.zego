@@ -115,6 +115,11 @@ const startBuyCourse = async () => {
     return
   }
   const res = await studentCreateAlipayOrder(courseId.value)
+  if (res?.status === 'paid') {
+    ElMessage.success('购买成功，返回课程继续学习')
+    router.push('/student-center')
+    return
+  }
   if (!res.formHtml) {
     ElMessage.error('下单失败：未获取支付表单')
     return

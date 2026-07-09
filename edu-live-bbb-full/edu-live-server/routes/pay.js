@@ -63,6 +63,56 @@ async function ensureStudentInstitutionMatchCourse(student, course, res) {
   return true;
 }
 
+async function enrollFreeCourse(studentId, course) {
+  const paidOrder = await Order.findOne({
+    where: { studentId, courseId: course.id, status: 'paid' },
+    order: [['id', 'DESC']]
+  });
+
+  if (paidOrder) {
+    return { order: paidOrder, alreadyPurchased: true };
+  }
+
+  const pendingOrder = await Order.findOne({
+    where: { studentId, courseId: course.id, status: 'pending' },
+    order: [['id', 'DESC']]
+  });
+
+  const now = new Date();
+  const transactionId = `FREE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  let order = pendingOrder;
+
+  if (order) {
+    await order.update({
+      payType: 'free',
+      amount: 0,
+      status: 'paid',
+      payTime: now,
+      transactionId,
+      expireTime: null
+    });
+  } else {
+    order = await Order.create({
+      orderNo: generateOrderNo('F'),
+      studentId,
+      courseId: course.id,
+      institutionId: course.institutionId,
+      amount: 0,
+      payType: 'free',
+      status: 'paid',
+      payTime: now,
+      transactionId,
+      expireTime: null
+    });
+  }
+
+  await Course.increment('studentCount', {
+    where: { id: course.id }
+  });
+
+  return { order, alreadyPurchased: false };
+}
+
 // ========== 微信支付 ==========
 
 /**
@@ -89,6 +139,17 @@ router.post('/wx/create', auth, payLimiter, asyncHandler(async (req, res) => {
 
   if (!await ensureStudentInstitutionMatchCourse(student, course, res)) {
     return;
+  }
+
+  const amount = Number(course.price || 0);
+  if (amount <= 0) {
+    const freeResult = await enrollFreeCourse(studentId, course);
+    return success(res, {
+      orderNo: freeResult.order.orderNo,
+      orderId: freeResult.order.id,
+      payType: 'free',
+      status: 'paid'
+    }, freeResult.alreadyPurchased ? '已购买该课程' : '免费课程领取成功');
   }
 
   // 检查是否已购买
@@ -196,6 +257,17 @@ router.post('/alipay/create', auth, payLimiter, asyncHandler(async (req, res) =>
     return;
   }
 
+  const amount = Number(course.price || 0);
+  if (amount <= 0) {
+    const freeResult = await enrollFreeCourse(studentId, course);
+    return success(res, {
+      orderNo: freeResult.order.orderNo,
+      orderId: freeResult.order.id,
+      payType: 'free',
+      status: 'paid'
+    }, freeResult.alreadyPurchased ? '已购买该课程' : '免费课程领取成功');
+  }
+
   // 检查是否已购买
   const existOrder = await Order.findOne({
     where: { studentId, courseId, status: 'paid' }
@@ -251,6 +323,17 @@ router.post('/alipay/wap/create', auth, payLimiter, asyncHandler(async (req, res
 
   if (!await ensureStudentInstitutionMatchCourse(student, course, res)) {
     return;
+  }
+
+  const amount = Number(course.price || 0);
+  if (amount <= 0) {
+    const freeResult = await enrollFreeCourse(studentId, course);
+    return success(res, {
+      orderNo: freeResult.order.orderNo,
+      orderId: freeResult.order.id,
+      payType: 'free',
+      status: 'paid'
+    }, freeResult.alreadyPurchased ? '已购买该课程' : '免费课程领取成功');
   }
 
   const orderNo = generateOrderNo('A');
