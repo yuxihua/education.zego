@@ -198,7 +198,12 @@ const handleSubmit = async () => {
 }
 
 const goDetail = (row) => {
-  router.push(`/live/room/${row.id}`)
+  const id = typeof row === 'object' && row !== null ? row.id : row
+  if (!id || typeof id === 'object') {
+    ElMessage.warning('直播间参数无效，请刷新后重试')
+    return
+  }
+  router.push(`/live/room/${id}`)
 }
 
 const handleTeacherEnter = (row) => {

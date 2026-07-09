@@ -72,8 +72,8 @@
             <p style="margin-top: 10px">视频大小：{{ formatFileSize(replayInfo.size) }}</p>
             <p style="margin-top: 10px">回放数量：{{ replayList.length }}</p>
             <p style="margin-top: 10px; word-break: break-all">回放地址：{{ replayInfo.url }}</p>
-            <el-button type="primary" style="margin-top: 15px; width: 100%" @click="handleOpenReplay">查看回放</el-button>
-            <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayUrl">复制回放地址</el-button>
+            <el-button type="primary" style="margin-top: 15px; width: 100%" @click="handleOpenReplay()">查看回放</el-button>
+            <el-button plain style="margin-top: 10px; width: 100%" @click="handleCopyReplayUrl()">复制回放地址</el-button>
             <el-button
               v-if="canDeleteReplay"
               type="danger"
@@ -335,8 +335,10 @@ const copyText = async (text) => {
   return true
 }
 
+const normalizeReplayUrl = (value) => (typeof value === 'string' ? value.trim() : '')
+
 const handleOpenReplay = (targetUrl = '') => {
-  const url = targetUrl || replayInfo.value?.url
+  const url = normalizeReplayUrl(targetUrl) || normalizeReplayUrl(replayInfo.value?.url)
   if (!url) {
     ElMessage.warning('暂无可用回放地址')
     return
@@ -345,7 +347,7 @@ const handleOpenReplay = (targetUrl = '') => {
 }
 
 const handleCopyReplayUrl = async (targetUrl = '') => {
-  const url = targetUrl || replayInfo.value?.url
+  const url = normalizeReplayUrl(targetUrl) || normalizeReplayUrl(replayInfo.value?.url)
   if (!url) {
     ElMessage.warning('暂无可复制的回放地址')
     return
