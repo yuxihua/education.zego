@@ -24,7 +24,7 @@
     </el-card>
 
     <el-alert
-      title="本页面已切换为 BBB 入会模式，不再使用 ZEGO 拉流"
+      title="欢迎使用AI空中课堂"
       type="success"
       :closable="false"
       show-icon
