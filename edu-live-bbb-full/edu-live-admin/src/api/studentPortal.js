@@ -47,6 +47,7 @@ export const studentGetRecordingProgress = (params) => studentClient.get('/stude
 export const studentSaveRecordingProgress = (data) => studentClient.post('/student/recording-progress', data)
 export const studentLiveRoomByCourse = (courseId) => studentClient.get(`/live/student/course/${courseId}/room`)
 export const studentLiveRoomDetail = (roomId) => studentClient.get(`/live/student/room/${roomId}`)
+export const studentBbbJoin = (roomId) => studentClient.get(`/bbb/join/${roomId}`)
 export const studentLiveChatHistory = (roomId, params) => studentClient.get(`/live/room/${roomId}/chat/history`, { params })
 export const studentLiveSendChat = (roomId, data) => studentClient.post(`/live/room/${roomId}/chat/send`, data)
 

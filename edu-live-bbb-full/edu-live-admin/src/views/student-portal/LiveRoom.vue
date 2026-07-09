@@ -36,8 +36,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import request from '@/api/request'
-import { studentLiveRoomByCourse, studentLiveRoomDetail } from '@/api/studentPortal'
+import { studentLiveRoomByCourse, studentLiveRoomDetail, studentBbbJoin } from '@/api/studentPortal'
 
 const route = useRoute()
 const courseId = computed(() => route.params.courseId)
@@ -64,7 +63,7 @@ const joinMeeting = async () => {
 
   joining.value = true
   try {
-    const res = await request.get(`/bbb/join/${encodeURIComponent(roomInfo.value.id)}`)
+    const res = await studentBbbJoin(encodeURIComponent(roomInfo.value.id))
     joinUrl.value = res.joinUrl || ''
     if (!joinUrl.value) {
       ElMessage.error('未获取到入会链接')
