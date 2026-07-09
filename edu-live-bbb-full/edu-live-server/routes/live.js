@@ -13,6 +13,7 @@ const { liveLimiter } = require('../middleware/ratelimit');
 const redis = require('../config/redis');
 const { writeOperationLog } = require('../utils/operationLogWriter');
 const { callBbb } = require('../utils/bbbApi');
+const { col } = require('sequelize');
 
 function getOperatorInstitutionId(req) {
   return req.user?.institutionId || 0;
@@ -297,7 +298,16 @@ router.get('/student/course/:courseId/room', auth, asyncHandler(async (req, res)
     where: { courseId },
     include: [
       { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName', 'price'] },
-      { model: PPTFile, as: 'pptFiles', attributes: ['id', 'name', 'type', 'pageCount'] }
+      {
+        model: PPTFile,
+        as: 'pptFiles',
+        attributes: [
+          'id',
+          [col('filename'), 'name'],
+          [col('fileType'), 'type'],
+          'pageCount'
+        ]
+      }
     ],
     order: [['createdAt', 'DESC']]
   });
@@ -331,7 +341,16 @@ router.get('/student/room/:id', auth, asyncHandler(async (req, res) => {
   const room = await LiveRoom.findByPk(req.params.id, {
     include: [
       { model: Course, as: 'course', attributes: ['id', 'title', 'cover', 'teacherName', 'price'] },
-      { model: PPTFile, as: 'pptFiles', attributes: ['id', 'name', 'type', 'pageCount'] }
+      {
+        model: PPTFile,
+        as: 'pptFiles',
+        attributes: [
+          'id',
+          [col('filename'), 'name'],
+          [col('fileType'), 'type'],
+          'pageCount'
+        ]
+      }
     ]
   });
 
