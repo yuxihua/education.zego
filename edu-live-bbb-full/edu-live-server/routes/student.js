@@ -6,7 +6,7 @@ const router = express.Router();
 const { Op } = require('sequelize');
 const axios = require('axios');
 const crypto = require('crypto');
-const { Student, Order, Course, Homework, User } = require('../models');
+const { Student, Order, Course, Homework, User, LiveRoom } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, generateToken, requireRole } = require('../middleware/auth');
@@ -28,6 +28,45 @@ function isStudentIdentity(req) {
 
 function getOperatorInstitutionId(req) {
   return req.user?.institutionId || 0;
+}
+
+function getRecordingProgressKey(studentId, courseId, videoId) {
+  return `student:recording:progress:${studentId}:${courseId}:${videoId}`;
+}
+
+function safeParseJson(value, fallback = null) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function parsePublishedRecordedVideos(course) {
+  const raw = course?.toJSON ? course.toJSON() : course;
+  const outline = raw?.outline && typeof raw.outline === 'object' ? raw.outline : {};
+  const recordedVideos = Array.isArray(outline.recordedVideos) ? outline.recordedVideos : [];
+  return recordedVideos
+    .map((video, index) => {
+      const url = String(video?.url || '').trim();
+      if (!url) return null;
+      const status = String(video?.status || 'published').trim();
+      if (status !== 'published') return null;
+      return {
+        videoId: String(video?.id || `${raw.id}-${index + 1}`),
+        title: String(video?.title || '').trim() || `第${index + 1}节`,
+        replayUrl: url,
+        replayDuration: Math.max(0, Number(video?.duration || 0)),
+        trialDuration: Math.max(0, Number(video?.trialDuration || 0)),
+        videoCover: String(video?.cover || '').trim() || raw.cover || '',
+        sourceType: 'manual-upload',
+        sort: Number.isFinite(Number(video?.sort)) ? Number(video.sort) : index + 1,
+        updatedAt: video?.updatedAt || raw.updatedAt || null
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
 }
 
 /**
@@ -362,6 +401,263 @@ router.get('/my-courses', auth, asyncHandler(async (req, res) => {
     page: pageNum,
     size: pageSizeNum
   });
+}));
+
+/**
+ * 获取课程录播试听列表（含是否已购）
+ */
+router.get('/course/:courseId/recordings', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员或家长可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const courseId = Number(req.params.courseId || 0);
+  if (!courseId) {
+    return fail(res, '无效的课程ID', 400, 400);
+  }
+
+  const course = await Course.findByPk(courseId, {
+    attributes: ['id', 'title', 'cover', 'teacherName', 'price', 'status', 'enableReplay', 'outline', 'updatedAt']
+  });
+  if (!course) {
+    return fail(res, '课程不存在', 404, 404);
+  }
+  if (String(course.status || '') !== 'published') {
+    return fail(res, '课程未上架，暂不可试听', 400, 400);
+  }
+  if (course.enableReplay === false) {
+    return fail(res, '该课程未开启录播', 400, 400);
+  }
+
+  const paidOrder = await Order.findOne({ where: { studentId, courseId, status: 'paid' }, attributes: ['id'] });
+  const isPurchased = Boolean(paidOrder);
+
+  const list = parsePublishedRecordedVideos(course).map((item) => ({
+    ...item,
+    courseId: course.id,
+    courseTitle: course.title || '',
+    courseCover: course.cover || '',
+    teacherName: course.teacherName || '',
+    isPurchased,
+    trialDuration: isPurchased ? 0 : item.trialDuration
+  }));
+
+  success(res, {
+    courseId: course.id,
+    isPurchased,
+    list
+  });
+}));
+
+/**
+ * 我的录播课程（已购课程下有回放的场次）
+ */
+router.get('/my-recordings', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员或家长可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const { page = 1, size = 20, courseId, keyword } = req.query;
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(size, 10) || 20;
+
+  const paidOrders = await Order.findAll({
+    where: { studentId, status: 'paid' },
+    attributes: ['courseId']
+  });
+
+  let courseIds = [...new Set(paidOrders.map((item) => Number(item.courseId || 0)).filter(Boolean))];
+
+  if (courseId) {
+    const targetCourseId = Number(courseId);
+    if (!Number.isNaN(targetCourseId)) {
+      courseIds = courseIds.filter((id) => id === targetCourseId);
+    }
+  }
+
+  if (!courseIds.length) {
+    return success(res, {
+      list: [],
+      total: 0,
+      page: pageNum,
+      size: pageSizeNum
+    });
+  }
+
+  const where = {
+    courseId: { [Op.in]: courseIds },
+    replayUrl: {
+      [Op.and]: [
+        { [Op.ne]: null },
+        { [Op.ne]: '' }
+      ]
+    }
+  };
+
+  if (keyword) {
+    where.title = { [Op.like]: `%${keyword}%` };
+  }
+
+  const rows = await LiveRoom.findAll({
+    where,
+    include: [{
+      model: Course,
+      as: 'course',
+      attributes: ['id', 'title', 'cover', 'teacherName'],
+      where: { enableReplay: true },
+      required: true
+    }],
+    order: [['endTime', 'DESC'], ['createdAt', 'DESC']]
+  });
+
+  const liveReplayList = rows
+    .map((item) => item.toJSON())
+    .map((item) => ({
+      videoId: `live-room-${item.id}`,
+      roomId: item.id,
+      roomTitle: item.title,
+      courseId: item.courseId,
+      courseTitle: item.course?.title || '',
+      courseCover: item.course?.cover || '',
+      videoCover: item.course?.cover || '',
+      teacherName: item.course?.teacherName || '',
+      replayUrl: item.replayUrl,
+      replayDuration: Number(item.replayDuration || 0),
+      trialDuration: 0,
+      replaySize: Number(item.replaySize || 0),
+      endTime: item.endTime || null,
+      createdAt: item.createdAt || null,
+      sourceType: 'live-replay'
+    }));
+
+  const purchasedCourses = await Course.findAll({
+    where: { id: { [Op.in]: courseIds }, enableReplay: true },
+    attributes: ['id', 'title', 'cover', 'teacherName', 'outline', 'updatedAt']
+  });
+
+  const manualReplayList = purchasedCourses.flatMap((course) => {
+    const raw = course.toJSON();
+    const outline = raw.outline && typeof raw.outline === 'object' ? raw.outline : {};
+    const recordedVideos = Array.isArray(outline.recordedVideos) ? outline.recordedVideos : [];
+    return recordedVideos
+      .map((video, index) => {
+        const url = String(video?.url || '').trim();
+        if (!url) return null;
+        const title = String(video?.title || '').trim() || `第${index + 1}节`;
+        const rowText = `${raw.title || ''} ${title}`;
+        if (keyword && !rowText.includes(String(keyword))) return null;
+        return {
+          roomId: null,
+          roomTitle: title,
+          videoId: String(video?.id || `${raw.id}-${index + 1}`),
+          courseId: raw.id,
+          courseTitle: raw.title || '',
+          courseCover: raw.cover || '',
+          videoCover: String(video?.cover || '').trim() || raw.cover || '',
+          teacherName: raw.teacherName || '',
+          replayUrl: url,
+          replayDuration: Math.max(0, Number(video?.duration || 0)),
+          trialDuration: Math.max(0, Number(video?.trialDuration || 0)),
+          replaySize: Math.max(0, Number(video?.size || 0)),
+          endTime: video?.updatedAt || raw.updatedAt || null,
+          createdAt: video?.updatedAt || raw.updatedAt || null,
+          sourceType: 'manual-upload'
+        };
+      })
+      .filter(Boolean);
+  });
+
+  const merged = [...manualReplayList, ...liveReplayList]
+    .sort((a, b) => new Date(b.endTime || b.createdAt || 0).getTime() - new Date(a.endTime || a.createdAt || 0).getTime());
+
+  const total = merged.length;
+  const start = (pageNum - 1) * pageSizeNum;
+  const list = merged.slice(start, start + pageSizeNum);
+
+  const listWithProgress = await Promise.all(list.map(async (item) => {
+    const progressKey = getRecordingProgressKey(studentId, item.courseId, item.videoId);
+    const rawProgress = await redis.get(progressKey);
+    const progress = safeParseJson(rawProgress, null);
+    return {
+      ...item,
+      progressSeconds: Math.max(0, Number(progress?.progressSeconds || 0)),
+      progressPercent: Math.max(0, Number(progress?.progressPercent || 0)),
+      lastLearnAt: progress?.updatedAt || null
+    };
+  }));
+
+  success(res, {
+    list: listWithProgress,
+    total,
+    page: pageNum,
+    size: pageSizeNum
+  });
+}));
+
+/**
+ * 获取单个录播学习进度
+ */
+router.get('/recording-progress', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员或家长可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const courseId = Number(req.query.courseId || 0);
+  const videoId = String(req.query.videoId || '').trim();
+  if (!courseId || !videoId) {
+    return fail(res, '缺少 courseId 或 videoId', 400, 400);
+  }
+
+  const key = getRecordingProgressKey(studentId, courseId, videoId);
+  const raw = await redis.get(key);
+  const progress = safeParseJson(raw, {});
+  success(res, {
+    courseId,
+    videoId,
+    progressSeconds: Math.max(0, Number(progress?.progressSeconds || 0)),
+    durationSeconds: Math.max(0, Number(progress?.durationSeconds || 0)),
+    progressPercent: Math.max(0, Number(progress?.progressPercent || 0)),
+    updatedAt: progress?.updatedAt || null
+  });
+}));
+
+/**
+ * 保存录播学习进度
+ */
+router.post('/recording-progress', auth, asyncHandler(async (req, res) => {
+  if (!isStudentIdentity(req) && req.user.role !== 'superadmin') {
+    return fail(res, '仅学员或家长可访问', 403, 403);
+  }
+
+  const studentId = getCurrentStudentId(req);
+  const courseId = Number(req.body?.courseId || 0);
+  const videoId = String(req.body?.videoId || '').trim();
+  const progressSeconds = Math.max(0, Number(req.body?.progressSeconds || 0));
+  const durationSeconds = Math.max(0, Number(req.body?.durationSeconds || 0));
+  if (!courseId || !videoId) {
+    return fail(res, '缺少 courseId 或 videoId', 400, 400);
+  }
+
+  const progressPercent = durationSeconds > 0
+    ? Math.min(100, Math.round((progressSeconds / durationSeconds) * 100))
+    : 0;
+
+  const payload = {
+    courseId,
+    videoId,
+    progressSeconds,
+    durationSeconds,
+    progressPercent,
+    updatedAt: new Date().toISOString()
+  };
+
+  const key = getRecordingProgressKey(studentId, courseId, videoId);
+  await redis.setex(key, 3600 * 24 * 365, JSON.stringify(payload));
+
+  success(res, payload, '学习进度已保存');
 }));
 
 /**

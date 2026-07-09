@@ -27,6 +27,12 @@ export const routes = [
     meta: { public: true, studentAuth: true }
   },
   {
+    path: '/student-recording-player',
+    name: 'StudentRecordingPlayer',
+    component: () => import('@/views/student-portal/RecordingPlayer.vue'),
+    meta: { public: true, studentAuth: true }
+  },
+  {
     path: '/pay/result',
     name: 'StudentPayResult',
     component: () => import('@/views/student-portal/PayResult.vue'),

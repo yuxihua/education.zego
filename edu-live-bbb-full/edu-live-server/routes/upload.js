@@ -119,6 +119,53 @@ router.get('/images', auth, asyncHandler(async (req, res) => {
   });
 }));
 
+/**
+ * @GET /api/upload/videos
+ * 获取已上传视频列表（本地存储）
+ */
+router.get('/videos', auth, asyncHandler(async (req, res) => {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const size = Math.min(Math.max(parseInt(req.query.size, 10) || 12, 1), 100);
+  const videoDir = path.join(UPLOAD_DIR, 'video');
+
+  if (!fs.existsSync(videoDir)) {
+    return success(res, {
+      list: [],
+      total: 0,
+      page,
+      size
+    });
+  }
+
+  const allowExt = new Set(['.mp4', '.mov', '.avi', '.mkv']);
+  const fileNames = (await fs.promises.readdir(videoDir))
+    .filter((fileName) => allowExt.has(path.extname(fileName).toLowerCase()));
+
+  const files = await Promise.all(fileNames.map(async (fileName) => {
+    const fullPath = path.join(videoDir, fileName);
+    const stat = await fs.promises.stat(fullPath);
+    return {
+      name: fileName,
+      size: stat.size,
+      updatedAt: stat.mtime,
+      url: `/api/uploads/video/${encodeURIComponent(fileName)}`
+    };
+  }));
+
+  files.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  const total = files.length;
+  const start = (page - 1) * size;
+  const list = files.slice(start, start + size);
+
+  success(res, {
+    list,
+    total,
+    page,
+    size
+  });
+}));
+
 // OSS 客户端
 const ossClient = new OSS({
   region: process.env.OSS_REGION,

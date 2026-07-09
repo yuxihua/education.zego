@@ -11,6 +11,41 @@ const { asyncHandler } = require('../middleware/error');
 const { auth, requireRole, optionalAuth } = require('../middleware/auth');
 const { notifyLiveStart } = require('../utils/push');
 
+const parseRecordedVideos = (course) => {
+  const outline = course?.outline && typeof course.outline === 'object' ? course.outline : {};
+  const list = Array.isArray(outline.recordedVideos) ? outline.recordedVideos : [];
+  return list
+    .map((item, index) => {
+      const url = String(item?.url || '').trim();
+      return {
+        id: String(item?.id || `video-${Date.now()}-${index}`),
+        title: String(item?.title || '').trim() || `第${index + 1}节`,
+        url,
+        duration: Math.max(0, Number(item?.duration || 0)),
+        trialDuration: Math.max(0, Number(item?.trialDuration || 0)),
+        sort: Number.isFinite(Number(item?.sort)) ? Number(item.sort) : index + 1,
+        status: String(item?.status || 'published').trim() === 'draft' ? 'draft' : 'published',
+        cover: String(item?.cover || '').trim(),
+        updatedAt: item?.updatedAt || null
+      };
+    })
+    .filter((item) => item.url)
+    .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
+};
+
+const mergeOutlineWithRecordedVideos = (course, recordedVideos = []) => {
+  const oldOutline = course?.outline && typeof course.outline === 'object' ? course.outline : {};
+  return {
+    ...oldOutline,
+    recordedVideos
+  };
+};
+
+const hasCourseManagePermission = (course, req) => {
+  if (!course || !req?.user) return false;
+  return req.user.role === 'superadmin' || Number(course.institutionId || 0) === Number(req.user.institutionId || 0);
+};
+
 /**
  * @GET /api/course/list
  * 课程列表（公开接口，无需登录）
@@ -204,6 +239,77 @@ router.put('/:id', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncH
 
   await course.update(updateData);
   success(res, course, '课程更新成功');
+}));
+
+/**
+ * @GET /api/course/:id/recordings
+ * 获取课程录播视频（人工上传）
+ */
+router.get('/:id/recordings', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const course = await Course.findByPk(id);
+  if (!course) {
+    return fail(res, '课程不存在', 404, 404);
+  }
+  if (!hasCourseManagePermission(course, req)) {
+    return fail(res, '无权访问此课程', 403, 403);
+  }
+
+  const list = parseRecordedVideos(course);
+  success(res, {
+    courseId: course.id,
+    courseTitle: course.title,
+    type: course.type,
+    list
+  });
+}));
+
+/**
+ * @PUT /api/course/:id/recordings
+ * 更新课程录播视频（人工上传）
+ */
+router.put('/:id/recordings', auth, requireRole(['admin', 'superadmin', 'teacher']), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { list } = req.body || {};
+  const course = await Course.findByPk(id);
+
+  if (!course) {
+    return fail(res, '课程不存在', 404, 404);
+  }
+  if (!hasCourseManagePermission(course, req)) {
+    return fail(res, '无权修改此课程', 403, 403);
+  }
+  if (!Array.isArray(list)) {
+    return fail(res, 'list 必须为数组', 400, 400);
+  }
+
+  const normalized = list
+    .map((item, index) => {
+      const url = String(item?.url || '').trim();
+      if (!url) return null;
+      return {
+        id: String(item?.id || `video-${Date.now()}-${index}`),
+        title: String(item?.title || '').trim() || `第${index + 1}节`,
+        url,
+        duration: Math.max(0, Number(item?.duration || 0)),
+        trialDuration: Math.max(0, Number(item?.trialDuration || 0)),
+        sort: Number.isFinite(Number(item?.sort)) ? Number(item.sort) : index + 1,
+        status: String(item?.status || 'published').trim() === 'draft' ? 'draft' : 'published',
+        cover: String(item?.cover || '').trim(),
+        updatedAt: new Date().toISOString()
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
+
+  await course.update({
+    outline: mergeOutlineWithRecordedVideos(course, normalized)
+  });
+
+  success(res, {
+    courseId: course.id,
+    list: normalized
+  }, '录播视频已保存');
 }));
 
 /**
