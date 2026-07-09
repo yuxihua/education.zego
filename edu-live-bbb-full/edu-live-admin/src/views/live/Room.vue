@@ -94,6 +94,15 @@
                 <div class="replay-list-actions">
                   <el-button link type="primary" @click="handleOpenReplay(item.url)">查看</el-button>
                   <el-button link @click="handleCopyReplayUrl(item.url)">复制</el-button>
+                  <el-button
+                    v-if="canDeleteReplay"
+                    link
+                    type="danger"
+                    :loading="deletingReplayRecordId === item.recordingID"
+                    @click="handleDeleteReplayItem(item)"
+                  >
+                    删除
+                  </el-button>
                 </div>
               </div>
             </div>
@@ -171,7 +180,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayListByLiveRoom, deleteBbbReplayByLiveRoom } from '@/api/live'
+import { getLiveRoomDetail, getLiveStats, deleteLiveRoomPpt, getBbbReplayListByLiveRoom, deleteBbbReplayByLiveRoom, deleteBbbReplayItemByLiveRoom } from '@/api/live'
 
 const route = useRoute()
 const router = useRouter()
@@ -187,6 +196,7 @@ const pptLoading = ref(false)
 const uploading = ref(false)
 const generatingReplay = ref(false)
 const deletingReplay = ref(false)
+const deletingReplayRecordId = ref('')
 const replayPolling = ref(false)
 const replayPollCount = ref(0)
 
@@ -385,6 +395,32 @@ const handleDeleteReplay = async () => {
     ElMessage.success('回放已删除')
   } finally {
     deletingReplay.value = false
+  }
+}
+
+const handleDeleteReplayItem = async (item) => {
+  const recordingID = String(item?.recordingID || '').trim()
+  if (!recordingID) {
+    ElMessage.warning('当前回放缺少 recordingID，无法单独删除')
+    return
+  }
+
+  await ElMessageBox.confirm('确认删除该条回放？删除后不可恢复。', '提示', { type: 'warning' })
+  deletingReplayRecordId.value = recordingID
+  try {
+    await deleteBbbReplayItemByLiveRoom(roomId, recordingID)
+    await fetchReplayListByRoom({ silent: true })
+    if (!replayList.value.length) {
+      replayInfo.value = null
+      if (roomInfo.value) {
+        roomInfo.value.replayUrl = null
+        roomInfo.value.replayDuration = null
+        roomInfo.value.replaySize = null
+      }
+    }
+    ElMessage.success('该条回放已删除')
+  } finally {
+    deletingReplayRecordId.value = ''
   }
 }
 

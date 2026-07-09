@@ -9,6 +9,7 @@ const { LiveRoom, Course, Order } = require('../models');
 const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth } = require('../middleware/auth');
+const { writeOperationLog } = require('../utils/operationLogWriter');
 const config = require('../config/bbb');
 const { callBbb, toBool, listRecordings, buildJoinUrl } = require('../utils/bbbApi');
 
@@ -241,25 +242,34 @@ const buildCreateMeetingParams = (room) => {
   return params;
 };
 
-const deleteReplayByMeeting = async (meetingID) => {
+const deleteReplayByMeeting = async (meetingID, targetRecordID = '') => {
   const payload = await callBbb('getRecordings', { meetingID });
   const recordings = listRecordings(payload.recordings);
+  const normalizedTargetRecordID = String(targetRecordID || '').trim();
 
   const matched = recordings
     .filter(item => item?.recordID)
     .filter(item => isRecordingMatchMeeting(item, meetingID));
 
   const candidates = matched.length ? matched : (recordings.length === 1 ? recordings : []);
+  const finalCandidates = normalizedTargetRecordID
+    ? candidates.filter(item => String(item.recordID || '').trim() === normalizedTargetRecordID)
+    : candidates;
+
   const recordIDs = candidates
     .map(item => String(item.recordID || '').trim())
     .filter(Boolean);
 
-  if (!recordIDs.length) {
+  const targetRecordIDs = finalCandidates
+    .map(item => String(item.recordID || '').trim())
+    .filter(Boolean);
+
+  if (!targetRecordIDs.length) {
     return { deletedCount: 0, recordIDs: [] };
   }
 
-  await callBbb('deleteRecordings', { recordID: recordIDs.join(',') });
-  return { deletedCount: recordIDs.length, recordIDs };
+  await callBbb('deleteRecordings', { recordID: targetRecordIDs.join(',') });
+  return { deletedCount: targetRecordIDs.length, recordIDs: targetRecordIDs, allRecordIDs: recordIDs };
 };
 
 router.post('/meeting/:roomId/create', auth, asyncHandler(async (req, res) => {
@@ -445,6 +455,7 @@ router.get('/replay-room/:roomId/all', auth, asyncHandler(async (req, res) => {
 
 router.delete('/replay-room/:roomId', auth, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
+  const targetRecordID = String(req.query.recordingID || '').trim();
   const room = await LiveRoom.findByPk(roomId, {
     include: [{ model: Course, as: 'course', attributes: ['id', 'institutionId', 'price'] }]
   });
@@ -455,22 +466,42 @@ router.delete('/replay-room/:roomId', auth, asyncHandler(async (req, res) => {
   const meetingID = normalizeMeetingId(room);
   if (!meetingID) return fail(res, '缺少会议标识', 400, 400);
 
-  const deleted = await deleteReplayByMeeting(meetingID);
+  const deleted = await deleteReplayByMeeting(meetingID, targetRecordID);
   if (!deleted.deletedCount) {
-    return fail(res, '未找到可删除的回放', 404, 404);
+    return fail(res, targetRecordID ? '未找到指定回放' : '未找到可删除的回放', 404, 404);
   }
 
+  const payload = await callBbb('getRecordings', { meetingID });
+  const recordings = listRecordings(payload.recordings);
+  const latestList = listSessionReplays(recordings, meetingID);
+  const latest = latestList[0] || null;
+
   await room.update({
-    replayUrl: null,
-    replayDuration: null,
-    replaySize: null
+    replayUrl: latest?.url || null,
+    replayDuration: latest?.duration || null,
+    replaySize: latest?.size || null
+  });
+
+  await writeOperationLog(req, {
+    action: targetRecordID ? '删除单条回放' : '删除全部回放',
+    path: `/api/bbb/replay-room/${room.id}`,
+    payload: {
+      roomId: room.id,
+      meetingID,
+      recordingID: targetRecordID || null,
+      deletedCount: deleted.deletedCount,
+      recordIDs: deleted.recordIDs,
+      remainingCount: latestList.length
+    },
+    message: targetRecordID ? '单条回放已删除' : '回放已全部删除'
   });
 
   return success(res, {
     roomId: room.id,
     meetingID,
     deletedCount: deleted.deletedCount,
-    recordIDs: deleted.recordIDs
+    recordIDs: deleted.recordIDs,
+    remainingCount: latestList.length
   }, '回放删除成功');
 }));
 
