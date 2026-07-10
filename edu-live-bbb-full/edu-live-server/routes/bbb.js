@@ -319,7 +319,9 @@ router.get('/join/:roomId', auth, asyncHandler(async (req, res) => {
 
   const fullName = req.user.nickname || req.user.username || '用户';
   const userId = req.user.studentId ? `student_${req.user.studentId}` : `user_${req.user.id}`;
-  const preferredLayout = normalizeLayout(config.join?.defaultLayout);
+  const preferredLayout = isStudentIdentity(req)
+    ? 'SMART_LAYOUT'
+    : normalizeLayout(config.join?.defaultLayout);
 
   const joinParams = {
     meetingID,
