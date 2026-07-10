@@ -32,6 +32,11 @@
         @ended="handleEnded"
       />
     </el-card>
+
+    <div class="mobile-player-bar">
+      <div class="mobile-progress">进度 {{ progressPercent }}%</div>
+      <el-button class="mobile-back-btn" @click="goBack">返回学员中心</el-button>
+    </div>
   </div>
 </template>
 
@@ -197,6 +202,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .recording-player-page {
+  --mobile-btn-height: 42px;
+  --mobile-gap: 10px;
   max-width: 1100px;
   margin: 20px auto;
   padding: 0 12px;
@@ -226,5 +233,95 @@ onBeforeUnmount(() => {
   max-height: 72vh;
   background: #000;
   border-radius: 8px;
+}
+
+@media (max-width: 1024px) {
+  .recording-player-page {
+    margin: 12px auto;
+    padding: 0 10px;
+  }
+
+  .video-player {
+    min-height: 280px;
+    max-height: 64vh;
+  }
+}
+
+@media (max-width: 768px) {
+  .recording-player-page {
+    margin: 8px auto;
+    padding: 0 8px;
+    padding-bottom: 74px;
+  }
+
+  .header-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .title {
+    font-size: 16px;
+  }
+
+  .meta {
+    font-size: 12px;
+  }
+
+  .video-player {
+    min-height: 210px;
+    max-height: 56vh;
+    border-radius: 6px;
+  }
+
+  :deep(.el-card__body) {
+    padding: 12px;
+  }
+
+  .mobile-player-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--mobile-gap);
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(6px);
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.08);
+    animation: bar-slide-up 220ms ease-out;
+  }
+
+  .mobile-progress {
+    font-size: 13px;
+    color: #374151;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .mobile-back-btn {
+    min-width: 128px;
+    min-height: var(--mobile-btn-height);
+  }
+}
+
+@keyframes bar-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-player-bar {
+    display: none;
+  }
 }
 </style>

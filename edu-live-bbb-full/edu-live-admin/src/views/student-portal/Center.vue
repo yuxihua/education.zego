@@ -5,17 +5,18 @@
         <h2>学员中心</h2>
         <div class="meta">{{ profile.nickname || '学员' }} · {{ profile.phone || '-' }}</div>
       </div>
-      <div>
+      <div class="header-actions">
         <el-button @click="refreshAll">刷新</el-button>
         <el-button type="danger" plain @click="handleLogout">退出</el-button>
       </div>
     </div>
 
     <el-row :gutter="16">
-      <el-col :span="14">
+      <el-col :xs="24" :sm="24" :md="14" :lg="14">
         <el-card>
           <template #header><span>可选课程（已上架）</span></template>
-          <el-table :data="courseList" v-loading="courseLoading" border>
+          <div v-if="!isMobile" class="table-wrap">
+            <el-table :data="courseList" v-loading="courseLoading" border>
             <el-table-column prop="title" label="课程" min-width="220" />
             <el-table-column prop="teacherName" label="讲师" width="120" />
             <el-table-column prop="price" label="价格" width="100">
@@ -23,18 +24,32 @@
             </el-table-column>
             <el-table-column label="操作" width="170">
               <template #default="{ row }">
-                <el-button type="primary" link @click="buyByAlipay(row)">支付宝下单</el-button>
+                <el-button type="primary" link :loading="orderSubmitting" @click="buyByAlipay(row)">支付宝下单</el-button>
                 <el-button type="success" link @click="previewRecording(row)">试听录播</el-button>
               </template>
             </el-table-column>
-          </el-table>
+            </el-table>
+          </div>
+          <div v-else class="mobile-list" v-loading="courseLoading">
+            <el-empty v-if="!courseList.length" description="暂无可选课程" />
+            <div v-for="row in courseList" :key="`course-${row.id}`" class="mobile-item">
+              <div class="mobile-item-title">{{ row.title || '-' }}</div>
+              <div class="mobile-item-meta">讲师：{{ row.teacherName || '-' }}</div>
+              <div class="mobile-item-meta">价格：¥{{ row.price }}</div>
+              <div class="mobile-item-actions">
+                <el-button type="primary" size="small" :loading="orderSubmitting" @click="buyByAlipay(row)">支付宝下单</el-button>
+                <el-button type="success" plain size="small" @click="previewRecording(row)">试听录播</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
       </el-col>
 
-      <el-col :span="10">
+      <el-col :xs="24" :sm="24" :md="10" :lg="10">
         <el-card>
           <template #header><span>我的已购课程</span></template>
-          <el-table :data="myCourses" v-loading="myCourseLoading" border>
+          <div v-if="!isMobile" class="table-wrap">
+            <el-table :data="myCourses" v-loading="myCourseLoading" border>
             <el-table-column label="课程" min-width="150">
               <template #default="{ row }">{{ row.course?.title || '-' }}</template>
             </el-table-column>
@@ -47,14 +62,27 @@
                 <el-button type="primary" link @click="enterLive(row)">进入直播</el-button>
               </template>
             </el-table-column>
-          </el-table>
+            </el-table>
+          </div>
+          <div v-else class="mobile-list" v-loading="myCourseLoading">
+            <el-empty v-if="!myCourses.length" description="暂无已购课程" />
+            <div v-for="row in myCourses" :key="`my-course-${row.id}`" class="mobile-item">
+              <div class="mobile-item-title">{{ row.course?.title || '-' }}</div>
+              <div class="mobile-item-meta">金额：¥{{ row.amount }}</div>
+              <div class="mobile-item-meta">支付时间：{{ row.payTime || '-' }}</div>
+              <div class="mobile-item-actions">
+                <el-button type="primary" size="small" @click="enterLive(row)">进入直播</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
 
     <el-card style="margin-top: 16px">
       <template #header><span>录播学习</span></template>
-      <el-table :data="recordings" v-loading="recordingLoading" border>
+      <div v-if="!isMobile" class="table-wrap">
+        <el-table :data="recordings" v-loading="recordingLoading" border>
         <el-table-column prop="courseTitle" label="课程" min-width="180" />
         <el-table-column prop="roomTitle" label="录播场次" min-width="180" />
         <el-table-column label="来源" width="120">
@@ -76,14 +104,30 @@
             <el-button type="primary" link @click="startLearning(row)">{{ Number(row.progressPercent || 0) > 0 ? '继续学习' : '开始学习' }}</el-button>
           </template>
         </el-table-column>
-      </el-table>
-      <el-empty v-if="!recordingLoading && !recordings.length" description="暂无可学习录播" />
+        </el-table>
+      </div>
+      <div v-else class="mobile-list" v-loading="recordingLoading">
+        <el-empty v-if="!recordings.length" description="暂无可学习录播" />
+        <div v-for="row in recordings" :key="`recording-${row.recordingID || row.videoId}`" class="mobile-item">
+          <div class="mobile-item-title">{{ row.roomTitle || row.courseTitle || '-' }}</div>
+          <div class="mobile-item-meta">课程：{{ row.courseTitle || '-' }}</div>
+          <div class="mobile-item-meta">讲师：{{ row.teacherName || '-' }}</div>
+          <div class="mobile-item-meta">来源：{{ row.sourceType === 'manual-upload' ? '手工上传' : '直播回放' }}</div>
+          <div class="mobile-item-meta">时长：{{ formatDuration(row.replayDuration) }}</div>
+          <div class="mobile-item-meta">进度：{{ Number(row.progressPercent || 0) }}%</div>
+          <div class="mobile-item-actions">
+            <el-button type="primary" size="small" @click="startLearning(row)">{{ Number(row.progressPercent || 0) > 0 ? '继续学习' : '开始学习' }}</el-button>
+          </div>
+        </div>
+      </div>
+      <el-empty v-if="!isMobile && !recordingLoading && !recordings.length" description="暂无可学习录播" />
     </el-card>
 
-    <el-dialog v-model="previewDialogVisible" :title="`录播章节试听 - ${previewCourseTitle}`" width="820px">
+    <el-dialog v-model="previewDialogVisible" :title="`录播章节试听 - ${previewCourseTitle}`" width="820px" class="preview-dialog">
       <el-skeleton v-if="previewLoading" :rows="6" animated />
       <el-empty v-else-if="!previewRecordings.length" description="该课程暂无可试听录播" />
-      <el-table v-else :data="previewRecordings" border max-height="420">
+      <div v-else-if="!isMobile" class="table-wrap">
+        <el-table :data="previewRecordings" border max-height="420">
         <el-table-column prop="title" label="章节" min-width="220" />
         <el-table-column label="时长" width="120">
           <template #default="{ row }">{{ formatDuration(row.replayDuration) }}</template>
@@ -96,17 +140,28 @@
             <el-button type="primary" link @click="startPreviewLearning(row)">开始</el-button>
           </template>
         </el-table-column>
-      </el-table>
+        </el-table>
+      </div>
+      <div v-else class="mobile-list preview-mobile-list">
+        <div v-for="row in previewRecordings" :key="`preview-${row.videoId || row.title}`" class="mobile-item">
+          <div class="mobile-item-title">{{ row.title || '-' }}</div>
+          <div class="mobile-item-meta">时长：{{ formatDuration(row.replayDuration) }}</div>
+          <div class="mobile-item-meta">试看：{{ row.trialDuration ? formatDuration(row.trialDuration) : '不限' }}</div>
+          <div class="mobile-item-actions">
+            <el-button type="primary" size="small" @click="startPreviewLearning(row)">开始</el-button>
+          </div>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="previewDialogVisible = false">关闭</el-button>
-        <el-button v-if="!previewIsPurchased && previewCourseId" type="success" @click="buyPreviewCourse">购买本课程</el-button>
+        <el-button v-if="!previewIsPurchased && previewCourseId" type="success" :loading="orderSubmitting" @click="buyPreviewCourse">购买本课程</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -138,6 +193,12 @@ const previewRecordings = ref([])
 const courseLoading = ref(false)
 const myCourseLoading = ref(false)
 const recordingLoading = ref(false)
+const isMobile = ref(false)
+const orderSubmitting = ref(false)
+
+const updateViewport = () => {
+  isMobile.value = window.innerWidth <= 768
+}
 
 const loadProfile = async () => {
   profile.value = await studentProfile()
@@ -234,6 +295,7 @@ const startLearning = (row) => {
 }
 
 const previewRecording = async (courseRow) => {
+  if (previewLoading.value) return
   const courseId = Number(courseRow?.id || 0)
   if (!courseId) {
     ElMessage.warning('课程信息无效，无法试听')
@@ -283,16 +345,19 @@ const buyPreviewCourse = async () => {
 }
 
 const buyByAlipay = async (course) => {
+  if (orderSubmitting.value) return
+  orderSubmitting.value = true
+  try {
   const res = await studentCreateAlipayOrder(course.id)
   if (res?.status === 'paid') {
     ElMessage.success('已成功加入已购课程')
     await loadMyCourses()
     await loadMyRecordings()
-    return
+      return
   }
   if (!res.formHtml) {
     ElMessage.error('下单失败：未获取支付表单')
-    return
+      return
   }
 
   // 支付宝返回的是自动提交表单，插入后会跳转收银台。
@@ -306,6 +371,9 @@ const buyByAlipay = async (course) => {
   } else {
     ElMessage.error('支付表单解析失败')
   }
+  } finally {
+    orderSubmitting.value = false
+  }
 }
 
 const handleLogout = async () => {
@@ -316,11 +384,22 @@ const handleLogout = async () => {
   router.push('/student-login')
 }
 
-onMounted(refreshAll)
+onMounted(() => {
+  updateViewport()
+  window.addEventListener('resize', updateViewport)
+  refreshAll()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewport)
+})
 </script>
 
 <style scoped>
 .student-center {
+  --mobile-btn-height: 42px;
+  --mobile-card-radius: 10px;
+  --mobile-gap: 8px;
   padding: 20px;
 }
 
@@ -331,7 +410,145 @@ onMounted(refreshAll)
   align-items: center;
 }
 
+.header-actions {
+  display: flex;
+  gap: var(--mobile-gap);
+  flex-wrap: wrap;
+}
+
 .meta {
   color: #666;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table-wrap :deep(.el-table) {
+  min-width: 640px;
+}
+
+.mobile-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-item {
+  border: 1px solid #ebeef5;
+  border-radius: var(--mobile-card-radius);
+  padding: 10px;
+  background: #fff;
+  transition: transform 140ms ease, box-shadow 180ms ease;
+}
+
+.mobile-item:active {
+  transform: translateY(1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
+.mobile-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 6px;
+}
+
+.mobile-item-meta {
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.mobile-item-actions {
+  display: flex;
+  gap: var(--mobile-gap);
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.preview-mobile-list {
+  max-height: 56vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 1024px) {
+  .student-center {
+    padding: 14px;
+  }
+
+  .header {
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .header > div:last-child {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  :deep(.preview-dialog) {
+    width: min(820px, 92vw) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .student-center {
+    padding: 10px;
+  }
+
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    margin: -10px -10px 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid #eef2f7;
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+  }
+
+  .header h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+
+  .meta {
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .mobile-item-actions :deep(.el-button) {
+    flex: 1;
+    min-width: 110px;
+    min-height: var(--mobile-btn-height);
+  }
+
+  .table-wrap :deep(.el-table) {
+    min-width: 560px;
+  }
+
+  :deep(.el-card__header) {
+    padding: 12px 14px;
+  }
+
+  :deep(.el-card__body) {
+    padding: 12px;
+  }
+
+  :deep(.el-dialog__header) {
+    padding-right: 28px;
+  }
+
+  :deep(.el-dialog__footer) {
+    display: flex;
+    gap: var(--mobile-gap);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 </style>

@@ -13,8 +13,10 @@
           <el-input v-model="form.nickname" placeholder="首次登录可填写昵称" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="handleLogin">登录</el-button>
-          <el-button @click="goAdminLogin">后台登录</el-button>
+          <div class="login-actions">
+            <el-button class="btn-login" type="primary" :loading="loading" @click="handleLogin">登录</el-button>
+            <el-button class="btn-admin" @click="goAdminLogin">后台登录</el-button>
+          </div>
         </el-form-item>
       </el-form>
     </div>
@@ -192,6 +194,9 @@ onMounted(() => {
 
 <style scoped>
 .student-login-page {
+  --mobile-btn-height: 42px;
+  --mobile-radius: 10px;
+  --mobile-gap: 8px;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -201,6 +206,7 @@ onMounted(() => {
 
 .login-card {
   width: 460px;
+  max-width: 100%;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.08);
@@ -256,5 +262,85 @@ h2 {
 .hint {
   color: #6b7280;
   font-size: 12px;
+}
+
+.login-actions {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn-login {
+  flex: 1;
+}
+
+.btn-admin {
+  margin-left: 0 !important;
+}
+
+@media (max-width: 1024px) {
+  .student-login-page {
+    padding: 24px 16px;
+    align-items: flex-start;
+  }
+
+  .login-card {
+    width: min(560px, 100%);
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .student-login-page {
+    padding: 16px 12px;
+  }
+
+  .login-card {
+    border-radius: var(--mobile-radius);
+    padding: 18px 14px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    animation: card-fade-in 220ms ease-out;
+  }
+
+  h2 {
+    margin-bottom: 14px;
+    font-size: 20px;
+  }
+
+  :deep(.el-form-item) {
+    margin-bottom: 14px;
+  }
+
+  :deep(.el-form-item__content) {
+    width: 100%;
+  }
+
+  .login-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--mobile-gap);
+  }
+
+  .login-actions :deep(.el-button) {
+    width: 100%;
+    min-height: var(--mobile-btn-height);
+    transition: transform 120ms ease, box-shadow 160ms ease;
+  }
+
+  .login-actions :deep(.el-button:active) {
+    transform: translateY(1px);
+  }
+}
+
+@keyframes card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
