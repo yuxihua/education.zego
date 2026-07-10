@@ -26,7 +26,7 @@ module.exports = {
   },
 
   join: {
-    defaultLayout: process.env.BBB_DEFAULT_LAYOUT || 'VIDEO_FOCUS',
+    defaultLayout: process.env.BBB_DEFAULT_LAYOUT || 'SMART_LAYOUT',
     enforceLayout: (process.env.BBB_ENFORCE_LAYOUT || 'false') === 'true',
     useDefaultLayoutOnJoin: (process.env.BBB_USE_DEFAULT_LAYOUT_ON_JOIN || 'true') === 'true'
   }

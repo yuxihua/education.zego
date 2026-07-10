@@ -245,24 +245,44 @@ router.get('/wx/callback', asyncHandler(async (req, res) => {
 }));
 
 /**
- * 学员登录（手机号/微信标识）
+ * 学员登录（手机号/账号名/微信标识）
  */
 router.post('/login', asyncHandler(async (req, res) => {
-  const { phone, password, nickname, openid, unionid, avatar, source = 'web', institutionId } = req.body;
+  const {
+    phone,
+    loginAccount,
+    password,
+    nickname,
+    openid,
+    unionid,
+    avatar,
+    source = 'web',
+    institutionId
+  } = req.body;
+  const normalizedPhone = String(phone || '').trim();
+  const normalizedLoginAccount = String(loginAccount || '').trim();
+  const account = normalizedPhone || normalizedLoginAccount;
   const institutionIdNum = institutionId ? Number(institutionId) : 0;
 
-  if (!phone && !openid) {
-    return fail(res, '手机号或openid至少填写一个', 400, 400);
+  if (!account && !openid) {
+    return fail(res, '手机号或登录账号名或openid至少填写一个', 400, 400);
   }
 
   let student = null;
 
-  if (phone) {
+  if (account) {
     if (!password) {
       return fail(res, '请输入密码', 400, 400);
     }
 
-    student = await Student.findOne({ where: { phone } });
+    student = await Student.findOne({
+      where: {
+        [Op.or]: [
+          { phone: account },
+          { nickname: account }
+        ]
+      }
+    });
     if (!student) {
       return fail(res, '学员账号不存在，请联系机构创建', 404, 404);
     }
@@ -277,7 +297,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
     const isValid = await student.validatePassword(password);
     if (!isValid) {
-      return fail(res, '手机号或密码错误', 401, 401);
+      return fail(res, '手机号/账号名或密码错误', 401, 401);
     }
 
     const patch = {};

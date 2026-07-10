@@ -120,7 +120,7 @@ const normalizeLayout = (value) => {
     'MEDIA_ONLY'
   ]);
   const layout = String(value || '').trim().toUpperCase();
-  return validLayouts.has(layout) ? layout : 'VIDEO_FOCUS';
+  return validLayouts.has(layout) ? layout : 'SMART_LAYOUT';
 };
 const getCurrentStudentId = (req) => req.user?.studentId || req.user?.id || 0;
 const normalizeJoinRole = (value) => {

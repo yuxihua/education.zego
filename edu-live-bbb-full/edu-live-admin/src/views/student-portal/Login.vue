@@ -3,8 +3,8 @@
     <div class="login-card">
       <h2>学员登录</h2>
       <el-form :model="form" label-width="90px">
-        <el-form-item label="手机号">
-          <el-input v-model="form.phone" placeholder="请输入手机号" />
+        <el-form-item label="登录账号">
+          <el-input v-model="form.phone" placeholder="请输入手机号或账号名" />
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="form.password" type="password" show-password placeholder="请输入登录密码" />
@@ -12,31 +12,11 @@
         <el-form-item label="昵称">
           <el-input v-model="form.nickname" placeholder="首次登录可填写昵称" />
         </el-form-item>
-        <el-form-item label="OpenID">
-          <el-input v-model="form.openid" placeholder="微信场景可填写" />
-        </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="handleLogin">登录</el-button>
           <el-button @click="goAdminLogin">后台登录</el-button>
         </el-form-item>
       </el-form>
-
-      <el-divider>或使用微信扫码登录</el-divider>
-      <div class="wx-login">
-        <div class="qr-wrapper" v-if="wxLogin.qrUrl">
-          <img :src="wxLogin.qrUrl" alt="微信扫码登录" class="qr-image" />
-        </div>
-        <div v-else class="qr-placeholder">点击下方按钮生成二维码</div>
-
-        <div class="wx-actions">
-          <el-button type="success" :loading="wxLogin.loading" @click="createWxQrLogin">
-            {{ wxLogin.qrUrl ? '刷新二维码' : '微信扫码登录' }}
-          </el-button>
-          <span v-if="wxLogin.state" class="hint">
-            二维码剩余 {{ wxLogin.remainSeconds }} 秒，扫码后会自动登录
-          </span>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -164,12 +144,12 @@ const createWxQrLogin = async (silent = false) => {
 }
 
 const handleLogin = async () => {
-  if (!form.phone && !form.openid) {
-    ElMessage.warning('手机号或OpenID至少填写一个')
+  if (!form.phone) {
+    ElMessage.warning('请输入手机号或账号名')
     return
   }
 
-  if (form.phone && !form.password) {
+  if (!form.password) {
     ElMessage.warning('请输入登录密码')
     return
   }
