@@ -86,13 +86,27 @@ const getRecordingPlaybackUrl = (recording) => {
   return format?.url || '';
 };
 
+const getRecordingDurationSeconds = (recording = {}, format = null) => {
+  const formatLength = Number(format?.length || 0);
+  if (Number.isFinite(formatLength) && formatLength > 0) {
+    return Math.round(formatLength * 60);
+  }
+
+  const playbackDuration = Number(recording?.playback?.duration || 0);
+  if (Number.isFinite(playbackDuration) && playbackDuration > 0) {
+    return Math.round(playbackDuration);
+  }
+
+  return 0;
+};
+
 const buildReplayPayload = (recording = {}) => {
   const format = getPreferredPlaybackFormat(recording);
   return {
     url: format?.url || '',
     recordingID: recording.recordID || '',
     size: Number(recording.size || 0),
-    duration: Number(format?.length || recording.playback?.duration || 0),
+    duration: getRecordingDurationSeconds(recording, format),
     startTime: recording.startTime || null,
     endTime: recording.endTime || null,
     publishedAt: recording.publishedDate || null
