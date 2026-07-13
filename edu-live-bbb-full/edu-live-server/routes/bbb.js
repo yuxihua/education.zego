@@ -61,7 +61,7 @@ const isRecordingMatchMeeting = (recording, meetingID) => {
   return getMeetingCandidates(recording).includes(target);
 };
 
-const PLAYBACK_TYPE_PRIORITY = ['presentation', 'video', 'screenshare', 'podcast'];
+const PLAYBACK_TYPE_PRIORITY = ['video', 'presentation', 'screenshare', 'podcast'];
 
 const getPreferredPlaybackFormat = (recording) => {
   const playback = recording?.playback?.format;
