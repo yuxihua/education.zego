@@ -98,7 +98,9 @@
         <el-table-column label="进度" width="120">
           <template #default="{ row }">{{ Number(row.progressPercent || 0) }}%</template>
         </el-table-column>
-        <el-table-column prop="endTime" label="结束时间" width="170" />
+        <el-table-column label="结束时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.endTime) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button type="primary" link @click="startLearning(row)">{{ Number(row.progressPercent || 0) > 0 ? '继续学习' : '开始学习' }}</el-button>
@@ -115,6 +117,7 @@
           <div class="mobile-item-meta">来源：{{ row.sourceType === 'manual-upload' ? '手工上传' : '直播回放' }}</div>
           <div class="mobile-item-meta">时长：{{ formatDuration(row.replayDuration) }}</div>
           <div class="mobile-item-meta">进度：{{ Number(row.progressPercent || 0) }}%</div>
+          <div class="mobile-item-meta">结束时间：{{ formatDateTime(row.endTime) }}</div>
           <div class="mobile-item-actions">
             <el-button type="primary" size="small" @click="startLearning(row)">{{ Number(row.progressPercent || 0) > 0 ? '继续学习' : '开始学习' }}</el-button>
           </div>
@@ -273,6 +276,33 @@ const formatDuration = (seconds) => {
   const s = total % 60
   if (h) return `${h}h ${String(m).padStart(2, '0')}m`
   return `${m}m ${String(s).padStart(2, '0')}s`
+}
+
+const formatDateTime = (value) => {
+  if (!value && value !== 0) return '-'
+  const text = String(value).trim()
+  if (!text) return '-'
+
+  let timestamp = 0
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text)
+    if (!Number.isFinite(numeric)) return '-'
+    timestamp = numeric > 1e12 ? numeric : numeric * 1000
+  } else {
+    timestamp = Date.parse(text)
+  }
+
+  if (!Number.isFinite(timestamp) || Number.isNaN(timestamp) || timestamp <= 0) return '-'
+
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '-'
+
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`
 }
 
 const openRecording = (row, options = {}) => {

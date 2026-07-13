@@ -121,10 +121,10 @@ function isRecordingMatchMeeting(recording, meetingID) {
 
 const PLAYBACK_TYPE_PRIORITY = ['presentation', 'video', 'screenshare', 'podcast'];
 
-function getRecordingPlaybackUrl(recording) {
+function getPreferredPlaybackFormat(recording) {
   const playback = recording?.playback?.format;
   const playbackItems = (Array.isArray(playback) ? playback : [playback]).filter((item) => item?.url);
-  if (!playbackItems.length) return '';
+  if (!playbackItems.length) return null;
 
   const sorted = [...playbackItems].sort((left, right) => {
     const leftType = normalizeKey(left?.type);
@@ -136,15 +136,21 @@ function getRecordingPlaybackUrl(recording) {
     return normalizedLeft - normalizedRight;
   });
 
-  return sorted[0]?.url || '';
+  return sorted[0] || null;
+}
+
+function getRecordingPlaybackUrl(recording) {
+  const format = getPreferredPlaybackFormat(recording);
+  return format?.url || '';
 }
 
 function buildReplayPayload(recording = {}) {
+  const format = getPreferredPlaybackFormat(recording);
   return {
-    url: getRecordingPlaybackUrl(recording),
+    url: format?.url || '',
     recordingID: String(recording.recordID || '').trim(),
     size: Number(recording.size || 0),
-    duration: Number(recording.playback?.duration || 0),
+    duration: Number(format?.length || recording.playback?.duration || 0),
     startTime: recording.startTime || null,
     endTime: recording.endTime || null,
     publishedAt: recording.publishedDate || null

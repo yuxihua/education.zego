@@ -63,10 +63,10 @@ const isRecordingMatchMeeting = (recording, meetingID) => {
 
 const PLAYBACK_TYPE_PRIORITY = ['presentation', 'video', 'screenshare', 'podcast'];
 
-const getRecordingPlaybackUrl = (recording) => {
+const getPreferredPlaybackFormat = (recording) => {
   const playback = recording?.playback?.format;
   const playbackItems = (Array.isArray(playback) ? playback : [playback]).filter(item => item?.url);
-  if (!playbackItems.length) return '';
+  if (!playbackItems.length) return null;
 
   const sorted = [...playbackItems].sort((left, right) => {
     const leftType = normalizeKey(left?.type);
@@ -78,18 +78,26 @@ const getRecordingPlaybackUrl = (recording) => {
     return normalizedLeft - normalizedRight;
   });
 
-  return sorted[0]?.url || '';
+  return sorted[0] || null;
 };
 
-const buildReplayPayload = (recording = {}) => ({
-  url: getRecordingPlaybackUrl(recording),
-  recordingID: recording.recordID || '',
-  size: Number(recording.size || 0),
-  duration: Number(recording.playback?.duration || 0),
-  startTime: recording.startTime || null,
-  endTime: recording.endTime || null,
-  publishedAt: recording.publishedDate || null
-});
+const getRecordingPlaybackUrl = (recording) => {
+  const format = getPreferredPlaybackFormat(recording);
+  return format?.url || '';
+};
+
+const buildReplayPayload = (recording = {}) => {
+  const format = getPreferredPlaybackFormat(recording);
+  return {
+    url: format?.url || '',
+    recordingID: recording.recordID || '',
+    size: Number(recording.size || 0),
+    duration: Number(format?.length || recording.playback?.duration || 0),
+    startTime: recording.startTime || null,
+    endTime: recording.endTime || null,
+    publishedAt: recording.publishedDate || null
+  };
+};
 
 const listSessionReplays = (recordings = [], meetingID = '') => recordings
   .filter(item => item && toBool(item.published))
