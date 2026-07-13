@@ -11,6 +11,7 @@ const { success, fail } = require('../utils/response');
 const { asyncHandler } = require('../middleware/error');
 const { auth, generateToken, requireRole } = require('../middleware/auth');
 const redis = require('../config/redis');
+const { callBbb, listRecordings, toBool } = require('../utils/bbbApi');
 
 const WX_WEB_APP_ID = process.env.WX_WEB_APP_ID || '';
 const WX_WEB_APP_SECRET = process.env.WX_WEB_APP_SECRET || '';
@@ -67,6 +68,156 @@ function parsePublishedRecordedVideos(course) {
     })
     .filter(Boolean)
     .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
+}
+
+function normalizeKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function toTimestamp(value) {
+  if (!value && value !== 0) return 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return 0;
+    return numeric > 1e12 ? numeric : numeric * 1000;
+  }
+
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getMeetingCandidates(recording = {}) {
+  const values = [];
+
+  const pushValue = (input) => {
+    const normalized = normalizeKey(input);
+    if (!normalized) return;
+    values.push(normalized);
+  };
+
+  pushValue(recording.meetingID);
+  pushValue(recording.meetingId);
+  pushValue(recording.internalMeetingID);
+  pushValue(recording.internalMeetingId);
+
+  const metadata = recording.metadata || {};
+  Object.entries(metadata).forEach(([key, value]) => {
+    const keyText = normalizeKey(key);
+    if (!keyText.includes('meeting') || !keyText.includes('id')) return;
+    pushValue(value);
+  });
+
+  return values;
+}
+
+function isRecordingMatchMeeting(recording, meetingID) {
+  const target = normalizeKey(meetingID);
+  if (!target) return false;
+  return getMeetingCandidates(recording).includes(target);
+}
+
+function getRecordingPlaybackUrl(recording) {
+  const playback = recording?.playback?.format;
+  const playbackItems = Array.isArray(playback) ? playback : [playback];
+  const firstPlayable = playbackItems.find((item) => item?.url);
+  return firstPlayable?.url || '';
+}
+
+function buildReplayPayload(recording = {}) {
+  return {
+    url: getRecordingPlaybackUrl(recording),
+    recordingID: String(recording.recordID || '').trim(),
+    size: Number(recording.size || 0),
+    duration: Number(recording.playback?.duration || 0),
+    startTime: recording.startTime || null,
+    endTime: recording.endTime || null,
+    publishedAt: recording.publishedDate || null
+  };
+}
+
+function listSessionReplays(recordings = [], meetingID = '') {
+  return recordings
+    .filter((item) => item && toBool(item.published))
+    .filter((item) => Boolean(getRecordingPlaybackUrl(item)))
+    .filter((item) => isRecordingMatchMeeting(item, meetingID))
+    .sort((a, b) => {
+      const aEnd = toTimestamp(a.endTime) || toTimestamp(a.publishedDate) || toTimestamp(a.startTime);
+      const bEnd = toTimestamp(b.endTime) || toTimestamp(b.publishedDate) || toTimestamp(b.startTime);
+      return bEnd - aEnd;
+    })
+    .map(buildReplayPayload);
+}
+
+function normalizeMeetingId(room) {
+  return String(room?.zegoRoomId || room?.id || '').trim();
+}
+
+function padTimePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatReplayTimeLabel(value) {
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return '';
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return `${date.getFullYear()}-${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())} ${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`;
+}
+
+function buildLiveReplayRows(room, replayList = []) {
+  const raw = room?.toJSON ? room.toJSON() : room;
+  const normalizedList = Array.isArray(replayList) ? replayList.filter((item) => item?.url) : [];
+  const fallbackList = normalizedList.length ? normalizedList : (raw?.replayUrl ? [{
+    url: raw.replayUrl,
+    recordingID: '',
+    size: Number(raw.replaySize || 0),
+    duration: Number(raw.replayDuration || 0),
+    startTime: raw.actualStartTime || null,
+    endTime: raw.endTime || null,
+    publishedAt: raw.updatedAt || raw.createdAt || null
+  }] : []);
+
+  return fallbackList.map((item, index) => {
+    const timeLabel = formatReplayTimeLabel(item.endTime || item.publishedAt || item.startTime || raw.endTime || raw.createdAt);
+    const segmentSuffix = fallbackList.length > 1 ? ` · 第${index + 1}段回放` : ' · 直播回放';
+    const recordingID = String(item.recordingID || '').trim();
+    return {
+      videoId: recordingID ? `live-room-${raw.id}-${recordingID}` : `live-room-${raw.id}-${index + 1}`,
+      roomId: raw.id,
+      roomTitle: `${raw.title || '直播回放'}${timeLabel ? ` · ${timeLabel}` : ''}${segmentSuffix}`,
+      courseId: raw.courseId,
+      courseTitle: raw.course?.title || '',
+      courseCover: raw.course?.cover || '',
+      videoCover: raw.course?.cover || '',
+      teacherName: raw.course?.teacherName || '',
+      replayUrl: item.url,
+      replayDuration: Number(item.duration || 0),
+      trialDuration: 0,
+      replaySize: Number(item.size || 0),
+      endTime: item.endTime || raw.endTime || null,
+      createdAt: item.publishedAt || item.startTime || raw.createdAt || null,
+      recordingID,
+      sourceType: 'live-replay'
+    };
+  });
+}
+
+async function fetchLiveReplayRows(room) {
+  const meetingID = normalizeMeetingId(room);
+  if (!meetingID) return buildLiveReplayRows(room, []);
+
+  try {
+    const payload = await callBbb('getRecordings', { meetingID });
+    const replayList = listSessionReplays(listRecordings(payload.recordings), meetingID);
+    return buildLiveReplayRows(room, replayList);
+  } catch (err) {
+    return buildLiveReplayRows(room, []);
+  }
 }
 
 /**
@@ -455,7 +606,7 @@ router.get('/course/:courseId/recordings', auth, asyncHandler(async (req, res) =
   const paidOrder = await Order.findOne({ where: { studentId, courseId, status: 'paid' }, attributes: ['id'] });
   const isPurchased = Boolean(paidOrder);
 
-  const list = parsePublishedRecordedVideos(course).map((item) => ({
+  const manualList = parsePublishedRecordedVideos(course).map((item) => ({
     ...item,
     courseId: course.id,
     courseTitle: course.title || '',
@@ -464,6 +615,30 @@ router.get('/course/:courseId/recordings', auth, asyncHandler(async (req, res) =
     isPurchased,
     trialDuration: isPurchased ? 0 : item.trialDuration
   }));
+
+  const liveRooms = await LiveRoom.findAll({
+    where: {
+      courseId: course.id,
+      endTime: { [Op.ne]: null }
+    },
+    include: [{
+      model: Course,
+      as: 'course',
+      attributes: ['id', 'title', 'cover', 'teacherName'],
+      required: true
+    }],
+    order: [['endTime', 'DESC'], ['createdAt', 'DESC']]
+  });
+
+  const liveReplayGroups = await Promise.all(liveRooms.map((room) => fetchLiveReplayRows(room)));
+  const liveList = liveReplayGroups.flat().map((item) => ({
+    ...item,
+    isPurchased,
+    trialDuration: isPurchased ? 0 : item.trialDuration
+  }));
+
+  const list = [...manualList, ...liveList]
+    .sort((a, b) => new Date(b.endTime || b.createdAt || 0).getTime() - new Date(a.endTime || a.createdAt || 0).getTime());
 
   success(res, {
     courseId: course.id,
@@ -510,17 +685,8 @@ router.get('/my-recordings', auth, asyncHandler(async (req, res) => {
 
   const where = {
     courseId: { [Op.in]: courseIds },
-    replayUrl: {
-      [Op.and]: [
-        { [Op.ne]: null },
-        { [Op.ne]: '' }
-      ]
-    }
+    endTime: { [Op.ne]: null }
   };
-
-  if (keyword) {
-    where.title = { [Op.like]: `%${keyword}%` };
-  }
 
   const rows = await LiveRoom.findAll({
     where,
@@ -534,25 +700,14 @@ router.get('/my-recordings', auth, asyncHandler(async (req, res) => {
     order: [['endTime', 'DESC'], ['createdAt', 'DESC']]
   });
 
-  const liveReplayList = rows
-    .map((item) => item.toJSON())
-    .map((item) => ({
-      videoId: `live-room-${item.id}`,
-      roomId: item.id,
-      roomTitle: item.title,
-      courseId: item.courseId,
-      courseTitle: item.course?.title || '',
-      courseCover: item.course?.cover || '',
-      videoCover: item.course?.cover || '',
-      teacherName: item.course?.teacherName || '',
-      replayUrl: item.replayUrl,
-      replayDuration: Number(item.replayDuration || 0),
-      trialDuration: 0,
-      replaySize: Number(item.replaySize || 0),
-      endTime: item.endTime || null,
-      createdAt: item.createdAt || null,
-      sourceType: 'live-replay'
-    }));
+  const liveReplayGroups = await Promise.all(rows.map((room) => fetchLiveReplayRows(room)));
+  const liveReplayList = liveReplayGroups
+    .flat()
+    .filter((item) => {
+      if (!keyword) return true;
+      const searchText = `${item.courseTitle || ''} ${item.roomTitle || ''}`;
+      return searchText.includes(String(keyword));
+    });
 
   const purchasedCourses = await Course.findAll({
     where: { id: { [Op.in]: courseIds }, enableReplay: true },
