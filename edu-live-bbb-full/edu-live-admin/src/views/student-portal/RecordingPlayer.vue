@@ -19,6 +19,18 @@
         title="未找到录播地址，请返回重试"
       />
 
+      <el-alert
+        v-else-if="shouldOpenExternally"
+        type="info"
+        :closable="false"
+        show-icon
+        title="该回放由 BBB 页面承载，正在为你打开外部播放页"
+      >
+        <template #default>
+          <el-button type="primary" link @click="openExternalReplay">如果没有自动跳转，请点此打开回放</el-button>
+        </template>
+      </el-alert>
+
       <video
         v-else
         ref="videoRef"
@@ -45,6 +57,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { studentCreateAlipayOrder, studentGetRecordingProgress, studentSaveRecordingProgress } from '@/api/studentPortal'
+import { isBbbPlaybackUrl, isDirectMediaReplayUrl, normalizeReplayUrl } from '@/utils/recording'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,15 +71,22 @@ let restoreSeconds = 0
 const courseId = computed(() => Number(route.query.courseId || 0))
 const videoId = computed(() => String(route.query.videoId || '').trim())
 const title = computed(() => String(route.query.title || '').trim())
-const replayUrl = computed(() => String(route.query.replayUrl || '').trim())
+const replayUrl = computed(() => normalizeReplayUrl(route.query.replayUrl))
 const videoCover = computed(() => String(route.query.videoCover || '').trim())
 const trialDuration = computed(() => Math.max(0, Number(route.query.trialDuration || 0)))
 const isPurchased = computed(() => String(route.query.isPurchased || '0') === '1')
+const shouldOpenExternally = computed(() => isBbbPlaybackUrl(replayUrl.value))
+const isPlayableDirectMedia = computed(() => isDirectMediaReplayUrl(replayUrl.value) || !shouldOpenExternally.value)
 
 const shouldLimitByTrial = computed(() => !isPurchased.value && trialDuration.value > 0)
 
 const goBack = () => {
   router.push('/student-center')
+}
+
+const openExternalReplay = () => {
+  if (!replayUrl.value) return
+  window.location.replace(replayUrl.value)
 }
 
 const saveProgress = async (force = false) => {
@@ -165,8 +185,18 @@ const handleTimeUpdate = async () => {
 }
 
 onMounted(async () => {
-  if (!courseId.value || !videoId.value || !replayUrl.value) {
+  if (!replayUrl.value) {
     ElMessage.warning('参数不完整，无法播放录播')
+    return
+  }
+
+  if (shouldOpenExternally.value) {
+    openExternalReplay()
+    return
+  }
+
+  if (!courseId.value || !videoId.value || !isPlayableDirectMedia.value) {
+    ElMessage.warning('当前录播链接暂不支持页内播放，请返回重试')
     return
   }
 

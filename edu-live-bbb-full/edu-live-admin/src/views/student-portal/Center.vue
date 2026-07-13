@@ -174,6 +174,7 @@ import {
   studentCourseList,
   studentCreateAlipayOrder
 } from '@/api/studentPortal'
+import { isBbbPlaybackUrl, normalizeReplayUrl } from '@/utils/recording'
 
 const router = useRouter()
 const route = useRoute()
@@ -274,23 +275,38 @@ const formatDuration = (seconds) => {
   return `${m}m ${String(s).padStart(2, '0')}s`
 }
 
-const startLearning = (row) => {
-  const replayUrl = String(row?.replayUrl || '').trim()
+const openRecording = (row, options = {}) => {
+  const replayUrl = normalizeReplayUrl(row?.replayUrl)
   if (!replayUrl) {
     ElMessage.warning('该录播地址不可用，请联系管理员')
     return
   }
+
+  if (isBbbPlaybackUrl(replayUrl)) {
+    window.location.assign(replayUrl)
+    return
+  }
+
   router.push({
     path: '/student-recording-player',
     query: {
       courseId: row.courseId,
-      videoId: row.videoId || `course-${row.courseId}-${row.roomId || 'manual'}`,
-      title: row.roomTitle || row.courseTitle || '录播学习',
+      videoId: options.videoId || row.videoId || `course-${row.courseId}-${row.roomId || 'manual'}`,
+      title: options.title || row.roomTitle || row.title || row.courseTitle || '录播学习',
       replayUrl,
       videoCover: row.videoCover || row.courseCover || '',
-      trialDuration: Number(row.trialDuration || 0),
-      isPurchased: 1
+      trialDuration: Number(options.trialDuration ?? (row.trialDuration || 0)),
+      isPurchased: options.isPurchased ? 1 : 0
     }
+  })
+}
+
+const startLearning = (row) => {
+  openRecording(row, {
+    videoId: row.videoId || `course-${row.courseId}-${row.roomId || 'manual'}`,
+    title: row.roomTitle || row.courseTitle || '录播学习',
+    trialDuration: Number(row.trialDuration || 0),
+    isPurchased: true
   })
 }
 
@@ -319,23 +335,11 @@ const previewRecording = async (courseRow) => {
 }
 
 const startPreviewLearning = (row) => {
-  const replayUrl = String(row?.replayUrl || '').trim()
-  if (!replayUrl) {
-    ElMessage.warning('该录播地址不可用，请联系管理员')
-    return
-  }
-
-  router.push({
-    path: '/student-recording-player',
-    query: {
-      courseId: row.courseId,
-      videoId: row.videoId,
-      title: row.title || row.courseTitle || '录播学习',
-      replayUrl,
-      videoCover: row.videoCover || row.courseCover || '',
-      trialDuration: Number(row.trialDuration || 0),
-      isPurchased: row.isPurchased ? 1 : 0
-    }
+  openRecording(row, {
+    videoId: row.videoId,
+    title: row.title || row.courseTitle || '录播学习',
+    trialDuration: Number(row.trialDuration || 0),
+    isPurchased: Boolean(row.isPurchased)
   })
 }
 
