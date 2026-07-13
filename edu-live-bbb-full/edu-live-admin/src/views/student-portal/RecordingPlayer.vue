@@ -38,13 +38,12 @@
         :poster="videoCover"
         controls
         preload="metadata"
+        :src="activeReplaySource"
         @error="handlePlaybackError"
         @loadedmetadata="handleLoadedMetadata"
         @pause="handlePause"
         @ended="handleEnded"
-      >
-        <source v-for="source in replaySources" :key="source.src" :src="source.src" :type="source.type || undefined" />
-      </video>
+      />
 
       <div v-if="isBbbReplay && !showExternalFallback" class="external-entry">
         <el-button type="info" link @click="openExternalReplay">改用 BBB 原始回放页</el-button>
@@ -59,7 +58,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { studentCreateAlipayOrder, studentGetRecordingProgress, studentSaveRecordingProgress } from '@/api/studentPortal'
@@ -72,6 +71,7 @@ const progressPercent = ref(0)
 const isReady = ref(false)
 const trialBlocked = ref(false)
 const hasPlaybackError = ref(false)
+const sourceIndex = ref(0)
 let saveTimer = null
 let restoreSeconds = 0
 
@@ -80,12 +80,13 @@ const videoId = computed(() => String(route.query.videoId || '').trim())
 const title = computed(() => String(route.query.title || '').trim())
 const replayUrl = computed(() => normalizeReplayUrl(route.query.replayUrl))
 const replaySources = computed(() => getDirectReplaySources(replayUrl.value))
+const activeReplaySource = computed(() => replaySources.value[sourceIndex.value]?.src || '')
 const videoCover = computed(() => String(route.query.videoCover || '').trim())
 const trialDuration = computed(() => Math.max(0, Number(route.query.trialDuration || 0)))
 const isPurchased = computed(() => String(route.query.isPurchased || '0') === '1')
 const isBbbReplay = computed(() => isBbbPlaybackUrl(replayUrl.value))
 const showExternalFallback = computed(() => isBbbReplay.value && hasPlaybackError.value)
-const primaryReplaySource = computed(() => replaySources.value[0]?.src || replayUrl.value)
+const primaryReplaySource = computed(() => activeReplaySource.value || replayUrl.value)
 
 const shouldLimitByTrial = computed(() => !isPurchased.value && trialDuration.value > 0)
 
@@ -99,6 +100,18 @@ const openExternalReplay = () => {
 }
 
 const handlePlaybackError = () => {
+  const hasNextSource = sourceIndex.value < replaySources.value.length - 1
+  if (hasNextSource) {
+    sourceIndex.value += 1
+    hasPlaybackError.value = false
+    isReady.value = false
+    nextTick(() => {
+      if (videoRef.value) {
+        videoRef.value.load()
+      }
+    })
+    return
+  }
   hasPlaybackError.value = true
 }
 
@@ -202,6 +215,9 @@ onMounted(async () => {
     ElMessage.warning('参数不完整，无法播放录播')
     return
   }
+
+  sourceIndex.value = 0
+  hasPlaybackError.value = false
 
   if (!courseId.value || !videoId.value || !primaryReplaySource.value) {
     ElMessage.warning('当前录播链接暂不支持页内播放，请返回重试')
