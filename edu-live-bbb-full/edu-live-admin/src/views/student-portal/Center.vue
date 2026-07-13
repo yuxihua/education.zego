@@ -312,11 +312,6 @@ const openRecording = (row, options = {}) => {
     return
   }
 
-  if (isBbbPlaybackUrl(replayUrl)) {
-    window.location.assign(replayUrl)
-    return
-  }
-
   router.push({
     path: '/student-recording-player',
     query: {

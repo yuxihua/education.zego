@@ -20,16 +20,20 @@
       />
 
       <el-alert
-        v-else-if="shouldOpenExternally"
+        v-else-if="showExternalFallback"
         type="info"
         :closable="false"
         show-icon
-        title="该回放由 BBB 页面承载，正在为你打开外部播放页"
+        title="当前页内播放器无法直接播放该回放，可改为打开 BBB 原始回放页"
       >
         <template #default>
-          <el-button type="primary" link @click="openExternalReplay">如果没有自动跳转，请点此打开回放</el-button>
+          <el-button type="primary" link @click="openExternalReplay">打开原始回放页</el-button>
         </template>
       </el-alert>
+
+      <div v-else-if="isBbbReplay" class="external-entry">
+        <el-button type="info" link @click="openExternalReplay">改用 BBB 原始回放页</el-button>
+      </div>
 
       <video
         v-else
@@ -38,11 +42,13 @@
         :poster="videoCover"
         controls
         preload="metadata"
-        :src="replayUrl"
+        @error="handlePlaybackError"
         @loadedmetadata="handleLoadedMetadata"
         @pause="handlePause"
         @ended="handleEnded"
-      />
+      >
+        <source v-for="source in replaySources" :key="source.src" :src="source.src" :type="source.type || undefined" />
+      </video>
     </el-card>
 
     <div class="mobile-player-bar">
@@ -57,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { studentCreateAlipayOrder, studentGetRecordingProgress, studentSaveRecordingProgress } from '@/api/studentPortal'
-import { isBbbPlaybackUrl, isDirectMediaReplayUrl, normalizeReplayUrl } from '@/utils/recording'
+import { getDirectReplaySources, isBbbPlaybackUrl, normalizeReplayUrl } from '@/utils/recording'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,6 +71,7 @@ const videoRef = ref(null)
 const progressPercent = ref(0)
 const isReady = ref(false)
 const trialBlocked = ref(false)
+const hasPlaybackError = ref(false)
 let saveTimer = null
 let restoreSeconds = 0
 
@@ -72,11 +79,13 @@ const courseId = computed(() => Number(route.query.courseId || 0))
 const videoId = computed(() => String(route.query.videoId || '').trim())
 const title = computed(() => String(route.query.title || '').trim())
 const replayUrl = computed(() => normalizeReplayUrl(route.query.replayUrl))
+const replaySources = computed(() => getDirectReplaySources(replayUrl.value))
 const videoCover = computed(() => String(route.query.videoCover || '').trim())
 const trialDuration = computed(() => Math.max(0, Number(route.query.trialDuration || 0)))
 const isPurchased = computed(() => String(route.query.isPurchased || '0') === '1')
-const shouldOpenExternally = computed(() => isBbbPlaybackUrl(replayUrl.value))
-const isPlayableDirectMedia = computed(() => isDirectMediaReplayUrl(replayUrl.value) || !shouldOpenExternally.value)
+const isBbbReplay = computed(() => isBbbPlaybackUrl(replayUrl.value))
+const showExternalFallback = computed(() => isBbbReplay.value && hasPlaybackError.value)
+const primaryReplaySource = computed(() => replaySources.value[0]?.src || replayUrl.value)
 
 const shouldLimitByTrial = computed(() => !isPurchased.value && trialDuration.value > 0)
 
@@ -87,6 +96,10 @@ const goBack = () => {
 const openExternalReplay = () => {
   if (!replayUrl.value) return
   window.location.replace(replayUrl.value)
+}
+
+const handlePlaybackError = () => {
+  hasPlaybackError.value = true
 }
 
 const saveProgress = async (force = false) => {
@@ -190,12 +203,7 @@ onMounted(async () => {
     return
   }
 
-  if (shouldOpenExternally.value) {
-    openExternalReplay()
-    return
-  }
-
-  if (!courseId.value || !videoId.value || !isPlayableDirectMedia.value) {
+  if (!courseId.value || !videoId.value || !primaryReplaySource.value) {
     ElMessage.warning('当前录播链接暂不支持页内播放，请返回重试')
     return
   }
