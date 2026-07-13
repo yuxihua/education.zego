@@ -119,11 +119,24 @@ function isRecordingMatchMeeting(recording, meetingID) {
   return getMeetingCandidates(recording).includes(target);
 }
 
+const PLAYBACK_TYPE_PRIORITY = ['presentation', 'video', 'screenshare', 'podcast'];
+
 function getRecordingPlaybackUrl(recording) {
   const playback = recording?.playback?.format;
-  const playbackItems = Array.isArray(playback) ? playback : [playback];
-  const firstPlayable = playbackItems.find((item) => item?.url);
-  return firstPlayable?.url || '';
+  const playbackItems = (Array.isArray(playback) ? playback : [playback]).filter((item) => item?.url);
+  if (!playbackItems.length) return '';
+
+  const sorted = [...playbackItems].sort((left, right) => {
+    const leftType = normalizeKey(left?.type);
+    const rightType = normalizeKey(right?.type);
+    const leftPriority = PLAYBACK_TYPE_PRIORITY.indexOf(leftType);
+    const rightPriority = PLAYBACK_TYPE_PRIORITY.indexOf(rightType);
+    const normalizedLeft = leftPriority === -1 ? PLAYBACK_TYPE_PRIORITY.length : leftPriority;
+    const normalizedRight = rightPriority === -1 ? PLAYBACK_TYPE_PRIORITY.length : rightPriority;
+    return normalizedLeft - normalizedRight;
+  });
+
+  return sorted[0]?.url || '';
 }
 
 function buildReplayPayload(recording = {}) {
