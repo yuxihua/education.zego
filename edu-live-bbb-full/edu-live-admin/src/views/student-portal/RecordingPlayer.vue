@@ -31,10 +31,6 @@
         </template>
       </el-alert>
 
-      <div v-else-if="isBbbReplay" class="external-entry">
-        <el-button type="info" link @click="openExternalReplay">改用 BBB 原始回放页</el-button>
-      </div>
-
       <video
         v-else
         ref="videoRef"
@@ -49,6 +45,10 @@
       >
         <source v-for="source in replaySources" :key="source.src" :src="source.src" :type="source.type || undefined" />
       </video>
+
+      <div v-if="isBbbReplay && !showExternalFallback" class="external-entry">
+        <el-button type="info" link @click="openExternalReplay">改用 BBB 原始回放页</el-button>
+      </div>
     </el-card>
 
     <div class="mobile-player-bar">
